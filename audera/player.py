@@ -583,7 +583,7 @@ class Service():
                 )
 
                 # Add audio stream packet to the buffer
-                await self.audio_output.buffer.put(packet)
+                self.audio_output.buffer.put(packet)
 
         except (
             asyncio.TimeoutError,  # Streamer communication timed-out

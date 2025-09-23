@@ -3,12 +3,12 @@
 from __future__ import annotations
 from typing import Union
 import logging
-import asyncio
 import time
 import struct
 import copy
 import json
 import pyaudio
+import queue
 
 from audera import struct as struct_
 
@@ -247,7 +247,7 @@ class Output():
         self.stream_start_time: Union[float, None] = None
 
         # Initialize the audio buffer and time offset
-        self.buffer: asyncio.Queue = asyncio.Queue(buffer_size)
+        self.buffer = queue.Queue(maxsize=buffer_size)
         self.time_offset: float = time_offset
         self.playback_timing_tolerance: float = playback_timing_tolerance
 
@@ -402,7 +402,7 @@ class Output():
             # )
 
         # Create a silent audio stream chunk when the buffer queue is empty
-        except asyncio.QueueEmpty:
+        except queue.Empty:
             chunk = self.silent_chunk(length=self.chunk_length)
 
         # Return the audio stream chunk
@@ -414,12 +414,16 @@ class Output():
         """
 
         # Discard invalid packets
-        while not self.buffer.empty():
+        while True:
 
-            # Peak at the next audio stream packet from the buffer queue
-            next_packet = self.buffer._queue[0]
+            try:
+                # Get the next audio stream packet from the buffer queue
+                next_packet = self.buffer.get_nowait()
+            except queue.Empty:
+                # No packets available, cannot synchronize
+                return
 
-            # Peak at the length of the next packet and the playback time
+            # Check the length of the packet and the playback time
             length = struct.unpack(">I", next_packet[:4])[0]
             playback_time = struct.unpack("d", next_packet[4:12])[0]
 
@@ -432,9 +436,6 @@ class Output():
                         playback_time
                     )
                 )
-
-                # Remove the incomplete packet from the buffer queue
-                _ = self.buffer.get_nowait()
 
                 continue
 
@@ -453,9 +454,6 @@ class Output():
                     )
                 )
 
-                # Remove the late packet from the buffer queue
-                _ = self.buffer.get_nowait()
-
                 continue
 
             # Discard early packets
@@ -468,12 +466,13 @@ class Output():
             #             playback_time
             #         )
             #     )
-            #     # Remove the late packet from the buffer queue
-            #     _ = self.buffer.get_nowait()
 
             #     continue
 
-            # Exit the loop only when a valid packet is available
+            # Put back the valid packet
+            self.buffer.put_nowait(next_packet)
+
+            # Exit the loop when a valid packet is available
             break
 
         # Sleep until the target playback time
@@ -536,10 +535,10 @@ class Output():
 
     def clear_buffer(self):
         """ Clears any / all unplayed audio stream packets from the buffer. """
-        while not self.buffer.empty():
+        while True:
             try:
                 self.buffer.get_nowait()
-            except asyncio.QueueEmpty:
+            except queue.Empty:
                 break
 
     def close(self):
