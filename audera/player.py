@@ -111,11 +111,6 @@ class Service():
         # Initialize time synchronization
         self.rtt: float = 0.0
 
-        # Initialize process control parameters
-        self.mdns_broadcaster_event: asyncio.Event = asyncio.Event()
-        self.sync_event: asyncio.Event = asyncio.Event()
-        self.buffer_event: asyncio.Event = asyncio.Event()
-
     async def shairport_sync_player(self):
         """ The async `micro-service` for the shairport-sync remote audio output player
         service that supports audio receiving, playback and synchronization from / with
@@ -306,13 +301,8 @@ class Service():
         try:
             await self.mdns.register()
 
-            # Set the mDNS broadcaster event to allow for the audio streamer synchronization,
-            #   audio stream capture and playback services to start.
-
-            self.mdns_broadcaster_event.set()
-
             # Update the mDNS parameters with the latest player attributes continuously
-            while self.mdns_broadcaster_event.is_set():
+            while True:
 
                 # Get the latest player attributes
                 self.player: audera.struct.player.Player = audera.dal.players.get_player(self.player.uuid)
@@ -357,13 +347,10 @@ class Service():
         The audio streamer synchronizer depends on the mDNS broadcaster.
         """
 
-        # Wait for the mDNS broadcaster
-        await self.mdns_broadcaster_event.wait()
-
         # Communicate with the audio streamer until the mDNS broadcaster is cancelled by the event loop
         #   or cancelled manually through `KeyboardInterrupt`
 
-        while self.mdns_broadcaster_event.is_set():
+        while True:
 
             # Initialize the audio streamer synchronizer
             streamer_synchronizer = await asyncio.start_server(
@@ -477,11 +464,6 @@ class Service():
                 ])
             )
 
-            # Set the audio streamer synchronizer event to allow for the audio stream capture
-            #   and playback services to start.
-
-            self.sync_event.set()
-
         except (
             asyncio.TimeoutError,  # Streamer communication timed-out
             ConnectionResetError,  # Streamer disconnected
@@ -532,9 +514,6 @@ class Service():
             ):
                 pass
 
-            # Stop synchronization and playback services
-            self.sync_event.clear()
-
     async def audio_receiver(self):
         """ The async server for audio receiving and buffering.
 
@@ -545,13 +524,10 @@ class Service():
         The audio receiver service depends on the audio streamer synchronizer.
         """
 
-        # Wait for the audio streamer synchronizer
-        await self.sync_event.wait()
-
         # Receive the audio stream from the audio streamer until the streamer synchronizer is cancelled by
         #   the event loop or cancelled manually through `KeyboardInterrupt`
 
-        while self.sync_event.is_set():
+        while True:
 
             # Initialize the audio receiver
             audio_receiver = await asyncio.start_server(
@@ -609,10 +585,6 @@ class Service():
                 # Add audio stream packet to the buffer
                 await self.audio_output.buffer.put(packet)
 
-                # Trigger audio stream playback
-                if self.audio_output.buffer.qsize() == audera.BUFFER_SIZE:
-                    self.buffer_event.set()
-
         except (
             asyncio.TimeoutError,  # Streamer communication timed-out
             ConnectionResetError,  # Streamer disconnected
@@ -647,9 +619,8 @@ class Service():
             # Close the playback session
             await self.playback_session.close()
 
-            # Reset the buffer and the buffer event
+            # Reset the buffer
             self.audio_output.clear_buffer()
-            self.buffer_event.clear()
 
     async def audio_playback(self):
         """ Plays a timestamped audio stream packet from the playback buffer, discarding incomplete
@@ -660,9 +631,6 @@ class Service():
 
         The audio playback service depends on the audio receiver.
         """
-
-        # Wait for the audio stream buffer event
-        await self.buffer_event.wait()
 
         # Logging
         self.logger.info(
@@ -752,18 +720,14 @@ class Service():
             # Set the playback state of the remote audio output player
             self.player = audera.dal.players.stop(self.player.uuid)
 
-            # Reset the buffer and the buffer event
+            # Reset the buffer
             self.audio_output.clear_buffer()
-            self.buffer_event.clear()
 
             # Close the audio services
             self.audio_output.close()
 
     async def stop_services(self):
         """ Stops the async tasks. """
-        self.mdns_broadcaster_event.clear()
-        self.sync_event.clear()
-        self.buffer_event.clear()
         self.orchestrator.shutdown()
 
     async def start_services(self):

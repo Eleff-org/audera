@@ -127,9 +127,6 @@ class Service():
         # Initialize playback delay and rtt-history
         self.rtt_history: list[float] = []
 
-        # Initialize process control parameters
-        self.mdns_browser_event: asyncio.Event = asyncio.Event()
-
     def get_streamer_time(self) -> float:
         """ Returns the network time protocol (ntp) synchronized time on the streamer. """
         return time.time() + self.audio_input.time_offset
@@ -224,15 +221,10 @@ class Service():
         try:
             await self.mdns.browse()
 
-            # Set the mDNS browser event to allow for the multi-player synchronization,
-            #   audio stream capture and broadcasting tasks to start.
-
-            self.mdns_browser_event.set()
-
             # Update the playback session, opening connections to all remote audio
             #   output players attached to the session continuously
 
-            while self.mdns_browser_event.is_set():
+            while True:
 
                 if self.mdns.players:
 
@@ -590,9 +582,6 @@ class Service():
         The audio stream service depends on the mDNS browser.
         """
 
-        # Wait for the mDNS browser
-        await self.mdns_browser_event.wait()
-
         # Logging
         self.logger.info(
             ' '.join([
@@ -618,7 +607,7 @@ class Service():
         #   cancelled manually through `KeyboardInterrupt`
 
         try:
-            while self.mdns_browser_event.is_set():
+            while True:
 
                 # Manage / update the parameters of the digital audio stream
 
@@ -725,33 +714,34 @@ class Service():
                 # Broadcast the packet to the players concurrently and drain the writer with timeout
                 #   for flow control, detaching any / all players that are too slow
 
-                results = await asyncio.gather(
-                    *[
-                        self.broadcast(
-                            writer=player_connection.stream_writer,
-                            packet=packet
-                        ) for player_connection in player_connections.values()
-                    ],
-                    return_exceptions=True
-                )
+                if player_connections:
+                    results = await asyncio.gather(
+                        *[
+                            self.broadcast(
+                                writer=player_connection.stream_writer,
+                                packet=packet
+                            ) for player_connection in player_connections.values()
+                        ],
+                        return_exceptions=True
+                    )
 
-                # Detach and disconnect players
-                for player, result in zip(
-                    [player_connection.player for player_connection in player_connections.values()],
-                    results
-                ):
-                    if result is False:
+                    # Detach and disconnect players
+                    for player, result in zip(
+                        [player_connection.player for player_connection in player_connections.values()],
+                        results
+                    ):
+                        if result is False:
 
-                        # Detach and disconnect the remote audio output player
-                        await self.stream_session.detach_player(player)
+                            # Detach and disconnect the remote audio output player
+                            await self.stream_session.detach_player(player)
 
-                        # Logging
-                        self.logger.info(
-                            'Remote audio output player {%s (%s)} detached.' % (
-                                player.name,
-                                player.short_uuid
+                            # Logging
+                            self.logger.info(
+                                'Remote audio output player {%s (%s)} detached.' % (
+                                    player.name,
+                                    player.short_uuid
+                                )
                             )
-                        )
 
                 # Yield to other tasks in the event loop
                 await asyncio.sleep(0)
@@ -828,7 +818,6 @@ class Service():
 
     async def stop_services(self):
         """ Stops the async tasks. """
-        self.mdns_browser_event.clear()
         self.orchestrator.shutdown()
 
     async def start_services(self):
