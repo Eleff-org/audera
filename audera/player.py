@@ -736,21 +736,21 @@ class Service():
         """
 
         # Schedule the shairport-sync player service
-        shairport_sync_player = asyncio.create_task(
-            self.orchestrator.arun(
-                "shairport_sync_player",
-                self.shairport_sync_player,
-                restart_on_failure=True,
-                timeout=None,
-                pool_type="thread"
-            )
-        )
+        # shairport_sync_player = asyncio.create_task(
+        #     self.orchestrator.arun(
+        #         "shairport_sync_player",
+        #         self.shairport_sync_player,
+        #         restart_on_failure=True,
+        #         timeout=None,
+        #         pool_type="thread"
+        #     )
+        # )
 
         # Schedule the audera player service (handles its own orchestration internally)
         audera_player = asyncio.create_task(self.audera_player())
 
         services = [
-            shairport_sync_player,
+            # shairport_sync_player,
             audera_player
         ]
 
