@@ -64,3 +64,37 @@
 - Avoid global state when possible
 - Use meaningful variable names
 - Keep functions focused and single-purpose
+
+## Orchestrator Usage
+- **Import**: `from audera import orchestrator`
+- **Purpose**: Isolate critical tasks from blocking the main event loop
+- **Key Features**:
+  - Thread/process pool execution
+  - Automatic retry on failure
+  - Configurable timeouts
+  - Comprehensive logging
+- **Usage Patterns**:
+  - **Synchronous execution**:
+    ```python
+    orchestrator = audera.orchestrator.Orchestrator(logger=logger)
+    result = orchestrator.run(
+        task_id="unique_task_id",
+        func=critical_function,
+        restart_on_failure=True,
+        timeout=30.0,
+        pool_type="thread"
+    )
+    ```
+  - **Asynchronous execution** (for coroutines):
+    ```python
+    result = await orchestrator.arun(
+        task_id="unique_task_id",
+        coro_func=async_critical_function,
+        restart_on_failure=True,
+        timeout=30.0,
+        pool_type="thread"
+    )
+    ```
+- **Integration**:
+  - `streamer.py`: NTP synchronization, audio streaming, and timing-critical mDNS browsing with player synchronization (blocking I/O and precision timing)
+  - `player.py`: Audio playback, timing-critical streamer synchronization, mDNS broadcasting, audio stream receiving, and deprecated shairport-sync service monitoring (blocking I/O, precision timing, network I/O, and subprocess management)

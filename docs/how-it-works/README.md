@@ -10,50 +10,71 @@
 
 `audera` is an open-source multi-room audio streaming system written in Python for DIY home audio enthusiasts.
 
+## Architecture overview
+
+Audera uses a sophisticated **orchestrator pattern** to ensure reliable, high-performance audio streaming:
+
+- **Isolated execution**: Critical I/O and timing-sensitive tasks run in dedicated thread pools
+- **Event loop protection**: Main asyncio event loop stays responsive for coordination
+- **Automatic recovery**: Failed tasks restart automatically with configurable timeouts
+- **Resource management**: Thread pools prevent resource exhaustion under load
+
+### Orchestrator Benefits
+
+- **Zero Blocking**: I/O operations never freeze the event loop
+- **Timing Precision**: Critical synchronization maintains sub-millisecond accuracy
+- **Automatic Recovery**: Failed tasks restart with configurable retry logic
+- **Resource Efficiency**: Thread pools scale with system capabilities
+- **Operational Control**: Dynamic start/stop of services via orchestrator API
+
 ## How `audera` works
-The streamer and player applications each run tasks within an asynchronous event loop.
+
+The streamer and player applications use an **orchestrator** to isolate critical tasks from blocking the main asynchronous event loop. Tasks involving I/O operations, timing-critical synchronization, or blocking operations are executed in dedicated thread pools, while lightweight coordination tasks run in the main event loop.
 
 ### Streamer
-The streamer service runs the following tasks,
-- Network time protocol (ntp) synchronization
-- Remote audio output player mDNS browsing with player connection, playback session management and multi-player synchronization
-- Audio stream capturing and broadcasting
 
-#### Event loop flow diagram
+The streamer service isolates the following critical tasks:
+- **Network time protocol (NTP) synchronization** - Timing-critical network I/O
+- **Remote audio output player mDNS browsing** - Network discovery with player synchronization
+- **Audio stream capturing and broadcasting** - Blocking audio I/O operations
+
+#### Orchestrated task flow
+
+```mermaid
+graph TD
+    A[Streamer Service] --> B[Main Event Loop]
+    B --> C[Orchestrator]
+
+    C --> D[NTP Synchronizer<br/>Thread Pool]
+    C --> E[mDNS Browser<br/>Thread Pool]
+    C --> F[Audio Streamer<br/>Thread Pool]
+
+    D --> G[Network Time Sync<br/>Every 600s]
+    E --> H[Player Discovery & Sync<br/>Every 5s]
+    F --> I[Audio Capture & Broadcast<br/>Continuous]
+
+    G -.-> B
+    H -.-> B
+    I -.-> B
+
+    style B fill:#e1f5fe
+    style C fill:#fff3e0
+    style D fill:#c8e6c9
+    style E fill:#c8e6c9
+    style F fill:#c8e6c9
 ```
-                                                                                                      mdns-browser              
-                                                                                         tasks          +-------+                    
-                                                   +-------------------+-------------------+---------+--> event +-waits-+            
-                                                   |                   |                   |         |  +-------+       |            
-                                                   |            +------v-----+      +------v-----+   |           +------v-----+      
-                                                   |            |            |      |            |  sets         |            |      
-                                                   |            |            |      |            |   |           |            |      
-                                                   |            |    ntp-    |      |    mdns-   |   |           |    audio   |      
-                                                   |            |synchronizer|      |   browser  +---+           |  streamer  |      
-    +------------+      +------------+      +------+-----+      |            |      |            |               |            |      
-    |            |      |            |      |            |      |            |      |            |               |            |      
-    |            |      |            |      |            |      +------+-----+      +------+-----+               +------+-----+      
-    |  streamer  |      |    event   | run  |  services  |             | every 600 sec.    | every 5 sec.               | every 0 sec.
-    |            +------>    loop    +------>            <-------------+-------------------+----------------------------+            
-    |            |      |            |      |            |                     until tasks are cancelled                           
-    |            |      |            |      |            |                                                                         
-    +------------+      +------^-----+      +------+-----+                                                                         
-                               |                   |                                                                               
-                               |                   |                                                                               
-                               +-------------------+                                                                               
-                           until event loop is cancelled                                                                           
-```
 
-#### Getting-started
-The streamer service can be run from the command-line,
+#### Getting Started
 
-``` bash
+The streamer service automatically orchestrates all critical tasks for reliable audio streaming. Run from the command-line:
+
+```bash
 audera run streamer
 ```
 
-Or, through a Python session,
+Or through a Python session:
 
-``` python
+```python
 import asyncio
 import audera
 
@@ -62,46 +83,62 @@ if __name__ == '__main__':
 ```
 
 ### Player
-The player service runs the following tasks,
-- Shairport-sync remote audio output player service for `airplay` connectivity
-- Audera remote audio output player service for `audera` connectivity
 
-#### Event loop flow diagram
+The player service isolates the following critical tasks:
+- **Shairport-sync service monitoring** - Subprocess management of shairport-sync for Airplay2 connectivity
+- **mDNS broadcasting** - Network service discovery I/O
+- **Streamer synchronization** - Timing-critical clock synchronization
+- **Audio stream receiving** - Audio packet I/O operations
+- **Audio playback** - Blocking audio output operations
+
+#### Orchestrated Task Flow
+
+```mermaid
+graph TD
+    A[Player Service] --> B[Main Event Loop]
+    B --> C[Orchestrator]
+
+    C --> D[Shairport-Sync Monitor<br/>Thread Pool]
+    C --> E[mDNS Broadcaster<br/>Thread Pool]
+    C --> F[Streamer Synchronizer<br/>Thread Pool]
+    C --> G[Audio Receiver<br/>Thread Pool]
+    C --> H[Audio Playback<br/>Thread Pool]
+
+    D --> I[Service Status Check<br/>Every 5s]
+    E --> J[Service Broadcasting<br/>Continuous]
+    F --> K[Time Synchronization<br/>Continuous]
+    G --> L[Packet Reception<br/>Continuous]
+    H --> M[Audio Output<br/>Continuous]
+
+    I -.-> B
+    J -.-> B
+    K -.-> B
+    L -.-> B
+    M -.-> B
+
+    style B fill:#e1f5fe
+    style C fill:#fff3e0
+    style D fill:#ffcdd2
+    style E fill:#c8e6c9
+    style F fill:#c8e6c9
+    style G fill:#c8e6c9
+    style H fill:#c8e6c9
+
+    D:::deprecated
+    classDef deprecated fill:#ffcdd2,stroke:#d32f2f,stroke-width:2px
 ```
-                                                                     tasks                                                                                                                                
-                                                   +-------------------+-------------------+                                                                                                              
-                                                   |                   |                   |                                                                                                              
-                                                   |            +------v-----+      +------v-----+                                                                                                        
-                                                   |            |            |      |            |                                                                                                        
-                                                   |            |            |      |            |                                     tasks                                                              
-                                                   |            | shairport- |      |   audera   +-------------+---+----------------------------+                                                            
-                                                   |            |sync player |      |   player   |             |   |                            |                                                            
-    +------------+      +------------+      +------+-----+      |            |      |            |             |   |    mdns-broadcaster        |          sync                        buffer                 
-    |            |      |            |      |            |      |            |      |            |             |   |        +-------+           |        +-------+                    +-------+                    
-    |            |      |            |      |            |      +------+-----+      +---+----^---+             |   +-----+--> event +-waits-+   +-----+--> event +-waits-+---------+--> event +-waits-+            
-    |   player   |      |    event   | run  |  services  |             | every 5 sec.   |    |                 |         |  +-------+       |         |  +-------+       |         |  +-------+       |            
-    |            +------>    loop    +------>            <-------------+----------------+    |          +------v-----+   |           +------v-----+   |           +------v-----+   |           +------v-----+      
-    |            |      |            |      |            |   until tasks are cancelled       |          |            |  sets         |            |  sets         |            |  sets         |            |      
-    |            |      |            |      |            |                                   |          |            |   |           |            |   |           |            |   |           |            |      
-    +------------+      +------^-----+      +------+-----+                                   |          |    mdns-   |   |           |  streamer- |   |           |   audio-   |   |           |   audio    |      
-                               |                   |                                         |          |   browser  +---+           |synchronizer+---+           |  receiver  +---+           |   player   |      
-                               |                   |                                         |          |            |               |            |               |            |               |            |      
-                               +-------------------+                                         |          |            |               |            |               |            |               |            |      
-                           until event loop is cancelled                                     |          +------+-----+               +------+-----+               +------+-----+               +------+-----+      
-                                                                                             |                 | every 5 sec.               | continuous                 | continuous                 |
-                                                                                             +-----------------+----------------------------+----------------------------+----------------------------+                                                                                   
-```
 
-#### Getting-started
-The player service can be run from the command-line,
+#### Getting Started
 
-``` bash
+The player service uses full task orchestration for optimal audio playback performance. Run from the command-line:
+
+```bash
 audera run player
 ```
 
-Or, through a Python session,
+Or through a Python session:
 
-``` python
+```python
 import asyncio
 import audera
 

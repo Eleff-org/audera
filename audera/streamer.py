@@ -46,6 +46,9 @@ class Service():
         # Logging
         self.logger = audera.logging.get_streamer_logger()
 
+        # Initialize orchestrator for task isolation
+        self.orchestrator = audera.orchestrator.Orchestrator(logger=self.logger)
+
         # Initialize identity
 
         # The `update` method will either get the existing identity, create a new identity or
@@ -826,26 +829,47 @@ class Service():
     async def stop_services(self):
         """ Stops the async tasks. """
         self.mdns_browser_event.clear()
+        self.orchestrator.shutdown()
 
     async def start_services(self):
         """ Runs the async mDNS browser service, time-synchronization service, multi-player
-        synchronization service, and the audio stream service.
+        synchronization service, and the audio stream service using the orchestrator for isolation.
         """
 
-        # Schedule the time-synchronization service
-        ntp_synchronizer = asyncio.create_task(self.ntp_synchronizer())
+        # Schedule the mDNS browser service in isolated thread pool
+        mdns_browser = asyncio.create_task(
+            self.orchestrator.arun(
+                "mdns_browser",
+                self.mdns_browser,
+                restart_on_failure=True,
+                timeout=None,
+                pool_type="thread"
+            )
+        )
 
-        # Schedule the mDNS browser service
-        mdns_browser = asyncio.create_task(self.mdns_browser())
+        # Schedule the NTP synchronizer in isolated thread pool
+        ntp_synchronizer = asyncio.create_task(
+            self.orchestrator.arun(
+                "ntp_synchronizer",
+                self.ntp_synchronizer,
+                restart_on_failure=True,
+                timeout=None,
+                pool_type="thread"
+            )
+        )
 
-        # Schedule the audio stream service
-        audio_streamer = asyncio.create_task(self.audio_streamer())
+        # Schedule the audio streamer in isolated thread pool
+        audio_streamer = asyncio.create_task(
+            self.orchestrator.arun(
+                "audio_streamer",
+                self.audio_streamer,
+                restart_on_failure=True,
+                timeout=None,
+                pool_type="thread"
+            )
+        )
 
-        services = [
-            ntp_synchronizer,
-            mdns_browser,
-            audio_streamer
-        ]
+        services = [mdns_browser, ntp_synchronizer, audio_streamer]
 
         # Run services
         try:

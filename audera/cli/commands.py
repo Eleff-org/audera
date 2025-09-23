@@ -59,7 +59,7 @@ def run(
     except KeyboardInterrupt:
 
         # Logging
-        service.logger.info("Shutting down the services.")
+        service.logger.info("Shutting down the services...")
 
     finally:
 
