@@ -60,10 +60,10 @@ class Service():
 
         self.mac_address = audera.netifaces.get_local_mac_address()
         self.streamer_ip_address = audera.netifaces.get_local_ip_address()
-        self.identity: audera.struct.identity.Identity = audera.dal.identities.update(
-            audera.struct.identity.Identity(
-                name=audera.struct.identity.generate_cool_name(),
-                uuid=audera.struct.identity.generate_uuid_from_mac_address(self.mac_address),
+        self.identity: audera.models.identity.Identity = audera.dal.identities.update(
+            audera.models.identity.Identity(
+                name=audera.models.identity.generate_cool_name(),
+                uuid=audera.models.identity.generate_uuid_from_mac_address(self.mac_address),
                 mac_address=self.mac_address,
                 address=self.streamer_ip_address
             )
@@ -79,7 +79,7 @@ class Service():
 
         self.stream_session: audera.sessions.Stream = audera.sessions.Stream(
             session=audera.dal.sessions.update(
-                audera.struct.session.Session(
+                audera.models.session.Session(
                     uuid=self.identity.uuid,
                     mac_address=self.identity.mac_address,
                     address=self.identity.address,
@@ -148,8 +148,8 @@ class Service():
 
         return self.last_audio_capture_time
 
-    async def ntp_synchronizer(self):
-        """ The async `micro-service` for network time protocol (ntp) synchronization.
+    def ntp_synchronizer(self):
+        """ The `micro-service` for network time protocol (ntp) synchronization.
 
         The purpose of ntp synchronization is to ensure that the time on the streamer
         coincides with all `audera` remote audio output players on the local network
@@ -175,7 +175,7 @@ class Service():
                     )
 
                     # Wait, yielding to other tasks in the event loop
-                    await asyncio.sleep(audera.SYNC_INTERVAL)
+                    time.sleep(audera.SYNC_INTERVAL)
 
                 except ntplib.NTPException:
 
@@ -192,7 +192,7 @@ class Service():
                     )
 
                     # Wait, yielding to other tasks in the event loop
-                    await asyncio.sleep(audera.SYNC_INTERVAL)
+                    time.sleep(audera.SYNC_INTERVAL)
 
         except (
             asyncio.CancelledError,  # Streamer services cancelled
@@ -331,7 +331,7 @@ class Service():
 
     async def synchronize_player(
         self,
-        player: audera.struct.player.Player
+        player: audera.models.player.Player
     ) -> bool:
         """ Synchronizes a remote audio output player and measures round-trip time (rtt).
 
@@ -489,7 +489,7 @@ class Service():
 
     async def open_audio_stream_connection(
         self,
-        player: audera.struct.player.Player
+        player: audera.models.player.Player
     ):
         """ Opens an audio stream connection to a remote audio output player when it is successfully
         synchronized for the first time.

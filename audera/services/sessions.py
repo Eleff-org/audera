@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Union, Dict
 import asyncio
 
-from audera import struct, dal
+from audera import models, dal
 
 
 class PlayerConnection():
@@ -21,7 +21,7 @@ class PlayerConnection():
 
     def __init__(
         self,
-        player: struct.player.Player,
+        player: models.player.Player,
         stream_writer: Union[asyncio.StreamWriter, None] = None
     ):
         """  Initializes an instance of a remote audio output player stream connection.
@@ -34,7 +34,7 @@ class PlayerConnection():
             The asynchronous network stream writer registered to the player used to write the
                 audio stream to the player over a TCP connection.
         """
-        self.player: struct.player.Player = player
+        self.player: models.player.Player = player
         self.stream_writer: Union[asyncio.StreamWriter, None] = stream_writer
 
     def connect(self, stream_writer: asyncio.StreamWriter) -> PlayerConnection:
@@ -80,7 +80,7 @@ class Stream():
 
     def __init__(
         self,
-        session: struct.session.Session
+        session: models.session.Session
     ):
         """ Initializes an instance of an audio stream session.
 
@@ -89,7 +89,7 @@ class Stream():
         session: `audera.struct.session.Session`
             An `audera.struct.session.Session` object.
         """
-        self.session: struct.session.Session = session
+        self.session: models.session.Session = session
         self.player_connections: Dict[str, PlayerConnection] = {}
 
     @property
@@ -99,7 +99,7 @@ class Stream():
 
     def attach_player(
         self,
-        player: struct.player.Player,
+        player: models.player.Player,
         stream_writer: asyncio.StreamWriter = None
     ):
         """ Attaches a player from the audio stream session.
@@ -124,7 +124,7 @@ class Stream():
 
     async def detach_player(
         self,
-        player: struct.player.Player
+        player: models.player.Player
     ):
         """ Detaches a player from the audio stream session and closes the asynchronous
         network stream writer.

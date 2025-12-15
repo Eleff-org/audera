@@ -53,10 +53,10 @@ class Service():
 
         self.mac_address = audera.netifaces.get_local_mac_address()
         self.player_ip_address = audera.netifaces.get_local_ip_address()
-        self.identity: audera.struct.identity.Identity = audera.dal.identities.update(
-            audera.struct.identity.Identity(
-                name=audera.struct.identity.generate_cool_name(),
-                uuid=audera.struct.identity.generate_uuid_from_mac_address(self.mac_address),
+        self.identity: audera.models.identity.Identity = audera.dal.identities.update(
+            audera.models.identity.Identity(
+                name=audera.models.identity.generate_cool_name(),
+                uuid=audera.models.identity.generate_uuid_from_mac_address(self.mac_address),
                 mac_address=self.mac_address,
                 address=self.player_ip_address
             )
@@ -67,7 +67,7 @@ class Service():
         # The `update` method will either get the existing player, create a new player or
         #   update an existing player from the identity.
 
-        self.player: audera.struct.player.Player = audera.dal.players.update_identity(self.identity)
+        self.player: audera.models.player.Player = audera.dal.players.update_identity(self.identity)
 
         # Initialize playback session
 
@@ -305,7 +305,7 @@ class Service():
             while True:
 
                 # Get the latest player attributes
-                self.player: audera.struct.player.Player = audera.dal.players.get_player(self.player.uuid)
+                self.player: audera.models.player.Player = audera.dal.players.get_player(self.player.uuid)
 
                 # Update the mDNS service
                 self.mdns.update(self.player)

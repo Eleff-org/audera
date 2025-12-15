@@ -10,7 +10,7 @@ import json
 import pyaudio
 import queue
 
-from audera import struct as struct_
+from audera import models
 
 
 class Input():
@@ -33,8 +33,8 @@ class Input():
     def __init__(
         self,
         logger: logging.Logger,
-        interface: struct_.audio.Interface,
-        device: struct_.audio.Device,
+        interface: models.audio.Interface,
+        device: models.audio.Device,
         playback_delay: float,
         time_offset: float = 0.0
     ):
@@ -58,8 +58,8 @@ class Input():
         self.logger = logger
 
         # Initialize the audio stream
-        self.interface: struct_.audio.Interface = interface
-        self.device: struct_.audio.Device = device
+        self.interface: models.audio.Interface = interface
+        self.device: models.audio.Device = device
         self.port = pyaudio.PyAudio()
         self.stream = self.port.open(
             format=interface.format,
@@ -134,7 +134,7 @@ class Input():
             )
         return False
 
-    def update(self, interface: struct_.audio.Interface, device: struct_.audio.Device):
+    def update(self, interface: models.audio.Interface, device: models.audio.Device):
         """ Opens a new audio stream with an updated interface and device settings and
         returns `True` when the stream is updated.
 
@@ -202,8 +202,8 @@ class Output():
     def __init__(
         self,
         logger: logging.Logger,
-        interface: struct_.audio.Interface,
-        device: struct_.audio.Device,
+        interface: models.audio.Interface,
+        device: models.audio.Device,
         buffer_size: int = 5,
         time_offset: float = 0.0,
         playback_timing_tolerance: float = 0.005,
@@ -231,8 +231,8 @@ class Output():
         self.logger = logger
 
         # Initialize the audio stream
-        self.interface: struct_.audio.Interface = interface
-        self.device: struct_.audio.Device = device
+        self.interface: models.audio.Interface = interface
+        self.device: models.audio.Device = device
         self.port = pyaudio.PyAudio()
         self.stream = self.port.open(
             format=interface.format,
@@ -317,8 +317,8 @@ class Output():
 
     def update(
         self,
-        interface: struct_.audio.Interface,
-        device: struct_.audio.Device
+        interface: models.audio.Interface,
+        device: models.audio.Device
     ):
         """ Opens a new audio stream with an updated interface and device settings and
         returns `True` when the stream is updated.

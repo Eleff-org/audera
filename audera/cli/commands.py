@@ -2,7 +2,8 @@
 
 from typing import Literal
 import asyncio
-from audera import player, streamer, ui, netifaces
+from audera import player, streamer, ui
+from audera.services import netifaces
 
 
 # Define audera sub-command function(s)

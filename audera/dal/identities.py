@@ -3,7 +3,7 @@
 from typing import Union
 import os
 from pytensils import config
-from audera.struct import identity
+from audera.models import identity
 from audera.dal import path
 
 

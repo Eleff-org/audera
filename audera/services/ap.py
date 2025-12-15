@@ -3,7 +3,8 @@
 from typing_extensions import Literal
 import subprocess
 import time
-from audera import struct, platform, netifaces
+from audera import models
+from audera.services import netifaces, platform
 
 
 class AccessPoint():
@@ -29,7 +30,7 @@ class AccessPoint():
         self,
         name: str,
         url: str,
-        identity: struct.identity.Identity,
+        identity: models.identity.Identity,
         interface: Literal['wlan0'],
         ap_interface: Literal['ap0'] = 'ap0'
     ):

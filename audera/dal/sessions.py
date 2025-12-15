@@ -4,7 +4,7 @@ from typing import Union, List
 import os
 import copy
 from pytensils import config, utils
-from audera.struct import session, player
+from audera.models import session, player
 from audera.dal import path, players, groups
 
 

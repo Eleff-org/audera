@@ -10,7 +10,7 @@ import socket
 from zeroconf import Zeroconf, ServiceInfo, ServiceBrowser, ServiceStateChange
 from threading import Event
 
-from audera import struct, dal
+from audera import models, dal
 
 
 class PlayerBroadcaster():
@@ -37,7 +37,7 @@ class PlayerBroadcaster():
         self,
         logger: logging.Logger,
         zc: Zeroconf,
-        player: struct.player.Player,
+        player: models.player.Player,
         service_type: str,
         service_description: str,
         service_port: int
@@ -65,7 +65,7 @@ class PlayerBroadcaster():
 
         # Initialize mDNS
         self.zc: Zeroconf = zc
-        self.player: struct.player.Player = player
+        self.player: models.player.Player = player
         self.service_type: str = service_type
         self.service_description: str = service_description
         self.service_port: int = service_port
@@ -125,7 +125,7 @@ class PlayerBroadcaster():
 
     def update(
         self,
-        player: struct.player.Player
+        player: models.player.Player
     ):
         """ Updates the mDNS service within the local network from
         an `audera.struct.player.Player` object.
@@ -383,7 +383,7 @@ class PlayerBrowser():
             info = zeroconf.get_service_info(service_type, name)
             if info and (name not in self.players):
 
-                player: struct.player.Player = struct.player.Player.from_service_info(info)
+                player: models.player.Player = models.player.Player.from_service_info(info)
                 player.connected = True
                 player = dal.players.update(player)
                 self.players[name] = player
@@ -418,7 +418,7 @@ class PlayerBrowser():
             info = zeroconf.get_service_info(service_type, name)
             if info and (name in self.players):
 
-                player: struct.player.Player = struct.player.Player.from_service_info(info)
+                player: models.player.Player = models.player.Player.from_service_info(info)
                 player = dal.players.update(player)
                 self.players[name] = player
 
