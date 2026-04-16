@@ -247,7 +247,7 @@ class Output():
         self.stream_start_time: Union[float, None] = None
 
         # Initialize the audio buffer and time offset
-        self.buffer = queue.Queue(maxsize=buffer_size)
+        self.buffer = queue.PriorityQueue(maxsize=buffer_size)
         self.time_offset: float = time_offset
         self.playback_timing_tolerance: float = playback_timing_tolerance
 
@@ -389,7 +389,7 @@ class Output():
 
         # Get the next audio stream packet from the buffer queue
         try:
-            packet = self.buffer.get_nowait()
+            timestamp, packet = self.buffer.get_nowait()
 
             # Parse the audio data from the packet
             chunk = packet[12:-12]
@@ -397,7 +397,7 @@ class Output():
             # Debug
             # self.logger.info(
             #     'Streaming audio stream packet with playback time %.7f [sec.].' % (
-            #         struct.unpack("d", packet[4:12])[0]
+            #         timestamp
             #     )
             # )
 
@@ -418,14 +418,14 @@ class Output():
 
             try:
                 # Get the next audio stream packet from the buffer queue
-                next_packet = self.buffer.get_nowait()
+                timestamp, next_packet = self.buffer.get_nowait()
             except queue.Empty:
                 # No packets available, cannot synchronize
                 return
 
             # Check the length of the packet and the playback time
             length = struct.unpack(">I", next_packet[:4])[0]
-            playback_time = struct.unpack("d", next_packet[4:12])[0]
+            playback_time = timestamp
 
             # Discard incomplete packets
             if length != self.chunk_length:
@@ -470,7 +470,7 @@ class Output():
             #     continue
 
             # Put back the valid packet
-            self.buffer.put_nowait(next_packet)
+            self.buffer.put_nowait((timestamp, next_packet))
 
             # Exit the loop when a valid packet is available
             break

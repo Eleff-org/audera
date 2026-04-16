@@ -92,7 +92,7 @@ class PlayerBroadcaster():
                 self.service_type
             )  # (r)emote (a)udio (o)utput (p)layer
 
-    async def register(self):
+    def register(self):
         """ Registers the mDNS service and connects the remote audio output player to the local network. """
 
         try:
@@ -333,12 +333,12 @@ class PlayerBrowser():
         self.time_out: float = time_out
 
         # Initialize remote audio output players
-        self.players: Dict[str, Union[ServiceInfo, None]] = {}
+        self.players: Dict[str, models.player.Player] = {}
 
         # Initialize service browser
         self.browser: Union[ServiceBrowser, None] = None
 
-    async def browse(self):
+    def browse(self):
         """ Browses for the remote audio output player mDNS service within the local network. """
 
         # Logging

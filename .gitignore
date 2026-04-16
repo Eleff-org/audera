@@ -3,5 +3,6 @@ __pycache__
 agents
 .venv
 build
+plans
 audera.egg-info
 testing*.py

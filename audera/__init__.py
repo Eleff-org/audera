@@ -8,9 +8,22 @@ from typing import List
 import errno
 
 from audera import models, dal
-from audera.services import ap, devices, logging, mdns, netifaces, ntp, orchestrator, platform, sessions
+from audera.services import ap, devices, logging, mdns, media, netifaces, ntp, orchestrator, platform, sessions
 
-__all__ = ['platform', 'ap', 'netifaces', 'ntp', 'mdns', 'models', 'dal', 'devices', 'sessions', 'logging', 'orchestrator']
+__all__ = [
+    'platform',
+    'ap',
+    'netifaces',
+    'ntp',
+    'mdns',
+    'models',
+    'dal',
+    'devices',
+    'sessions',
+    'logging',
+    'orchestrator',
+    'media',
+]
 
 # Logo
 LOGO: List[str] = [
