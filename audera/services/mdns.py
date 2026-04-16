@@ -4,7 +4,7 @@ Allows for resolving hostnames to IP addresses within local networks
 that do not include a local name server.
 """
 
-from typing import Union, Dict
+from typing import Optional, Dict
 import logging
 import socket
 from zeroconf import Zeroconf, ServiceInfo, ServiceBrowser, ServiceStateChange
@@ -234,7 +234,7 @@ class Connection():
         self.retry: int = 1
         self.time_out: float = time_out
 
-    def connect(self) -> Union[ServiceInfo, None]:
+    def connect(self) -> Optional[ServiceInfo]:
         """ Connect to an mDNS service within the local network by name. """
 
         # Initialize the mDNS service information
@@ -336,7 +336,7 @@ class PlayerBrowser():
         self.players: Dict[str, models.player.Player] = {}
 
         # Initialize service browser
-        self.browser: Union[ServiceBrowser, None] = None
+        self.browser: Optional[ServiceBrowser] = None
 
     def browse(self):
         """ Browses for the remote audio output player mDNS service within the local network. """

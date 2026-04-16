@@ -280,7 +280,7 @@ class Output():
         return b'\x00' * length
 
     def to_dict(self):
-        """ Returns the `audera.struct.audio.Input` object as a `dict`. """
+        """ Returns the `audera.struct.audio.Output` object as a `dict`. """
         return {
             'state': 'active' if self.stream.is_active() else 'stopped',
             'type': self.device.type,
@@ -293,7 +293,7 @@ class Output():
         }
 
     def __repr__(self):
-        """ Returns the `audera.struct.audio.Input` object as a json-formatted `str`. """
+        """ Returns the `audera.struct.audio.Output` object as a json-formatted `str`. """
         return json.dumps(self.to_dict(), indent=2)
 
     def __eq__(self, compare):
@@ -301,10 +301,10 @@ class Output():
 
         Parameters
         ----------
-        compare: `audera.device_manager.Input`
-            An instance of an `audera.device_manager.Input` object.
+        compare: `audera.services.devices.Output`
+            An instance of an `audera.services.devices.Output` object.
         """
-        if isinstance(compare, Input):
+        if isinstance(compare, Output):
             return (
                 self.interface.format == compare.interface.format
                 and self.interface.rate == compare.interface.rate

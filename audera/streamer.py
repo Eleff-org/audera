@@ -1,6 +1,6 @@
 """ Streamer service """
 
-from typing import Union
+from typing import Optional
 import asyncio
 import socket
 import time
@@ -117,7 +117,7 @@ class Service():
             device=audera.dal.devices.get_device('input'),
             playback_delay=audera.PLAYBACK_DELAY
         )
-        self.last_audio_capture_time: Union[float, None] = None
+        self.last_audio_capture_time: Optional[float] = None
 
         # Initialize playback delay and rtt-history
         self.rtt_history: list[float] = []

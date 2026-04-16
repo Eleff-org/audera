@@ -41,6 +41,9 @@ class Synchronizer:
             Tuple of (time_offset, rtt) if successful, else (None, None).
         """
         try:
+            # Bind to sync port
+            self.sock.bind(('', self.sync_port))
+
             # Receive t1 from player
             data, addr = self.sock.recvfrom(1024)
             if addr[0] != player_address:
