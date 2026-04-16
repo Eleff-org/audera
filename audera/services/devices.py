@@ -3,14 +3,14 @@
 from __future__ import annotations
 from typing import Union
 import logging
-import asyncio
 import time
 import struct
 import copy
 import json
 import pyaudio
+import queue
 
-from audera import struct as struct_
+from audera import models
 
 
 class Input():
@@ -33,8 +33,8 @@ class Input():
     def __init__(
         self,
         logger: logging.Logger,
-        interface: struct_.audio.Interface,
-        device: struct_.audio.Device,
+        interface: models.audio.Interface,
+        device: models.audio.Device,
         playback_delay: float,
         time_offset: float = 0.0
     ):
@@ -58,8 +58,8 @@ class Input():
         self.logger = logger
 
         # Initialize the audio stream
-        self.interface: struct_.audio.Interface = interface
-        self.device: struct_.audio.Device = device
+        self.interface: models.audio.Interface = interface
+        self.device: models.audio.Device = device
         self.port = pyaudio.PyAudio()
         self.stream = self.port.open(
             format=interface.format,
@@ -134,7 +134,7 @@ class Input():
             )
         return False
 
-    def update(self, interface: struct_.audio.Interface, device: struct_.audio.Device):
+    def update(self, interface: models.audio.Interface, device: models.audio.Device):
         """ Opens a new audio stream with an updated interface and device settings and
         returns `True` when the stream is updated.
 
@@ -202,8 +202,8 @@ class Output():
     def __init__(
         self,
         logger: logging.Logger,
-        interface: struct_.audio.Interface,
-        device: struct_.audio.Device,
+        interface: models.audio.Interface,
+        device: models.audio.Device,
         buffer_size: int = 5,
         time_offset: float = 0.0,
         playback_timing_tolerance: float = 0.005,
@@ -231,8 +231,8 @@ class Output():
         self.logger = logger
 
         # Initialize the audio stream
-        self.interface: struct_.audio.Interface = interface
-        self.device: struct_.audio.Device = device
+        self.interface: models.audio.Interface = interface
+        self.device: models.audio.Device = device
         self.port = pyaudio.PyAudio()
         self.stream = self.port.open(
             format=interface.format,
@@ -247,7 +247,7 @@ class Output():
         self.stream_start_time: Union[float, None] = None
 
         # Initialize the audio buffer and time offset
-        self.buffer: asyncio.Queue = asyncio.Queue(buffer_size)
+        self.buffer = queue.PriorityQueue(maxsize=buffer_size)
         self.time_offset: float = time_offset
         self.playback_timing_tolerance: float = playback_timing_tolerance
 
@@ -280,7 +280,7 @@ class Output():
         return b'\x00' * length
 
     def to_dict(self):
-        """ Returns the `audera.struct.audio.Input` object as a `dict`. """
+        """ Returns the `audera.struct.audio.Output` object as a `dict`. """
         return {
             'state': 'active' if self.stream.is_active() else 'stopped',
             'type': self.device.type,
@@ -293,7 +293,7 @@ class Output():
         }
 
     def __repr__(self):
-        """ Returns the `audera.struct.audio.Input` object as a json-formatted `str`. """
+        """ Returns the `audera.struct.audio.Output` object as a json-formatted `str`. """
         return json.dumps(self.to_dict(), indent=2)
 
     def __eq__(self, compare):
@@ -301,10 +301,10 @@ class Output():
 
         Parameters
         ----------
-        compare: `audera.device_manager.Input`
-            An instance of an `audera.device_manager.Input` object.
+        compare: `audera.services.devices.Output`
+            An instance of an `audera.services.devices.Output` object.
         """
-        if isinstance(compare, Input):
+        if isinstance(compare, Output):
             return (
                 self.interface.format == compare.interface.format
                 and self.interface.rate == compare.interface.rate
@@ -317,8 +317,8 @@ class Output():
 
     def update(
         self,
-        interface: struct_.audio.Interface,
-        device: struct_.audio.Device
+        interface: models.audio.Interface,
+        device: models.audio.Device
     ):
         """ Opens a new audio stream with an updated interface and device settings and
         returns `True` when the stream is updated.
@@ -389,7 +389,7 @@ class Output():
 
         # Get the next audio stream packet from the buffer queue
         try:
-            packet = self.buffer.get_nowait()
+            timestamp, packet = self.buffer.get_nowait()
 
             # Parse the audio data from the packet
             chunk = packet[12:-12]
@@ -397,12 +397,12 @@ class Output():
             # Debug
             # self.logger.info(
             #     'Streaming audio stream packet with playback time %.7f [sec.].' % (
-            #         struct.unpack("d", packet[4:12])[0]
+            #         timestamp
             #     )
             # )
 
         # Create a silent audio stream chunk when the buffer queue is empty
-        except asyncio.QueueEmpty:
+        except queue.Empty:
             chunk = self.silent_chunk(length=self.chunk_length)
 
         # Return the audio stream chunk
@@ -414,14 +414,18 @@ class Output():
         """
 
         # Discard invalid packets
-        while not self.buffer.empty():
+        while True:
 
-            # Peak at the next audio stream packet from the buffer queue
-            next_packet = self.buffer._queue[0]
+            try:
+                # Get the next audio stream packet from the buffer queue
+                timestamp, next_packet = self.buffer.get_nowait()
+            except queue.Empty:
+                # No packets available, cannot synchronize
+                return
 
-            # Peak at the length of the next packet and the playback time
+            # Check the length of the packet and the playback time
             length = struct.unpack(">I", next_packet[:4])[0]
-            playback_time = struct.unpack("d", next_packet[4:12])[0]
+            playback_time = timestamp
 
             # Discard incomplete packets
             if length != self.chunk_length:
@@ -432,9 +436,6 @@ class Output():
                         playback_time
                     )
                 )
-
-                # Remove the incomplete packet from the buffer queue
-                _ = self.buffer.get_nowait()
 
                 continue
 
@@ -453,9 +454,6 @@ class Output():
                     )
                 )
 
-                # Remove the late packet from the buffer queue
-                _ = self.buffer.get_nowait()
-
                 continue
 
             # Discard early packets
@@ -468,12 +466,13 @@ class Output():
             #             playback_time
             #         )
             #     )
-            #     # Remove the late packet from the buffer queue
-            #     _ = self.buffer.get_nowait()
 
             #     continue
 
-            # Exit the loop only when a valid packet is available
+            # Put back the valid packet
+            self.buffer.put_nowait((timestamp, next_packet))
+
+            # Exit the loop when a valid packet is available
             break
 
         # Sleep until the target playback time
@@ -536,10 +535,10 @@ class Output():
 
     def clear_buffer(self):
         """ Clears any / all unplayed audio stream packets from the buffer. """
-        while not self.buffer.empty():
+        while True:
             try:
                 self.buffer.get_nowait()
-            except asyncio.QueueEmpty:
+            except queue.Empty:
                 break
 
     def close(self):

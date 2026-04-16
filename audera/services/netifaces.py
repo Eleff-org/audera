@@ -7,7 +7,7 @@ import netifaces
 import uuid
 import subprocess
 
-from audera import platform
+from audera.services import platform
 
 
 def get_gateway_ip_address() -> str:

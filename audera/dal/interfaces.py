@@ -3,7 +3,7 @@
 from typing import Union
 import os
 from pytensils import config
-from audera.struct import audio
+from audera.models import audio
 from audera.dal import path
 
 

@@ -1,5 +1,8 @@
 __pycache__
+.pytest_cache
+agents
 .venv
 build
+plans
 audera.egg-info
 testing*.py

@@ -4,7 +4,7 @@ from typing import Union, List
 import os
 import duckdb
 from pytensils import config, utils
-from audera.struct import player
+from audera.models import player
 from audera.dal import path, players
 
 

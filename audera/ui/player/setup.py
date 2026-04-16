@@ -18,7 +18,7 @@ class Page():
     """
 
     @audera.platform.requires('dietpi')
-    def __init__(self, identity: audera.struct.identity.Identity):
+    def __init__(self, identity: audera.models.identity.Identity):
         """ Initializes an instance of the player setup app.
 
         Parameters
@@ -32,7 +32,7 @@ class Page():
         # The `update` method will either get the existing player, create a new player or
         #   update an existing player from the identity.
 
-        self.player: audera.struct.player.Player = audera.dal.players.update_identity(identity)
+        self.player: audera.models.player.Player = audera.dal.players.update_identity(identity)
 
         # Initialize connected network ssid
         self.connected_profile: Union[str, None] = None
@@ -426,10 +426,10 @@ def run():
     except audera.netifaces.NetworkConnectionError:
         player_ip_address = ''  # The player may not have an ip-address yet
 
-    identity: audera.struct.identity.Identity = audera.dal.identities.update(
-        audera.struct.identity.Identity(
-            name=audera.struct.identity.generate_cool_name(),
-            uuid=audera.struct.identity.generate_uuid_from_mac_address(mac_address),
+    identity: audera.models.identity.Identity = audera.dal.identities.update(
+        audera.models.identity.Identity(
+            name=audera.models.identity.generate_cool_name(),
+            uuid=audera.models.identity.generate_uuid_from_mac_address(mac_address),
             mac_address=mac_address,
             address=player_ip_address
         )

@@ -7,9 +7,23 @@ for DIY home audio enthusiasts.
 from typing import List
 import errno
 
-from audera import platform, ap, netifaces, ntp, mdns, struct, dal, devices, sessions, logging
+from audera import models, dal
+from audera.services import ap, devices, logging, mdns, media, netifaces, ntp, orchestrator, platform, sessions
 
-__all__ = ['platform', 'ap', 'netifaces', 'ntp', 'mdns', 'struct', 'dal', 'devices', 'sessions', 'logging']
+__all__ = [
+    'platform',
+    'ap',
+    'netifaces',
+    'ntp',
+    'mdns',
+    'models',
+    'dal',
+    'devices',
+    'sessions',
+    'logging',
+    'orchestrator',
+    'media',
+]
 
 # Logo
 LOGO: List[str] = [

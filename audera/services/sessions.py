@@ -1,10 +1,10 @@
 """ Audio stream / playback session manager """
 
 from __future__ import annotations
-from typing import Union, Dict
+from typing import Dict, Optional
 import asyncio
 
-from audera import struct, dal
+from audera import models, dal
 
 
 class PlayerConnection():
@@ -21,8 +21,8 @@ class PlayerConnection():
 
     def __init__(
         self,
-        player: struct.player.Player,
-        stream_writer: Union[asyncio.StreamWriter, None] = None
+        player: models.player.Player,
+        stream_writer: Optional[asyncio.StreamWriter] = None
     ):
         """  Initializes an instance of a remote audio output player stream connection.
 
@@ -30,20 +30,20 @@ class PlayerConnection():
         ----------
         player: `audera.struct.player.Player`
             An `audera.struct.player.Player` object.
-        stream_writer: `asyncio.StreamWriter`
-            The asynchronous network stream writer registered to the player used to write the
+        stream_writer: `Optional[asyncio.StreamWriter]`
+            The optional asynchronous network stream writer registered to the player used to write the
                 audio stream to the player over a TCP connection.
         """
-        self.player: struct.player.Player = player
-        self.stream_writer: Union[asyncio.StreamWriter, None] = stream_writer
+        self.player: models.player.Player = player
+        self.stream_writer: Optional[asyncio.StreamWriter] = stream_writer
 
-    def connect(self, stream_writer: asyncio.StreamWriter) -> PlayerConnection:
+    def connect(self, stream_writer: Optional[asyncio.StreamWriter]) -> PlayerConnection:
         """ Attaches the asynchronous network stream writer.
 
         Parameters
         ----------
-        stream_writer: `asyncio.StreamWriter`
-            The asynchronous network stream writer registered to the player used to write the
+        stream_writer: `Optional[asyncio.StreamWriter]`
+            The optional asynchronous network stream writer registered to the player used to write the
                 audio stream to the player over a TCP connection.
         """
         self.stream_writer = stream_writer
@@ -80,7 +80,7 @@ class Stream():
 
     def __init__(
         self,
-        session: struct.session.Session
+        session: models.session.Session
     ):
         """ Initializes an instance of an audio stream session.
 
@@ -89,7 +89,7 @@ class Stream():
         session: `audera.struct.session.Session`
             An `audera.struct.session.Session` object.
         """
-        self.session: struct.session.Session = session
+        self.session: models.session.Session = session
         self.player_connections: Dict[str, PlayerConnection] = {}
 
     @property
@@ -99,8 +99,8 @@ class Stream():
 
     def attach_player(
         self,
-        player: struct.player.Player,
-        stream_writer: asyncio.StreamWriter = None
+        player: models.player.Player,
+        stream_writer: Optional[asyncio.StreamWriter] = None
     ):
         """ Attaches a player from the audio stream session.
 
@@ -108,8 +108,8 @@ class Stream():
         ----------
         player: `audera.struct.player.Player`
             An `audera.struct.player.Player` object.
-        stream_writer: `asyncio.StreamWriter`
-            The asynchronous network stream writer registered to the player used to write the
+        stream_writer: `Optional[asyncio.StreamWriter]`
+            The optional asynchronous network stream writer registered to the player used to write the
                 audio stream to the player over a TCP connection.
         """
 
@@ -124,7 +124,7 @@ class Stream():
 
     async def detach_player(
         self,
-        player: struct.player.Player
+        player: models.player.Player
     ):
         """ Detaches a player from the audio stream session and closes the asynchronous
         network stream writer.
@@ -144,8 +144,9 @@ class Stream():
                     self.player_connections.get(player.address).player
                 )
 
-                # Close the remote audio output player connection
-                await asyncio.gather(self.player_connections.get(player.address).disconnect())
+                # Close the remote audio output player connection if exists
+                if self.player_connections.get(player.address).stream_writer:
+                    await asyncio.gather(self.player_connections.get(player.address).disconnect())
 
                 # Remove the remote audio output player connection
                 del self.player_connections[player.address]
@@ -164,11 +165,12 @@ class Stream():
             [player_connection.player for player_connection in self.player_connections.values()]
         )
 
-        # Close all remote audio output player connections
+        # Close all remote audio output player connections if they exist
         await asyncio.gather(
             *[
                 player_connection.disconnect()
                 for player_connection in self.player_connections.values()
+                if player_connection.stream_writer
             ]
         )
 
@@ -192,28 +194,28 @@ class StreamerConnection():
 
     def __init__(
         self,
-        streamer_address: Union[str, None] = None,
-        stream_writer: Union[asyncio.StreamWriter, None] = None
+        streamer_address: Optional[str] = None,
+        stream_writer: Optional[asyncio.StreamWriter] = None
     ):
         """ Initializes an instance of a streamer connection.
 
         Parameters
         ----------
-        streamer_address: `str`
+        streamer_address: `Optional[str]`
             The ip-address of the audio streamer.
-        stream_writer: `asyncio.StreamWriter`
-            The asynchronous network stream writer registered to the streamer.
+        stream_writer: `Optional[asyncio.StreamWriter]`
+            The optional asynchronous network stream writer registered to the streamer.
         """
-        self.streamer_address: Union[str, None] = streamer_address
-        self.stream_writer: Union[asyncio.StreamWriter, None] = stream_writer
+        self.streamer_address: Optional[str] = streamer_address
+        self.stream_writer: Optional[asyncio.StreamWriter] = stream_writer
 
-    def connect(self, stream_writer: asyncio.StreamWriter) -> StreamerConnection:
+    def connect(self, stream_writer: Optional[asyncio.StreamWriter]) -> StreamerConnection:
         """ Attaches the asynchronous network stream writer.
 
         Parameters
         ----------
-        stream_writer: `asyncio.StreamWriter`
-            The asynchronous network stream writer registered to the streamer.
+        stream_writer: `Optional[asyncio.StreamWriter]`
+            The optional asynchronous network stream writer registered to the streamer.
         """
         self.stream_writer = stream_writer
 
@@ -262,7 +264,7 @@ class Playback():
     async def attach_stream_writer(
         self,
         streamer_address: str,
-        stream_writer: asyncio.StreamWriter = None
+        stream_writer: Optional[asyncio.StreamWriter] = None
     ):
         """ Attaches a stream writer to the audio stream session.
 
@@ -270,8 +272,8 @@ class Playback():
         ----------
         streamer_address: `str`
             The ip-address of the audio streamer.
-        stream_writer: `asyncio.StreamWriter`
-            The asynchronous network stream writer registered to the streamer.
+        stream_writer: `Optional[asyncio.StreamWriter]`
+            The optional asynchronous network stream writer registered to the streamer.
         """
 
         # Attach / retain the streamer connection
