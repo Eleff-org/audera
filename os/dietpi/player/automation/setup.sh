@@ -4,7 +4,7 @@
 set -e
 
 # Import DietPi global functions
-source "/boot/dietpi/func/dietpi-globals"
+# source "/boot/dietpi/func/dietpi-globals"
 
 # Setup color formatting
 RED='\033[0;31m'
@@ -57,15 +57,18 @@ fi
 echo ">>> Installing build packages"
 apt-get update && \
 apt-get install -y \
+    wget \
+    curl \
+    git \
     network-manager \
     dnsmasq \
     alsa-utils \
     snapclient \
-    wget \
-    curl \
-    python3.11 \
+    python3.13 \
     python3-dev \
-    build-essential
+    build-essential && \
+apt-get clean && \
+rm -rf /var/lib/apt/lists/*
 echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 
 # Load ALSA loopback module (needed for CamillaDSP ↔ Snapclient audio path)
@@ -146,12 +149,12 @@ systemctl start snapclient camilladsp
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
-echo
-echo ">>> Configuring the operating-system"
-echo ">>> Ensuring wifi availability without hdmi-output"
-G_CONFIG_INJECT 'hdmi_force_hotplug=' 'hdmi_force_hotplug=1' /boot/config.txt
-G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
-echo -e "[  ${GREEN}OK${RESET}  ] os configured successfully"
+# echo
+# echo ">>> Configuring the operating-system"
+# echo ">>> Ensuring wifi availability without hdmi-output"
+# G_CONFIG_INJECT 'hdmi_force_hotplug=' 'hdmi_force_hotplug=1' /boot/config.txt
+# G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
+# echo -e "[  ${GREEN}OK${RESET}  ] os configured successfully"
 
 # Purge ifupdown
 

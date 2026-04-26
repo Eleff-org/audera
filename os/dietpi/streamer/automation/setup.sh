@@ -4,7 +4,7 @@
 set -e
 
 # Import DietPi global functions
-source "/boot/dietpi/func/dietpi-globals"
+# source "/boot/dietpi/func/dietpi-globals"
 
 # Setup color formatting
 RED='\033[0;31m'
@@ -60,14 +60,19 @@ fi
 echo ">>> Installing build packages"
 apt-get update && \
 apt-get install -y \
-    snapserver \
-    snapclient \
-    alsa-utils \
     wget \
     curl \
-    python3.11 \
+    git \
+    network-manager \
+    dnsmasq \
+    alsa-utils \
+    snapserver \
+    snapclient \
+    python3.13 \
     python3-dev \
-    build-essential
+    build-essential && \
+apt-get clean && \
+rm -rf /var/lib/apt/lists/*
 echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 
 # Load ALSA loopback module (needed for CamillaDSP ↔ Snapclient audio path)
@@ -176,12 +181,57 @@ systemctl start snapserver snapclient camilladsp
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
+# echo
+# echo ">>> Configuring the operating-system"
+# echo ">>> Ensuring wifi availability without hdmi-output"
+# G_CONFIG_INJECT 'hdmi_force_hotplug=' 'hdmi_force_hotplug=1' /boot/config.txt
+# G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
+# echo -e "[  ${GREEN}OK${RESET}  ] os configured successfully"
+
+# Purge ifupdown
+
+# ifupdown will conflict with Network-Manager if
+#   both are installed. Comment out all configuration
+#   from `/etc/network/interfaces`.
+
 echo
-echo ">>> Configuring the operating-system"
-echo ">>> Ensuring wifi availability without hdmi-output"
-G_CONFIG_INJECT 'hdmi_force_hotplug=' 'hdmi_force_hotplug=1' /boot/config.txt
-G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
-echo -e "[  ${GREEN}OK${RESET}  ] os configured successfully"
+echo ">>> Purging ifupdown"
+
+if systemctl is-active --quiet ifupdown; then
+    systemctl stop ifupdown
+    systemctl disable ifupdown
+fi
+
+apt-get purge -y ifupdown
+sed -i '/^[[:space:]]*[^#[:space:]]/s/^/# /' /etc/network/interfaces
+echo -e "[  ${GREEN}OK${RESET}  ] ifupdown purged successfully"
+
+# Setup network-manager
+
+# Network-manager should manage all network devices,
+#   even those configured within `/etc/network/interfaces`.
+
+echo
+echo ">>> Setting up network-manager"
+sed -i '/^\[ifupdown\]/,/^\[/s/managed=false/managed=true/' /etc/NetworkManager/NetworkManager.conf
+systemctl enable NetworkManager
+systemctl restart NetworkManager
+nmcli networking on
+echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
+
+# Setup dnsmasq
+echo
+echo ">>> Setting up dnsmasq"
+systemctl disable dnsmasq
+echo -e "[  ${GREEN}OK${RESET}  ] dnsmasq setup successfully"
+
+# Configure alsa
+echo
+echo ">>> Configuring alsa"
+SOUNDCARD=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+echo ">>> Assigning {$SOUNDCARD} as the default soundcard"
+/boot/dietpi/func/dietpi-set_hardware soundcard $SOUNDCARD
+echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
 
 # Set up the autostart script
 echo
