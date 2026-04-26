@@ -1,11 +1,12 @@
 """ Network interfaces """
 
-from typing_extensions import Union, Literal, Dict, List
 import asyncio
 import socket
-import netifaces
-import uuid
 import subprocess
+import uuid
+
+import netifaces
+from typing_extensions import Dict, List, Literal, Union
 
 from audera.services import platform
 

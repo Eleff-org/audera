@@ -1,8 +1,10 @@
 """ Access point management """
 
-from typing_extensions import Literal
 import subprocess
 import time
+
+from typing_extensions import Literal
+
 from audera import models
 from audera.services import netifaces, platform
 

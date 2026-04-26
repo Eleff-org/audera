@@ -1,100 +1,59 @@
-# Audera Agent Guidelines
+# AGENTS.md
 
-## Build/Lint/Test Commands
+This file provides guidance to coding agents when working with code in this repository. For project status, migration history, planned workstreams, and release milestones, see `PROJECT.md`.
 
-### Building
-- Install package: `pip install .`
-- Install in development mode: `pip install -e .`
+## Commands
 
-### Linting
-- Run flake8: `flake8`
-- Configuration: max-line-length = 129
+```bash
+uv sync --all-extras        # install all dependencies including dev
+uv run ruff check --fix     # lint (max-line-length = 129)
+uv run ruff format          # format
+uv run ty check             # type check
+uv run python testing.py    # run ad-hoc tests (no formal test framework)
+uv run pytest tests/dal/ -v                          # DAL tests (no Docker required)
+uv run pytest tests/services/test_snapserver.py -v  # requires Docker
+uv run pytest tests/services/ -v                     # all service tests
+uv run pytest -v                                     # everything
+pre-commit install          # install git hooks (run once after clone)
+pre-commit run --all-files  # run all hooks manually
+```
 
-### Testing
-- Run test files: `python testing.py` or `python testing_2.py`
-- No formal test framework configured (pytest/unittest not in requirements)
+Install as a tool directly from GitHub:
+```bash
+uv tool install git+https://github.com/Eleff-org/audera.git
+```
 
-## Code Style Guidelines
+## Package layout
 
-### Imports
-- Use absolute imports: `from audera import module`
-- Group imports: standard library, third-party, local
-- Use `from __future__ import annotations` for forward references
+List @audera/ for the Python package layout.
 
-### Type Hints
-- Use comprehensive type annotations
-- Use `Literal` for constrained values: `Literal[1, 2]`
-- Use `Union`/`Optional` for complex types
-- Type hint all function parameters and return values
+## Services
 
-### Naming Conventions
-- Functions/variables: `snake_case`
-- Classes: `PascalCase`
-- Constants: `UPPER_CASE`
-- Private members: `_leading_underscore`
+- **SnapserverClient** (`services/snapserver.py`): JSON-RPC 2.0 over WebSocket at `ws://host:1780/jsonrpc` (HTTP server port). Opens a new connection per call. Methods: `get_status`, `get_clients`, `get_groups`, `set_client_volume`, `set_group_stream`, `set_group_mute`.
+- **CamillaDSPClient** (`services/camilladsp.py`): WebSocket at `ws://host:1234`. Methods: `get_config`, `set_config`, `get_volume`, `set_volume`.
+- **PlexAmpClient** (`services/plexamp.py`): HTTP at `http://host:32500` via `httpx`. Methods: `get_sessions`, `get_now_playing`, `play`, `pause`, `skip`.
 
-### Documentation
-- Use Google-style docstrings
-- Document all classes, methods, and functions
-- Include parameter descriptions with types
-- Include return value descriptions
+## Data models
 
-### Code Structure
-- Use dataclasses for structured data: `@dataclass`
-- Implement `from_dict()` and `to_dict()` methods for serialization
-- Use `__post_init__()` for dataclass initialization logic
-- Implement `__repr__()` with JSON formatting
-- Implement `__eq__()` for comparison
+All models are `@dataclass` with `from_dict()` / `from_config()` / `to_dict()` / `__repr__()` (JSON) / `__eq__()`.
 
-### Error Handling
-- Use specific exception types (TypeError, KeyError, ValueError)
-- Provide descriptive error messages
-- Validate input parameters
+- `Player` — Snapcast client: `id, host, port, connected, volume, muted, group_id`
+- `Group` — Snapcast group: `id, name, client_ids, stream_id, muted, volume`
+- `Stream` — Plex-Amp stream: `id, name, uri, status, current_track`
+- `DSPConfig` — CamillaDSP pipeline: `id, player_id, pipeline (dict), enabled`
 
-### Formatting
-- Max line length: 129 characters
-- Use 4 spaces for indentation
-- Use single quotes for strings unless containing single quotes
-- Use f-strings for string formatting
+`Player.group_id` and `Group.stream_id` are empty strings (not `None`) when unassigned — required by the pytensils `'str'` DTYPES constraint.
 
-### Best Practices
-- Use type checking with `isinstance()`
-- Use list comprehensions for simple transformations
-- Use context managers where appropriate
-- Avoid global state when possible
-- Use meaningful variable names
-- Keep functions focused and single-purpose
+## DAL
 
-## Orchestrator Usage
-- **Import**: `from audera import orchestrator`
-- **Purpose**: Isolate critical tasks from blocking the main event loop
-- **Key Features**:
-  - Thread/process pool execution
-  - Automatic retry on failure
-  - Configurable timeouts
-  - Comprehensive logging
-- **Usage Patterns**:
-  - **Synchronous execution**:
-    ```python
-    orchestrator = audera.orchestrator.Orchestrator(logger=logger)
-    result = orchestrator.run(
-        task_id="unique_task_id",
-        func=critical_function,
-        restart_on_failure=True,
-        timeout=30.0,
-        pool_type="thread"
-    )
-    ```
-  - **Asynchronous execution** (for coroutines):
-    ```python
-    result = await orchestrator.arun(
-        task_id="unique_task_id",
-        coro_func=async_critical_function,
-        restart_on_failure=True,
-        timeout=30.0,
-        pool_type="thread"
-    )
-    ```
-- **Integration**:
-  - `streamer.py`: NTP synchronization, audio streaming, and timing-critical mDNS browsing with player synchronization (blocking I/O and precision timing)
-  - `player.py`: Audio playback, timing-critical streamer synchronization, mDNS broadcasting, audio stream receiving, and deprecated shairport-sync service monitoring (blocking I/O, precision timing, network I/O, and subprocess management)
+- `players`, `groups`, `streams` use `pytensils.config.Handler` + DuckDB for bulk queries via `read_json_auto`.
+- `dsp` uses plain `json` — the pipeline dict is too complex for DTYPES validation.
+- Config files: `~/.audera/{players,groups,streams,dsp}/{id}.json`
+
+## Code style
+
+- Type-hint all parameters and return values; use `Literal` for constrained string values
+- Google-style docstrings
+- `snake_case` functions/variables, `PascalCase` classes, `UPPER_CASE` constants, `_leading_underscore` private
+- Single quotes unless the string contains a single quote; f-strings for formatting
+- 4-space indentation, 129-character line limit

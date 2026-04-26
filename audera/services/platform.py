@@ -1,9 +1,10 @@
 """ Operating-system management """
 
-from typing import Callable, Literal
 import os
-import dotenv
 import platform
+from typing import Callable, Literal
+
+import dotenv
 
 # Load the dietpi os environment
 dotenv.load_dotenv('/boot/dietpi/.version')

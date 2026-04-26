@@ -1,8 +1,9 @@
 """ Command-line utility """
 
-import sys
-import errno
 import argparse
+import errno
+import sys
+
 from audera.cli import commands
 
 
@@ -49,9 +50,28 @@ def main():
         'type_',
         help="The type of `audera` service.",
         type=str,
-        choices=['streamer', 'player']
+        choices=['streamer-server', 'player-server', 'player-setup']
     )
     _RUN_ARG_PARSER.set_defaults(func=commands.run)
+
+    # Setup `conf` command CLI argument option(s)
+    _CONF_ARG_PARSER = _ARG_SUBPARSER.add_parser(
+        name='conf',
+        help='Prints a bundled config file to stdout.',
+        epilog="Execute `audera conf --help` for help."
+    )
+    _CONF_ARG_PARSER.add_argument(
+        'role',
+        help="The audera device role.",
+        type=str,
+        choices=['streamer', 'player']
+    )
+    _CONF_ARG_PARSER.add_argument(
+        'filename',
+        help="The config file name.",
+        type=str
+    )
+    _CONF_ARG_PARSER.set_defaults(func=commands.conf)
 
     # Parse arguments
     _ARGS = _ARG_PARSER.parse_args()

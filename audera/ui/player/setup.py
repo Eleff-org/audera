@@ -1,9 +1,10 @@
 """ Remote audio output player setup """
 
-from typing_extensions import Union, Dict, List
 import os
 import time
+
 from nicegui import app, ui
+from typing_extensions import Dict, List, Union
 
 import audera
 

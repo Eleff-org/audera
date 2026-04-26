@@ -1,0 +1,19 @@
+---
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,1"
+    format: S32LE
+    # snapclient writes to hw:Loopback,0 at 48000:32:2; this paired device reads it
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:0,0"
+    format: S32LE
+
+filters: {}
+
+pipeline: []

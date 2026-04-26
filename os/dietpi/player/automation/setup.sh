@@ -8,7 +8,6 @@ source "/boot/dietpi/func/dietpi-globals"
 
 # Setup color formatting
 RED='\033[0;31m'
-YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 RESET='\033[0m'
 
@@ -20,14 +19,15 @@ else
 fi
 
 # Variables
-GIT_REPO_URL="https://github.com/thomaseleff/audera.git"
-WORKSPACE="/home/dietpi/audera"
-SHAIRPORT_CONFIG="/usr/local/etc/shairport-sync.conf"
-REPO_SHAIRPORT_CONFIG="$WORKSPACE/os/dietpi/player/conf/shairport-sync.conf"
+GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
+CAMILLADSP_VERSION="2.0.3"
+CAMILLADSP_ARCHIVE="camilladsp-linux-aarch64.tar.gz"
+CAMILLADSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CAMILLADSP_VERSION}/${CAMILLADSP_ARCHIVE}"
+CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
+CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
 
 AUTOSTART_DIRECTORY="/var/lib/dietpi/dietpi-autostart"
 AUTOSTART_SCRIPT="$AUTOSTART_DIRECTORY/custom.sh"
-REPO_AUTOSTART_SCRIPT="$WORKSPACE/os/dietpi/player/automation/autostart.sh"
 
 # Start console logging
 
@@ -44,12 +44,12 @@ echo '    \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__| '
 echo
 echo ">>> Running the Audera player setup & installation..."
 echo
-echo "    Script source {https://raw.githubusercontent.com/thomaseleff/audera/refs/heads/main/os/dietpi/player/automation/setup.sh}."
+echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/refs/heads/main/os/dietpi/player/automation/setup.sh}."
 
 # Ensure the script is running as root
 echo
 if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}*** CRITICAL: The setup-script must be run as {sudo}.${RESET}" 
+    echo -e "${RED}*** CRITICAL: The setup-script must be run as {sudo}.${RESET}"
     exit 1
 fi
 
@@ -60,61 +60,90 @@ apt-get install -y \
     network-manager \
     dnsmasq \
     alsa-utils \
-    ffmpeg \
-    shairport-sync-airplay2 \
-    git \
+    snapclient \
+    wget \
+    curl \
     python3.11 \
-    python3-venv \
-    python3-pip \
     python3-dev \
-    build-essential \
-    python3-pyaudio \
-    portaudio19-dev \
-    cmake
+    build-essential
 echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 
-# Clone the git repository
+# Load ALSA loopback module (needed for CamillaDSP ↔ Snapclient audio path)
+# index=7 keeps the loopback off hw:0 so physical card indices are stable
 echo
-if [ ! -d "$WORKSPACE" ]; then
-    echo ">>> Cloning the Git repository"
-    git clone -b "$GIT_BRANCH" "$GIT_REPO_URL" "$WORKSPACE"
-else
-    echo ">>> Pulling the Git repository"
-    cd "$WORKSPACE" && git pull origin "$GIT_BRANCH"
-fi
-echo -e "[  ${GREEN}OK${RESET}  ] Git repository created successfully"
+echo ">>> Enabling ALSA loopback module"
+echo "options snd-aloop index=7" > /etc/modprobe.d/snd-aloop.conf
+echo "snd-aloop" > /etc/modules-load.d/snd-aloop.conf
+modprobe snd-aloop
+echo -e "[  ${GREEN}OK${RESET}  ] ALSA loopback module enabled"
 
-# Replace shairport-sync configuration with the file from the repository
+# Install CamillaDSP
 echo
-echo ">>> Creating the shairport-sync configuration"
-cp "$REPO_SHAIRPORT_CONFIG" "$SHAIRPORT_CONFIG"
-chmod 644 "$SHAIRPORT_CONFIG"
-echo -e "[  ${GREEN}OK${RESET}  ] shairport-sync configured successfully"
+echo ">>> Installing CamillaDSP v${CAMILLADSP_VERSION}"
+wget -q "$CAMILLADSP_URL" -O "/tmp/${CAMILLADSP_ARCHIVE}"
+tar -xzf "/tmp/${CAMILLADSP_ARCHIVE}" -C /usr/local/bin/
+chmod +x /usr/local/bin/camilladsp
+rm "/tmp/${CAMILLADSP_ARCHIVE}"
+mkdir -p "$CAMILLADSP_CONFIG_DIR"
+echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP installed successfully"
 
-# Create the Python virtual environment
+# Install uv
 echo
-if [ ! -d "$WORKSPACE/.venv" ]; then
-    echo ">>> Creating the Python virtual env {$WORKSPACE/.venv}"
-    python3 -m venv "$WORKSPACE/.venv"
-    echo ">>> Activating the Python virtual env"
-    source "$WORKSPACE/.venv/bin/activate"
-else
-    echo ">>> Activating the Python virtual env"
-    source "$WORKSPACE/.venv/bin/activate"
+echo ">>> Installing uv"
+if ! command -v uv &> /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 fi
-echo -e "[  ${GREEN}OK${RESET}  ] Python virtual env created successfully"
+echo -e "[  ${GREEN}OK${RESET}  ] uv installed successfully"
 
-# Install Python requirements
+# Install audera CLI
 echo
-if [ -f "$WORKSPACE/requirements.txt" ]; then
-    echo ">>> Installing the Python requirements"
-    python3 -m pip install --upgrade pip
-    pip3 install -e "$WORKSPACE"
-else
-    echo -e "${RED} ** ERROR: Failed to build & install audera.${RESET}"
-    exit 1
-fi
-echo -e "[  ${GREEN}OK${RESET}  ] Python requirements installed successfully"
+echo ">>> Installing audera"
+UV_TOOL_BIN_DIR=/usr/local/bin uv tool install "git+${GIT_REPO_URL}@${GIT_BRANCH}"
+echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
+
+# Write CamillaDSP configuration
+echo
+echo ">>> Creating the CamillaDSP configuration"
+audera conf player camilladsp.yml > "$CAMILLADSP_CONFIG"
+chmod 644 "$CAMILLADSP_CONFIG"
+echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
+
+# Install systemd service units
+echo
+echo ">>> Installing systemd service units"
+
+# snapclient service — outputs to ALSA loopback; CamillaDSP reads from the paired device
+cat > /etc/systemd/system/snapclient.service <<EOF
+[Unit]
+Description=Snapcast client
+After=network.target sound.target
+
+[Service]
+ExecStart=/usr/bin/snapclient --soundcard hw:Loopback,0 --sampleformat 48000:32:2
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# camilladsp service — captures from ALSA loopback, plays to physical DAC (hw:0)
+cat > /etc/systemd/system/camilladsp.service <<EOF
+[Unit]
+Description=CamillaDSP
+After=sound.target snapclient.service
+
+[Service]
+ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG -p 1234
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable snapclient camilladsp
+systemctl start snapclient camilladsp
+echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
 echo
@@ -171,15 +200,18 @@ echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
 
 # Set up the autostart script
 echo
-if [ ! -d "$AUTOSTART_DIRECTORY" ]; then
-    echo ">>> Creating the custom autostart directory"
-    mkdir "$AUTOSTART_DIRECTORY"
-    echo ">>> Creating the custom autostart script"
-    cp "$REPO_AUTOSTART_SCRIPT" "$AUTOSTART_SCRIPT"
-    chmod +x "$AUTOSTART_SCRIPT"
-else
-    echo -e "${YELLOW}  * WARNING: Autostart script already exists.${RESET}"
-fi
+echo ">>> Creating the custom autostart script"
+mkdir -p "$AUTOSTART_DIRECTORY"
+cat > "$AUTOSTART_SCRIPT" <<'EOF'
+#!/bin/bash
+# DietPi-AutoStart custom script
+# Location: /var/lib/dietpi/dietpi-autostart/custom.sh
+
+set -e
+
+exec audera run player-server
+EOF
+chmod +x "$AUTOSTART_SCRIPT"
 echo -e "[  ${GREEN}OK${RESET}  ] Custom autostart script created successfully"
 
 # Log

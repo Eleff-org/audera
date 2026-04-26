@@ -1,28 +1,28 @@
 """ Audera commands """
 
+import importlib.resources
+import sys
 from typing import Literal
-import asyncio
-from audera import player, streamer, ui
+
 from audera.services import netifaces
 
 
-# Define audera sub-command function(s)
 def run(
-    type_: Literal['streamer', 'player']
+    type_: Literal['streamer-server', 'player-server', 'player-setup']
 ):
-    """ Runs an `audera` async service.
+    """ Runs an `audera` service.
 
     Parameters
     ----------
-    type_ : `Literal['streamer', 'player']`
+    type_ : `Literal['streamer-server', 'player-server', 'player-setup']`
         The type of `audera` service.
 
     Help
     ----
-    usage: audera run [-h] {streamer,player}
+    usage: audera run [-h] {streamer-server,player-server,player-setup}
 
     positional arguments:
-    {streamer,player}  The type of `audera` service.
+    {streamer-server,player-server,player-setup}  The type of `audera` service.
 
     options:
     -h, --help       show this help message and exit
@@ -32,37 +32,60 @@ def run(
     Examples
     --------
     ``` console
-    audera run streamer
+    audera run streamer-server
     ```
 
     """
-    if type_.strip().lower() not in ['streamer', 'player']:
+    type_ = type_.strip().lower()
+
+    if type_ not in ['streamer-server', 'player-server', 'player-setup']:
         raise NotImplementedError
 
-    if type_.strip().lower() == 'streamer':
+    if type_ == 'streamer-server':
+        from audera.server.streamer import app
+        app.run()
 
-        # Initialize the streamer service
-        service = streamer.Service()
-
-    if type_.strip().lower() == 'player':
-
-        # Initialize the remote audio output player setup
+    elif type_ == 'player-server':
         if not netifaces.connected():
-            ui.player.setup.run()
+            from audera.ui.player import setup
+            setup.run()
+        from audera.server.player import app
+        app.run()
 
-        # Initialize the remote audio output player service
-        service = player.Service()
+    elif type_ == 'player-setup':
+        from audera.ui.player import setup
+        setup.run()
 
-    # Run services
-    try:
-        asyncio.run(service.run())
 
-    except KeyboardInterrupt:
+def conf(role: Literal['streamer', 'player'], filename: str) -> None:
+    """ Prints a bundled config file to stdout.
 
-        # Logging
-        service.logger.info("Shutting down the services...")
+    Parameters
+    ----------
+    role : `Literal['streamer', 'player']`
+        The audera device role.
+    filename : `str`
+        The config file name within the role directory.
 
-    finally:
+    Help
+    ----
+    usage: audera conf [-h] {streamer,player} filename
 
-        # Logging
-        service.logger.info('The services exited successfully.')
+    positional arguments:
+    {streamer,player}  The audera device role.
+    filename           The config file name.
+
+    options:
+    -h, --help       show this help message and exit
+
+    Execute `audera conf --help` for help.
+
+    Examples
+    --------
+    ``` console
+    audera conf streamer camilladsp.yml > /etc/camilladsp/config.yml
+    ```
+
+    """
+    ref = importlib.resources.files('audera').joinpath('conf').joinpath(role).joinpath(filename)
+    sys.stdout.write(ref.read_text(encoding='utf-8'))

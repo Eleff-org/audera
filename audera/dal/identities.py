@@ -1,11 +1,12 @@
 """ Identity configuration-layer """
 
-from typing import Union
 import os
-from pytensils import config
-from audera.models import identity
-from audera.dal import path
+from typing import Union
 
+from pytensils import config
+
+from audera.dal import path
+from audera.models import identity
 
 PATH: Union[str, os.PathLike] = path.HOME
 FILE_NAME: str = 'identity.json'

@@ -1,10 +1,12 @@
 """ Remote audio device identity """
 
 from __future__ import annotations
-from dataclasses import dataclass
-import coolname
-import uuid
+
 import json
+import uuid
+from dataclasses import dataclass
+
+import coolname
 from pytensils import config
 
 

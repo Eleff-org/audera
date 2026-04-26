@@ -6,48 +6,62 @@
        \ \__\ \__\ \______/\ \______/\ \______\ \__\\ _\\ \__\ \__\
         \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__|
 
-`alpha-release` coming soon!
+`Audera` is a new era of composable audio systems that brings open-protocols to your own hardware for multi-room synchronous playback, built on [Plex-Amp](https://www.plex.tv/plexamp/) (headless), [Snapcast](https://github.com/badaix/snapcast), and [CamillaDSP](https://github.com/HEnquist/camilladsp).
 
-`audera` is an open-source multi-room audio streaming system written in Python for DIY home audio enthusiasts.
+## Architecture
 
-## Getting-started
-Check out the `audera` docs for more information on the types of deployment architectures and details on how the streamer and player applications work.
+| Service | Role | Port |
+|---|---|---|
+| **Plex-Amp** (headless) | Music source / playback queue | 32500 (HTTP) |
+| **Snapserver / Snapclient** | Synchronized multi-room audio distribution | 1704 (audio), 1705 (JSON-RPC WS) |
+| **CamillaDSP** | Per-device DSP pipeline (EQ, room correction) | 1234 (WebSocket) |
 
-- [Deployment architectures](./docs/deployment-architectures/README.md)
-- [How-it-works](./docs/how-it-works/README.md)
+### Devices
+
+**Server** — one per system (or zone)
+- Runs Plex-Amp (headless), Snapserver, Snapclient, and CamillaDSP
+- Hosts the Audera webserver at `https://audera.local` — manages volume and mute for all connected players
+- CamillaDSP sits in the Snapclient audio path so each device DSPs independently
+
+**Player** — one per room
+- Runs Snapclient and CamillaDSP
+- Connects to the server automatically on boot; managed via the server webserver
+- No local webserver required
 
 ## Installation
-The source code is available on [GitHub](https://github.com/thomaseleff/audera).
 
-`audera` can be installed via Github from the command-line.
+Audera is designed for [DietPi](https://dietpi.com/) on Raspberry Pi hardware. Setup scripts are provided for both device types.
 
-1. Setup a Python developer environment. `audera` supports Python versions >= 3.11.
-2. From the command-line, run,
+### Server
 
+1. Flash DietPi to an SD card and copy `os/dietpi/streamer/dietpi.txt` to the boot partition.
+2. Boot the device and SSH in as `root`.
+3. Run the setup script, optionally passing a branch name (defaults to `main`):
+
+   ```bash
+   sudo bash os/dietpi/streamer/automation/setup.sh [branch]
    ```
-   # Via Github
-   git clone -b main https://github.com/thomaseleff/audera.git
+
+### Player
+
+1. Flash DietPi to an SD card and copy `os/dietpi/player/dietpi.txt` to the boot partition.
+2. Boot the device and SSH in as `root`.
+3. Run the setup script, optionally passing a branch name (defaults to `main`):
+
+   ```bash
+   sudo bash os/dietpi/player/automation/setup.sh [branch]
    ```
 
-3. Navigate into the cloned repository directory and install via pip,
+## Development
 
-   ```
-   pip install .
-   ```
+`audera` supports Python >= 3.11. To install from source:
+
+```bash
+git clone -b main https://github.com/Eleff-org/audera.git
+cd audera
+pip install -e .
+```
 
 ## Roadmap
-Upcoming enhancements / fixes in priority order. Open an [issue](https://github.com/thomaseleff/audera/issues/new) to request a feature or fix.
 
-- [x] Access point Wi-Fi sharing
-- [ ] Digital sound processing (DSP)
-- [ ] Audera streamer (Bluetooth input-only)
-- [ ] Audera streamer Wi-Fi sharing setup
-- [ ] Audera streamer web-interface
-  - [ ] Managing players / player groups and playback sessions
-  - [ ] Streamer settings
-  - [ ] Danger zone OTT updates
-
-#### Misc. improvements
-- [ ] FLAC encoding / decoding with ffmpeg
-- [ ] Multi-player sync optimization
-- [ ] Event tracking (logins / sessions / errors, etc..)
+See [PROJECT.md](./PROJECT.md) for current status, planned workstreams, and release milestones.
