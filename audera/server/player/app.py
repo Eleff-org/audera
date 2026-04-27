@@ -1,6 +1,6 @@
 """Audera player FastAPI server"""
 
-import socket
+import subprocess
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -49,10 +49,14 @@ def health():
 @app.get('/ready')
 def ready():
     try:
-        with socket.create_connection(('localhost', audera.SNAPCLIENT_PORT), timeout=1.0):
-            pass
-        return {'status': 'ready'}
-    except OSError:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'snapclient'],
+            capture_output=True, text=True, timeout=2.0
+        )
+        if result.stdout.strip() == 'active':
+            return {'status': 'ready'}
+        return JSONResponse(status_code=503, content={'status': 'unavailable'})
+    except Exception:
         return JSONResponse(status_code=503, content={'status': 'unavailable'})
 
 
