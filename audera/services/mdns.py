@@ -4,6 +4,7 @@ import socket
 from typing import Dict, List
 
 from zeroconf import ServiceBrowser, ServiceInfo, ServiceStateChange, Zeroconf
+from zeroconf.asyncio import AsyncServiceInfo, AsyncZeroconf
 
 import audera
 from audera.models.identity import Identity
@@ -27,14 +28,12 @@ class PlayerBroadcaster:
     def __init__(self, identity: Identity, port: int):
         self.identity = identity
         self.port = port
-        self.zc = Zeroconf()
 
     @property
     def registered_name(self) -> str:
         return '%s.%s' % (self.identity.name, SERVICE_TYPE)
 
-    @property
-    def info(self) -> ServiceInfo:
+    def _make_info(self) -> ServiceInfo:
         return ServiceInfo(
             type_=SERVICE_TYPE,
             name=self.registered_name,
@@ -46,36 +45,74 @@ class PlayerBroadcaster:
             },
         )
 
+    def _make_async_info(self) -> AsyncServiceInfo:
+        return AsyncServiceInfo(
+            type_=SERVICE_TYPE,
+            name=self.registered_name,
+            addresses=[socket.inet_aton(self.identity.address)],
+            port=self.port,
+            properties={
+                'uuid': self.identity.uuid,
+                'name': self.identity.name,
+            },
+        )
+
     def start(self):
-        """Registers the mDNS service."""
+        """Registers the mDNS service (sync, for use outside an event loop)."""
+        zc = Zeroconf()
         try:
-            self.zc.register_service(self.info)
+            zc.register_service(self._make_info())
             _logger.info(
                 'mDNS service {%s} registered at {%s:%s}.'
-                % (
-                    SERVICE_TYPE,
-                    self.identity.address,
-                    self.port,
-                )
+                % (SERVICE_TYPE, self.identity.address, self.port)
             )
         except Exception as e:
             _logger.error(
                 '[%s] mDNS service {%s} registration failed. %s.'
-                % (
-                    type(e).__name__,
-                    SERVICE_TYPE,
-                    str(e),
-                )
+                % (type(e).__name__, SERVICE_TYPE, str(e))
             )
+        finally:
+            self._sync_zc = zc
 
     def stop(self):
-        """Unregisters the mDNS service and closes the Zeroconf instance."""
+        """Unregisters the mDNS service (sync, for use outside an event loop)."""
+        zc = getattr(self, '_sync_zc', None)
+        if zc is None:
+            return
         try:
-            self.zc.unregister_service(self.info)
+            zc.unregister_service(self._make_info())
         except Exception:
             pass
         finally:
-            self.zc.close()
+            zc.close()
+            _logger.info('mDNS service {%s} unregistered.' % SERVICE_TYPE)
+
+    async def async_start(self):
+        """Registers the mDNS service (async, for use inside a running event loop)."""
+        self._async_zc = AsyncZeroconf()
+        try:
+            await self._async_zc.async_register_service(self._make_async_info())
+            _logger.info(
+                'mDNS service {%s} registered at {%s:%s}.'
+                % (SERVICE_TYPE, self.identity.address, self.port)
+            )
+        except Exception as e:
+            _logger.error(
+                '[%s] mDNS service {%s} registration failed. %s.'
+                % (type(e).__name__, SERVICE_TYPE, str(e))
+            )
+
+    async def async_stop(self):
+        """Unregisters the mDNS service (async, for use inside a running event loop)."""
+        zc = getattr(self, '_async_zc', None)
+        if zc is None:
+            return
+        try:
+            await zc.async_unregister_service(self._make_async_info())
+        except Exception:
+            pass
+        finally:
+            await zc.async_close()
             _logger.info('mDNS service {%s} unregistered.' % SERVICE_TYPE)
 
 

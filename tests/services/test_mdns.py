@@ -1,6 +1,6 @@
 """Integration tests for audera.services.mdns"""
 
-import time
+import asyncio
 
 import pytest
 
@@ -24,11 +24,12 @@ def discovery():
     d.close()
 
 
-def test_broadcaster_registers_and_discovery_finds_player(discovery):
+@pytest.mark.asyncio
+async def test_broadcaster_registers_and_discovery_finds_player(discovery):
     broadcaster = PlayerBroadcaster(identity=_IDENTITY, port=_PORT)
-    broadcaster.start()
+    await broadcaster.async_start()
     try:
-        time.sleep(2.0)
+        await asyncio.sleep(2.0)
         players = discovery.get_players()
         match = next((p for p in players if p[0] == 'test-player'), None)
         assert match is not None
@@ -36,15 +37,16 @@ def test_broadcaster_registers_and_discovery_finds_player(discovery):
         assert ip == '127.0.0.1'
         assert port == _PORT
     finally:
-        broadcaster.stop()
+        await broadcaster.async_stop()
 
 
-def test_broadcaster_stop_removes_player_from_discovery(discovery):
+@pytest.mark.asyncio
+async def test_broadcaster_stop_removes_player_from_discovery(discovery):
     broadcaster = PlayerBroadcaster(identity=_IDENTITY, port=_PORT)
-    broadcaster.start()
-    time.sleep(2.0)
-    broadcaster.stop()
-    time.sleep(2.0)
+    await broadcaster.async_start()
+    await asyncio.sleep(2.0)
+    await broadcaster.async_stop()
+    await asyncio.sleep(2.0)
     players = discovery.get_players()
     names = [name for name, _ip, _port in players]
     assert 'test-player' not in names

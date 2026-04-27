@@ -33,9 +33,9 @@ async def lifespan(app: FastAPI):
             pass
 
     broadcaster = PlayerBroadcaster(identity=identity, port=audera.PLAYER_PORT)
-    broadcaster.start()
+    await broadcaster.async_start()
     yield
-    broadcaster.stop()
+    await broadcaster.async_stop()
 
 
 app = FastAPI(lifespan=lifespan)
