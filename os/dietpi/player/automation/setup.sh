@@ -63,6 +63,7 @@ apt-get install -y \
     network-manager \
     dnsmasq \
     alsa-utils \
+    avahi-daemon \
     snapclient \
     python3.13 \
     python3-dev \
@@ -119,10 +120,11 @@ echo ">>> Installing systemd service units"
 cat > /etc/systemd/system/snapclient.service <<EOF
 [Unit]
 Description=Snapcast client
-After=network.target sound.target
+Wants=avahi-daemon.service
+After=network-online.target time-sync.target sound.target avahi-daemon.service
 
 [Service]
-ExecStart=/usr/bin/snapclient --soundcard hw:Loopback,0 --sampleformat 48000:32:2
+ExecStart=/usr/bin/snapclient --soundcard hw:Loopback,0 --sampleformat 48000:32:*
 Restart=on-failure
 
 [Install]
