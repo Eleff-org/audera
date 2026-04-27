@@ -74,7 +74,8 @@ apt-get install -y \
     snapclient \
     python3.13 \
     python3-dev \
-    build-essential && \
+    build-essential \
+    jq && \
 apt-get clean && \
 rm -rf /var/lib/apt/lists/*
 echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
@@ -115,7 +116,12 @@ echo -e "[  ${GREEN}OK${RESET}  ] Node.js installed successfully"
 
 echo
 echo ">>> Installing PlexAmp headless"
-wget --show-progress "https://plexamp.plex.tv/headless/Plexamp-Linux-headless-latest.tar.bz2" -O /tmp/plexamp.tar.bz2
+PLEXAMP_URL=$(curl -s "https://plexamp.plex.tv/headless/version.json" | jq -r '.updateUrl')
+if [ -z "$PLEXAMP_URL" ] || [ "$PLEXAMP_URL" = "null" ]; then
+    echo -e "[  ${RED}FAIL${RESET}  ] Failed to fetch PlexAmp download URL"
+    exit 1
+fi
+wget --show-progress "$PLEXAMP_URL" -O /tmp/plexamp.tar.bz2
 tar -xjf /tmp/plexamp.tar.bz2 -C /opt/
 rm /tmp/plexamp.tar.bz2
 echo -e "[  ${GREEN}OK${RESET}  ] PlexAmp headless installed successfully"
