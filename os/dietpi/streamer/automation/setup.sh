@@ -67,6 +67,7 @@ apt-get install -y \
     dnsmasq \
     alsa-utils \
     avahi-daemon \
+    avahi-utils \
     nginx \
     openssl \
     snapserver \
@@ -105,6 +106,20 @@ if ! command -v uv &> /dev/null; then
 fi
 echo -e "[  ${GREEN}OK${RESET}  ] uv installed successfully"
 
+# Install Node.js
+echo
+echo ">>> Installing Node.js"
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs
+echo -e "[  ${GREEN}OK${RESET}  ] Node.js installed successfully"
+
+echo
+echo ">>> Installing PlexAmp headless"
+wget -q "https://plexamp.plex.tv/headless/Plexamp-Linux-headless-latest.tar.bz2" -O /tmp/plexamp.tar.bz2
+tar -xjf /tmp/plexamp.tar.bz2 -C /opt/
+rm /tmp/plexamp.tar.bz2
+echo -e "[  ${GREEN}OK${RESET}  ] PlexAmp headless installed successfully"
+
 # Install audera CLI
 echo
 echo ">>> Installing audera"
@@ -132,6 +147,16 @@ echo ">>> Creating the CamillaDSP configuration"
 audera conf streamer camilladsp.yml > "$CAMILLADSP_CONFIG"
 chmod 644 "$CAMILLADSP_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
+
+# Create plexamp-mdns helper
+echo
+echo ">>> Creating plexamp-mdns helper"
+cat > /usr/local/bin/plexamp-mdns.sh <<'EOF'
+#!/bin/bash
+exec avahi-publish -a -R plexamp.local $(hostname -I | awk '{print $1}')
+EOF
+chmod +x /usr/local/bin/plexamp-mdns.sh
+echo -e "[  ${GREEN}OK${RESET}  ] plexamp-mdns helper created"
 
 # Install systemd service units
 echo
@@ -180,9 +205,38 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 
+# plexamp service
+cat > /etc/systemd/system/plexamp.service <<'EOF'
+[Unit]
+Description=PlexAmp Headless
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/plexamp/js/index.js
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# plexamp-mdns service
+cat > /etc/systemd/system/plexamp-mdns.service <<'EOF'
+[Unit]
+Description=Publish plexamp.local mDNS hostname
+After=avahi-daemon.service network-online.target
+Requires=avahi-daemon.service
+
+[Service]
+ExecStart=/usr/local/bin/plexamp-mdns.sh
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
-systemctl enable snapserver snapclient camilladsp
-systemctl start snapserver snapclient camilladsp
+systemctl enable snapserver snapclient camilladsp plexamp plexamp-mdns
+systemctl start snapserver snapclient camilladsp plexamp plexamp-mdns
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
@@ -240,7 +294,7 @@ openssl req -x509 -newkey rsa:2048 \
     -out /etc/ssl/certs/audera.local.crt \
     -days 3650 -nodes \
     -subj "/CN=audera.local" \
-    -addext "subjectAltName=DNS:audera.local"
+    -addext "subjectAltName=DNS:audera.local,DNS:plexamp.local"
 chmod 600 /etc/ssl/private/audera.local.key
 echo -e "[  ${GREEN}OK${RESET}  ] TLS certificate generated"
 
@@ -257,6 +311,23 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name plexamp.local;
+
+    ssl_certificate     /etc/ssl/certs/audera.local.crt;
+    ssl_certificate_key /etc/ssl/private/audera.local.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:32500;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_http_version 1.1;

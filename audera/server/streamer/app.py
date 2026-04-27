@@ -1,6 +1,9 @@
 """Audera streamer NiceGUI webserver"""
 
 import os
+import re
+import subprocess
+from typing import Optional
 
 from dotenv import load_dotenv
 from nicegui import ui
@@ -24,6 +27,44 @@ def _load_settings() -> Settings:
 
 def _snapserver(settings: Settings) -> SnapserverClient:
     return SnapserverClient(host=settings.snapserver_host, port=audera.SNAPSERVER_PORT)
+
+
+def _plexamp_status() -> str:
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'plexamp'],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip()
+    except Exception:
+        return 'unknown'
+
+
+def _plexamp_claim_url() -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ['journalctl', '-u', 'plexamp', '-n', '200', '--no-pager', '-o', 'cat'],
+            capture_output=True, text=True, timeout=5,
+        )
+        match = re.search(r'https://plex\.tv/claim/\S+', result.stdout)
+        return match.group(0) if match else None
+    except Exception:
+        return None
+
+
+def _build_services_tab():
+    """Renders the Services tab — shows status and claim URL for background services."""
+    status = _plexamp_status()
+    with ui.card().classes('w-full mb-2'):
+        with ui.row().classes('items-center justify-between w-full'):
+            ui.label('PlexAmp Headless').classes('font-medium')
+            ui.label(status).classes('text-sm ' + ('text-green-500' if status == 'active' else 'text-red-500'))
+        claim_url = _plexamp_claim_url()
+        if claim_url:
+            ui.label('Claim this player:').classes('text-sm text-gray-500 mt-1')
+            ui.link(claim_url, claim_url).classes('text-sm break-all')
+        elif status == 'active':
+            ui.link('Open PlexAmp', 'https://plexamp.local').classes('text-sm mt-1')
 
 
 def _build_players_tab(settings_: Settings):
@@ -96,11 +137,14 @@ def index():
 
     with ui.tabs().classes('w-full') as tabs:
         players_tab = ui.tab('Players')
+        services_tab = ui.tab('Services')
         settings_tab = ui.tab('Settings')
 
     with ui.tab_panels(tabs, value=players_tab).classes('w-full'):
         with ui.tab_panel(players_tab):
             _build_players_tab(settings_)
+        with ui.tab_panel(services_tab):
+            _build_services_tab()
         with ui.tab_panel(settings_tab):
             _build_settings_tab(settings_)
 
