@@ -115,7 +115,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] Node.js installed successfully"
 
 echo
 echo ">>> Installing PlexAmp headless"
-wget -q "https://plexamp.plex.tv/headless/Plexamp-Linux-headless-latest.tar.bz2" -O /tmp/plexamp.tar.bz2
+wget --show-progress "https://plexamp.plex.tv/headless/Plexamp-Linux-headless-latest.tar.bz2" -O /tmp/plexamp.tar.bz2
 tar -xjf /tmp/plexamp.tar.bz2 -C /opt/
 rm /tmp/plexamp.tar.bz2
 echo -e "[  ${GREEN}OK${RESET}  ] PlexAmp headless installed successfully"
