@@ -44,7 +44,7 @@ echo '    \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__| '
 echo
 echo ">>> Running the Audera player setup & installation..."
 echo
-echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/refs/heads/main/os/dietpi/player/automation/setup.sh}."
+echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/player/automation/setup.sh}."
 
 # Ensure the script is running as root
 echo

@@ -1,10 +1,10 @@
-"""Integration tests for audera.ui.player.setup"""
+"""Integration tests for audera.server.setup"""
 
 import pytest
 
 import audera.dal.identities as identities
 from audera.models.identity import Identity, generate_uuid_from_mac_address
-from audera.ui.player.setup import Page
+from audera.server.setup import Page
 
 _MAC = 'aa:bb:cc:dd:ee:ff'
 
@@ -49,24 +49,24 @@ def test_page_name_returns_identity_name(page):
     assert page.name == 'test-player'
 
 
-def test_update_player_name_callback_persists_to_disk(page, monkeypatch):
+def test_update_name_callback_persists_to_disk(page, monkeypatch):
     monkeypatch.setattr('nicegui.ui.notify', lambda *a, **kw: None)
-    page.update_player_name_callback('Living Room')
+    page.update_name_callback('Living Room')
     saved = identities.get_identity()
     assert saved.name == 'Living Room'
 
 
-def test_update_player_name_callback_ignores_same_name(page, monkeypatch):
+def test_update_name_callback_ignores_same_name(page, monkeypatch):
     notified = []
     monkeypatch.setattr('nicegui.ui.notify', lambda *a, **kw: notified.append(True))
-    page.update_player_name_callback('test-player')
+    page.update_name_callback('test-player')
     assert not notified
 
 
-def test_update_player_name_callback_ignores_none(page, monkeypatch):
+def test_update_name_callback_ignores_none(page, monkeypatch):
     notified = []
     monkeypatch.setattr('nicegui.ui.notify', lambda *a, **kw: notified.append(True))
-    page.update_player_name_callback(None)
+    page.update_name_callback(None)
     assert not notified
 
 

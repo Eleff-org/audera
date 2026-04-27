@@ -1,4 +1,4 @@
-"""Remote audio output player setup"""
+"""Remote audio device setup — shared between player and streamer roles"""
 
 import os
 import time
@@ -11,14 +11,14 @@ import audera
 
 
 class Page:
-    """A `class` that represents a player setup app.
+    """A `class` that represents a device setup app shared between player and streamer roles.
 
     Parameters
     ----------
-    identity: `audera.struct.identity.Identity`
-        An instance of an `audera.struct.identity.Identity` object.
+    identity: `audera.models.identity.Identity`
+        An instance of an `audera.models.identity.Identity` object.
     role: `Literal['streamer', 'player']`
-        The device role, used to customise page labels.
+        The device role, used to customise page labels and finish-page instructions.
     """
 
     @audera.platform.requires('dietpi')
@@ -27,14 +27,14 @@ class Page:
         identity: audera.models.identity.Identity,
         role: Literal['streamer', 'player'] = 'player',
     ):
-        """Initializes an instance of the player setup app.
+        """Initializes an instance of the device setup app.
 
         Parameters
         ----------
-        identity: `audera.struct.identity.Identity`
-            An instance of an `audera.struct.identity.Identity` object.
+        identity: `audera.models.identity.Identity`
+            An instance of an `audera.models.identity.Identity` object.
         role: `Literal['streamer', 'player']`
-            The device role, used to customise page labels.
+            The device role, used to customise page labels and finish-page instructions.
         """
 
         self.identity = identity
@@ -49,7 +49,7 @@ class Page:
 
         # Initialize access-point
         self.ap = audera.ap.AccessPoint(
-            name=audera.NAME, url='http://player-setup.audera.com', interface='wlan0', identity=identity
+            name=audera.NAME, url='http://%s-setup.audera.com' % role, interface='wlan0', identity=identity
         )
 
         try:
@@ -65,13 +65,13 @@ class Page:
     def available_networks(self):
         return [f'{key} 🔒' if value else key for key, value in self.wifi_networks.items()]
 
-    def update_player_name_callback(self, name: Union[str, None]):
-        """Updates the name of the remote audio output player.
+    def update_name_callback(self, name: Union[str, None]):
+        """Updates the name of the device.
 
         Parameters
         ----------
         name: `Union[str, None]`
-            The new name of the remote audio output player.
+            The new name of the device.
         """
         if name and name != self.identity.name:
             self.identity.name = str(name)
@@ -120,6 +120,19 @@ class Page:
                     ssid=ssid, supported_security_types=self.wifi_networks[ssid], password=password, interface='wlan0'
                 )
                 self.connected_profile = ssid
+
+                # Update the identity with the now-assigned IP address.
+                try:
+                    self.identity = audera.dal.identities.update(
+                        audera.models.identity.Identity(
+                            name=self.identity.name,
+                            uuid=self.identity.uuid,
+                            mac_address=self.identity.mac_address,
+                            address=audera.netifaces.get_local_ip_address(),
+                        )
+                    )
+                except audera.netifaces.NetworkConnectionError:
+                    pass
 
                 ui.notify('Network `%s` connected successfully.' % ssid, position='top-right', type='positive')
 
@@ -229,11 +242,11 @@ class Page:
                     'Utility Room',
                     'She shed',
                 ],
-                validation={'The player name cannot be empty.': lambda value: value is not None},
+                validation={'The %s name cannot be empty.' % self.role: lambda value: value is not None},
             ).props('clearable rounded-md outlined dense').classes('w-full').on(
-                'blur', lambda event: self.update_player_name_callback(event.sender.value)
-            ).on('keyboard.enter', lambda event: self.update_player_name_callback(event.sender.value)).on(
-                'keyboard.down', lambda event: self.update_player_name_callback(event.sender.value)
+                'blur', lambda event: self.update_name_callback(event.sender.value)
+            ).on('keyboard.enter', lambda event: self.update_name_callback(event.sender.value)).on(
+                'keyboard.down', lambda event: self.update_name_callback(event.sender.value)
             )
 
             with ui.row().classes('flex w-full'):
@@ -300,6 +313,14 @@ class Page:
     def finish(self):
         """Returns the finish page content."""
 
+        _finish_instructions: Dict[str, str] = {
+            'player': (
+                'Once your player restarts, connect to your **audera** streamer to start a playback session, or, '
+                'cast directly to your player through any AirPlay enabled device.'
+            ),
+            'streamer': ('Once your streamer restarts, connect your **audera** players to start a playback session.'),
+        }
+
         with ui.row().classes('flex w-full'):
             ui.label('%s \u2014 Finish' % audera.NAME.lower()).classes('self-center text-sm ml-3')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
@@ -311,30 +332,16 @@ class Page:
         # Finish
         with ui.card().classes('mx-auto flex w-full'):
             ui.markdown('🎉 Your %s was set up successfully' % self.role).classes('text-3xl')
-            ui.markdown(
-                """
-                Click **Finish** below to start listening.
-                """
-            )
-            ui.markdown(
-                """
-                Once your player restarts, connect to your **audera** streamer to start a playback session, or,
-                cast directly to your player through any AirPlay enabled device.
-                """
-            )
-            ui.markdown(
-                """
-                To learn more about the **audera** ecosystem, check out the [Github](%s).
-                """
-                % (audera.HOME)
-            )
+            ui.markdown('Click **Finish** below to start listening.')
+            ui.markdown(_finish_instructions[self.role])
+            ui.markdown('To learn more about the **audera** ecosystem, check out the [Github](%s).' % audera.HOME)
 
             with ui.row().classes('flex w-full'):
                 ui.button('Back', on_click=lambda: ui.navigate.to('/connect')).props('flat rounded').classes('normal-case')
                 ui.button('Finish', on_click=self.shutdown).props('rounded').classes('ml-auto normal-case')
 
     def shutdown(self):
-        """Closes the access-point, shutdowns the player setup, app and restarts the player."""
+        """Closes the access-point, shuts down the setup app, and restarts the device."""
         self.ap.stop()
         app.shutdown()
 
@@ -344,27 +351,27 @@ class Page:
 
 
 def run(role: Literal['streamer', 'player'] = 'player'):
-    """Runs the remote audio output player setup for player configuration and Wi-Fi sharing.
+    """Runs the device setup wizard for configuration and Wi-Fi onboarding.
 
     Parameters
     ----------
     role: `Literal['streamer', 'player']`
-        The device role, used to customise page labels.
+        The device role, used to customise page labels and finish-page instructions.
     """
 
     # Initialize identity
     mac_address = audera.netifaces.get_local_mac_address()
     try:
-        player_ip_address = audera.netifaces.get_local_ip_address()
+        ip_address = audera.netifaces.get_local_ip_address()
     except audera.netifaces.NetworkConnectionError:
-        player_ip_address = ''  # The player may not have an ip-address yet
+        ip_address = ''  # The device may not have an ip-address yet during initial setup
 
     identity: audera.models.identity.Identity = audera.dal.identities.update(
         audera.models.identity.Identity(
             name=audera.models.identity.generate_cool_name(),
             uuid=audera.models.identity.generate_uuid_from_mac_address(mac_address),
             mac_address=mac_address,
-            address=player_ip_address,
+            address=ip_address,
         )
     )
 

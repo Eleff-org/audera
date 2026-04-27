@@ -9,12 +9,29 @@ from fastapi.responses import JSONResponse
 
 import audera
 from audera.dal import identities
+from audera.models import identity as identity_models
 from audera.services.mdns import PlayerBroadcaster
+from audera.services.netifaces import NetworkConnectionError, get_local_ip_address
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     identity = identities.get_identity()
+
+    # The address may be empty if no network was available during setup; resolve it now.
+    if not identity.address:
+        try:
+            identity = identities.update(
+                identity_models.Identity(
+                    name=identity.name,
+                    uuid=identity.uuid,
+                    mac_address=identity.mac_address,
+                    address=get_local_ip_address(),
+                )
+            )
+        except NetworkConnectionError:
+            pass
+
     broadcaster = PlayerBroadcaster(identity=identity, port=audera.PLAYER_PORT)
     broadcaster.start()
     yield

@@ -100,7 +100,7 @@ The migration replaced the entire custom transport with Snapcast + Plex-Amp + Ca
 | Service clients (`snapserver`, `camilladsp`, `plexamp`) | Complete — not yet integration-tested |
 | Server webserver — Players tab (`server/streamer/app.py`) | Complete — per-client volume/mute via Snapserver JSON-RPC |
 | Player webserver (`server/player/app.py`) | Complete — lightweight FastAPI server (`/health`, `/ready`, `/identity`) with mDNS broadcast on startup |
-| WiFi onboarding wizard — player (`ui/player/setup.py`) | Complete — audited; supports both `player` and `streamer` roles |
+| WiFi onboarding wizard — player (`server/setup.py`) | Complete — audited; supports both `player` and `streamer` roles |
 | WiFi onboarding wizard — server | Complete — `commands.py` checks connectivity and launches wizard with `role='streamer'` before starting server |
 | CLI (`audera run streamer-server / player-server / player-setup`) | Complete |
 | nginx reverse proxy + avahi (`audera.local`) | Complete — `avahi-daemon` configured with hostname `audera`; self-signed TLS cert generated; nginx reverse-proxies `https://audera.local:443` → `http://localhost:80` with WebSocket upgrade headers |
@@ -131,7 +131,7 @@ The guiding principle is **simplicity first, ship incrementally**. Each workstre
 | WS-1: Server device MVP | DietPi `setup.sh` for server: `snapclient` + `snapserver` + CamillaDSP systemd units; correct ALSA loopback audio path | ✓ Complete |
 | WS-2: Server webserver — Players tab | Per-client volume/mute via Snapserver JSON-RPC; nginx reverse proxy + avahi at `audera.local`; self-signed TLS | ✓ Complete |
 | WS-3: Player device MVP | DietPi `setup.sh` for player: `snapclient` + CamillaDSP systemd units; lightweight FastAPI player webserver (`/health`, `/ready`, `/identity`) | ✓ Complete |
-| WS-4: WiFi onboarding wizard | `ui/player/setup.py` supports both `player` and `streamer` roles; connectivity check on server and player startup | ✓ Complete |
+| WS-4: WiFi onboarding wizard | `server/setup.py` supports both `player` and `streamer` roles; connectivity check on server and player startup | ✓ Complete |
 
 ### WS-5: SSH test harness
 - Write a shell script (`os/test/reprovision.sh`) that SSHes into a target device and re-runs the appropriate `setup.sh` without a full SD card re-flash

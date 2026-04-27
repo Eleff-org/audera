@@ -64,7 +64,7 @@ done
 [[ "$DEVICE" == 'streamer' || "$DEVICE" == 'player' ]] || die "--device must be 'streamer' or 'player'"
 [[ "$WIPE_NETWORKS" -eq 1 && "$CHECK" -eq 1 ]] && die "--wipe-networks and --check are incompatible (device won't have WiFi after wipe)"
 
-SETUP_URL="https://raw.githubusercontent.com/Eleff-org/audera/refs/heads/${BRANCH}/os/dietpi/${DEVICE}/automation/setup.sh"
+SETUP_URL="https://raw.githubusercontent.com/Eleff-org/audera/${BRANCH}/os/dietpi/${DEVICE}/automation/setup.sh"
 
 SED_STRIP="sed -i '/^echo.*Restarting/d; /^sleep 5\$/d; /^[[:space:]]*reboot[[:space:]]*\$/d' /tmp/audera_setup.sh"
 
@@ -127,17 +127,17 @@ fi
 _log "[$(date '+%Y-%m-%d %H:%M:%S')] Starting re-provisioning: device=${DEVICE} host=${HOST} branch=${BRANCH}"
 
 _log "[$(date '+%Y-%m-%d %H:%M:%S')] Running setup.sh on ${HOST} ..."
-_ssh bash -c "$SETUP_CMD"
+_ssh "$SETUP_CMD"
 _log "[$(date '+%Y-%m-%d %H:%M:%S')] setup.sh completed."
 
 if [[ "$WIPE_NETWORKS" -eq 1 ]]; then
     if [[ "$NO_REBOOT" -eq 1 ]]; then
         _log "[$(date '+%Y-%m-%d %H:%M:%S')] Wiping network connections (no reboot) ..."
-        _ssh bash -c "nmcli -t -f UUID con show | while IFS= read -r uuid; do [ -n \"\$uuid\" ] && nmcli con delete uuid \"\$uuid\"; done"
+        _ssh 'nmcli -t -f UUID con show | while IFS= read -r uuid; do [ -n "$uuid" ] && nmcli con delete uuid "$uuid"; done'
         _log "[$(date '+%Y-%m-%d %H:%M:%S')] Network connections wiped. Device is running for inspection."
     else
         _log "[$(date '+%Y-%m-%d %H:%M:%S')] Wiping network connections and rebooting ..."
-        _ssh bash -c "$WIPE_CMD" || true
+        _ssh "$WIPE_CMD" || true
         _log "[$(date '+%Y-%m-%d %H:%M:%S')] Wipe + reboot command issued (SSH may drop — that is expected)."
     fi
 elif [[ "$NO_REBOOT" -eq 0 ]]; then

@@ -41,7 +41,7 @@ def run(type_: Literal['streamer-server', 'player-server', 'player-setup']):
 
     if type_ == 'streamer-server':
         if not netifaces.connected():
-            from audera.ui.player import setup
+            from audera.server import setup
 
             setup.run(role='streamer')
         from audera.server.streamer import app
@@ -50,7 +50,7 @@ def run(type_: Literal['streamer-server', 'player-server', 'player-setup']):
 
     elif type_ == 'player-server':
         if not netifaces.connected():
-            from audera.ui.player import setup
+            from audera.server import setup
 
             setup.run(role='player')
         from audera.server.player import app
@@ -58,7 +58,7 @@ def run(type_: Literal['streamer-server', 'player-server', 'player-setup']):
         app.run()
 
     elif type_ == 'player-setup':
-        from audera.ui.player import setup
+        from audera.server import setup
 
         setup.run(role='player')
 
