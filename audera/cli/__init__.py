@@ -1,4 +1,4 @@
-""" Audera """
+"""Audera"""
 
 from audera.cli import audera
 

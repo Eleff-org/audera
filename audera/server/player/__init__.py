@@ -1,1 +1,1 @@
-""" Audera player webserver """
+"""Audera player webserver"""

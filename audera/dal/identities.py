@@ -1,4 +1,4 @@
-""" Identity configuration-layer """
+"""Identity configuration-layer"""
 
 import os
 from typing import Union
@@ -10,28 +10,19 @@ from audera.models import identity
 
 PATH: Union[str, os.PathLike] = path.HOME
 FILE_NAME: str = 'identity.json'
-DTYPES: dict = {
-    'identity': {
-        'name': 'str',
-        'uuid': 'str',
-        'mac_address': 'str',
-        'address': 'str'
-    }
-}
+DTYPES: dict = {'identity': {'name': 'str', 'uuid': 'str', 'mac_address': 'str', 'address': 'str'}}
 
 
 def exists() -> bool:
-    """ Returns `True` when the identity configuration file exists. """
-    if os.path.isfile(
-        os.path.abspath(os.path.join(PATH, FILE_NAME))
-    ):
+    """Returns `True` when the identity configuration file exists."""
+    if os.path.isfile(os.path.abspath(os.path.join(PATH, FILE_NAME))):
         return True
     else:
         return False
 
 
 def create(identity_: identity.Identity) -> config.Handler:
-    """ Creates the identity configuration file and returns the contents
+    """Creates the identity configuration file and returns the contents
     as a `pytensils.config.Handler` object.
 
     Parameters
@@ -45,26 +36,19 @@ def create(identity_: identity.Identity) -> config.Handler:
         os.mkdir(PATH)
 
     # Create the configuration file
-    config_ = config.Handler(
-        path=PATH,
-        file_name=FILE_NAME,
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name=FILE_NAME, create=True)
     config_ = config_.from_dict({'identity': identity_.to_dict()})
 
     return config_
 
 
 def get() -> config.Handler:
-    """ Returns the contents of the identity configuration as a
+    """Returns the contents of the identity configuration as a
     `pytensils.config.Handler` object.
     """
 
     # Read the configuration file
-    config_ = config.Handler(
-        path=PATH,
-        file_name=FILE_NAME
-    )
+    config_ = config.Handler(path=PATH, file_name=FILE_NAME)
 
     # Validate
     config_.validate(DTYPES)
@@ -73,7 +57,7 @@ def get() -> config.Handler:
 
 
 def get_or_create(identity_: identity.Identity) -> config.Handler:
-    """ Creates or reads the identity configuration file and returns the contents as
+    """Creates or reads the identity configuration file and returns the contents as
     a `pytensils.config.Handler` object.
 
     Parameters
@@ -88,7 +72,7 @@ def get_or_create(identity_: identity.Identity) -> config.Handler:
 
 
 def save(identity_: identity.Identity) -> config.Handler:
-    """ Saves the identity configuration to `~/.audera/identity.json`.
+    """Saves the identity configuration to `~/.audera/identity.json`.
 
     Parameters
     ----------
@@ -101,18 +85,14 @@ def save(identity_: identity.Identity) -> config.Handler:
         os.mkdir(PATH)
 
     # Create the configuration file
-    config_ = config.Handler(
-        path=PATH,
-        file_name=FILE_NAME,
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name=FILE_NAME, create=True)
     config_ = config_.from_dict({'identity': identity_.to_dict()})
 
     return config_
 
 
 def update(new: identity.Identity) -> identity.Identity:
-    """ Updates the identity configuration file `~/.audera/identity.json`.
+    """Updates the identity configuration file `~/.audera/identity.json`.
 
     Parameters
     ----------
@@ -128,7 +108,6 @@ def update(new: identity.Identity) -> identity.Identity:
 
     # Compare and update
     if not identity_ == new:
-
         # Update the identity configuration object and write to the configuration file
         config_ = config_.from_dict(
             {
@@ -136,7 +115,7 @@ def update(new: identity.Identity) -> identity.Identity:
                     'name': identity_.name,  # Retain the existing name, name is immutable
                     'uuid': identity_.uuid,  # Retain the existing uuid, uuid is immutable
                     'mac_address': new.mac_address,
-                    'address': new.address
+                    'address': new.address,
                 }
             }
         )
@@ -148,7 +127,7 @@ def update(new: identity.Identity) -> identity.Identity:
 
 
 def delete():
-    """ Deletes the configuration file associated with a `audera.struct.identity.Identity` object.
+    """Deletes the configuration file associated with a `audera.struct.identity.Identity` object.
 
     Parameters
     ----------
@@ -160,12 +139,12 @@ def delete():
 
 
 def get_identity() -> identity.Identity:
-    """ Returns the identity of the remote audio device as an `audera.struct.identity.Identity` object. """
+    """Returns the identity of the remote audio device as an `audera.struct.identity.Identity` object."""
     return identity.Identity.from_config(get())
 
 
 def get_identity_mac_address() -> str:
-    """ Returns the mac-address of the remote audio device as an `str`. """
+    """Returns the mac-address of the remote audio device as an `str`."""
 
     # Read the configuration file
     identity_ = get_identity()
@@ -173,7 +152,7 @@ def get_identity_mac_address() -> str:
 
 
 def get_identity_ip_address() -> str:
-    """ Returns the ip-address of the remote audio device as an `str`. """
+    """Returns the ip-address of the remote audio device as an `str`."""
 
     # Read the configuration file
     identity_ = get_identity()

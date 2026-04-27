@@ -67,6 +67,8 @@ apt-get install -y \
     dnsmasq \
     alsa-utils \
     avahi-daemon \
+    nginx \
+    openssl \
     snapserver \
     snapclient \
     python3.13 \
@@ -152,7 +154,8 @@ EOF
 cat > /etc/systemd/system/snapclient.service <<EOF
 [Unit]
 Description=Snapcast client
-After=network.target sound.target snapserver.service
+Wants=avahi-daemon.service
+After=network-online.target time-sync.target sound.target avahi-daemon.service snapserver.service
 
 [Service]
 ExecStart=/usr/bin/snapclient --soundcard hw:Loopback,0 --sampleformat 48000:32:*
@@ -219,6 +222,53 @@ systemctl enable NetworkManager
 systemctl restart NetworkManager
 nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
+
+# Configure avahi hostname
+echo
+echo ">>> Configuring avahi hostname"
+hostnamectl set-hostname audera
+systemctl enable avahi-daemon
+systemctl restart avahi-daemon
+echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {audera.local}"
+
+# Generate self-signed TLS certificate for audera.local
+echo
+echo ">>> Generating self-signed TLS certificate"
+openssl req -x509 -newkey rsa:2048 \
+    -keyout /etc/ssl/private/audera.local.key \
+    -out /etc/ssl/certs/audera.local.crt \
+    -days 3650 -nodes \
+    -subj "/CN=audera.local" \
+    -addext "subjectAltName=DNS:audera.local"
+chmod 600 /etc/ssl/private/audera.local.key
+echo -e "[  ${GREEN}OK${RESET}  ] TLS certificate generated"
+
+# Configure nginx reverse proxy
+echo
+echo ">>> Configuring nginx"
+cat > /etc/nginx/sites-available/audera.local <<'EOF'
+server {
+    listen 443 ssl;
+    server_name audera.local;
+
+    ssl_certificate     /etc/ssl/certs/audera.local.crt;
+    ssl_certificate_key /etc/ssl/private/audera.local.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+ln -sf /etc/nginx/sites-available/audera.local /etc/nginx/sites-enabled/audera.local
+rm -f /etc/nginx/sites-enabled/default
+systemctl enable nginx
+systemctl restart nginx
+echo -e "[  ${GREEN}OK${RESET}  ] nginx configured"
 
 # Setup dnsmasq
 echo

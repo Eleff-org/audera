@@ -1,4 +1,4 @@
-""" Group configuration-layer """
+"""Group configuration-layer"""
 
 import os
 from typing import List, Union
@@ -23,7 +23,7 @@ DTYPES: dict = {
 
 
 def exists(id: str) -> bool:
-    """ Returns `True` when the group configuration file exists.
+    """Returns `True` when the group configuration file exists.
 
     Parameters
     ----------
@@ -34,7 +34,7 @@ def exists(id: str) -> bool:
 
 
 def create(group: player.Group) -> config.Handler:
-    """ Creates the group configuration file and returns the contents as a
+    """Creates the group configuration file and returns the contents as a
     `pytensils.config.Handler` object.
 
     Parameters
@@ -44,17 +44,13 @@ def create(group: player.Group) -> config.Handler:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([group.id, 'json']),
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([group.id, 'json']), create=True)
     config_ = config_.from_dict({'group': group.to_dict()})
     return config_
 
 
 def get(id: str) -> config.Handler:
-    """ Returns the contents of the group configuration as a
+    """Returns the contents of the group configuration as a
     `pytensils.config.Handler` object.
 
     Parameters
@@ -62,16 +58,13 @@ def get(id: str) -> config.Handler:
     id: `str`
         The Snapcast group identifier.
     """
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([id, 'json'])
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([id, 'json']))
     config_.validate(DTYPES)
     return config_
 
 
 def get_or_create(group: player.Group) -> config.Handler:
-    """ Creates or reads the group configuration file and returns the contents as
+    """Creates or reads the group configuration file and returns the contents as
     a `pytensils.config.Handler` object.
 
     Parameters
@@ -86,7 +79,7 @@ def get_or_create(group: player.Group) -> config.Handler:
 
 
 def save(group: player.Group) -> config.Handler:
-    """ Saves the group configuration to `~/.audera/groups/{group.id}.json`.
+    """Saves the group configuration to `~/.audera/groups/{group.id}.json`.
 
     Parameters
     ----------
@@ -95,17 +88,13 @@ def save(group: player.Group) -> config.Handler:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([group.id, 'json']),
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([group.id, 'json']), create=True)
     config_ = config_.from_dict({'group': group.to_dict()})
     return config_
 
 
 def update(new: player.Group) -> player.Group:
-    """ Updates the group configuration file `~/.audera/groups/{group.id}.json`.
+    """Updates the group configuration file `~/.audera/groups/{group.id}.json`.
 
     Parameters
     ----------
@@ -122,7 +111,7 @@ def update(new: player.Group) -> player.Group:
 
 
 def delete(id: str):
-    """ Deletes the configuration file for a group.
+    """Deletes the configuration file for a group.
 
     Parameters
     ----------
@@ -134,12 +123,12 @@ def delete(id: str):
 
 
 def get_group(id: str) -> player.Group:
-    """ Returns the group as an `audera.models.player.Group` object. """
+    """Returns the group as an `audera.models.player.Group` object."""
     return player.Group.from_config(get(id))
 
 
 def attach_client(group_id: str, client_id: str) -> player.Group:
-    """ Attaches a Snapcast client to a group.
+    """Attaches a Snapcast client to a group.
 
     Parameters
     ----------
@@ -156,7 +145,7 @@ def attach_client(group_id: str, client_id: str) -> player.Group:
 
 
 def detach_client(group_id: str, client_id: str) -> player.Group:
-    """ Detaches a Snapcast client from a group.
+    """Detaches a Snapcast client from a group.
 
     Parameters
     ----------
@@ -173,7 +162,7 @@ def detach_client(group_id: str, client_id: str) -> player.Group:
 
 
 def assign_stream(group_id: str, stream_id: str) -> player.Group:
-    """ Assigns a stream to a group.
+    """Assigns a stream to a group.
 
     Parameters
     ----------
@@ -191,8 +180,7 @@ def assign_stream(group_id: str, stream_id: str) -> player.Group:
 
 def connection() -> duckdb.DuckDBPyConnection:
     return duckdb.connect().execute(
-        'CREATE TABLE groups AS SELECT "group".* FROM read_json_auto(?)',
-        (os.path.join(PATH, '*.json'),)
+        'CREATE TABLE groups AS SELECT "group".* FROM read_json_auto(?)', (os.path.join(PATH, '*.json'),)
     )
 
 
@@ -202,7 +190,7 @@ def query_to_groups(cursor: duckdb.DuckDBPyConnection) -> List[player.Group]:
 
 
 def get_all_groups() -> List[player.Group]:
-    """ Returns all groups as a list of `audera.models.player.Group` objects. """
+    """Returns all groups as a list of `audera.models.player.Group` objects."""
     try:
         with connection() as conn:
             return query_to_groups(conn.execute('SELECT * FROM groups'))

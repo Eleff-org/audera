@@ -1,4 +1,4 @@
-""" User-interfaces """
+"""User-interfaces"""
 
 from audera.ui import player
 

@@ -1,4 +1,4 @@
-""" Audera commands """
+"""Audera commands"""
 
 import importlib.resources
 import sys
@@ -7,10 +7,8 @@ from typing import Literal
 from audera.services import netifaces
 
 
-def run(
-    type_: Literal['streamer-server', 'player-server', 'player-setup']
-):
-    """ Runs an `audera` service.
+def run(type_: Literal['streamer-server', 'player-server', 'player-setup']):
+    """Runs an `audera` service.
 
     Parameters
     ----------
@@ -42,23 +40,31 @@ def run(
         raise NotImplementedError
 
     if type_ == 'streamer-server':
+        if not netifaces.connected():
+            from audera.ui.player import setup
+
+            setup.run(role='streamer')
         from audera.server.streamer import app
+
         app.run()
 
     elif type_ == 'player-server':
         if not netifaces.connected():
             from audera.ui.player import setup
-            setup.run()
+
+            setup.run(role='player')
         from audera.server.player import app
+
         app.run()
 
     elif type_ == 'player-setup':
         from audera.ui.player import setup
-        setup.run()
+
+        setup.run(role='player')
 
 
 def conf(role: Literal['streamer', 'player'], filename: str) -> None:
-    """ Prints a bundled config file to stdout.
+    """Prints a bundled config file to stdout.
 
     Parameters
     ----------

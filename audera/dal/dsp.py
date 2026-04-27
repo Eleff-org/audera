@@ -1,4 +1,4 @@
-""" DSP configuration-layer """
+"""DSP configuration-layer"""
 
 import json
 import os
@@ -11,7 +11,7 @@ PATH: Union[str, os.PathLike] = os.path.join(path.HOME, 'dsp')
 
 
 def exists(player_id: str) -> bool:
-    """ Returns `True` when the DSP configuration file exists.
+    """Returns `True` when the DSP configuration file exists.
 
     Parameters
     ----------
@@ -22,7 +22,7 @@ def exists(player_id: str) -> bool:
 
 
 def create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
-    """ Creates the DSP configuration file and returns the `DSPConfig` object.
+    """Creates the DSP configuration file and returns the `DSPConfig` object.
 
     Parameters
     ----------
@@ -38,7 +38,7 @@ def create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
 
 
 def get(player_id: str) -> dsp.DSPConfig:
-    """ Returns the DSP configuration as an `audera.models.dsp.DSPConfig` object.
+    """Returns the DSP configuration as an `audera.models.dsp.DSPConfig` object.
 
     Parameters
     ----------
@@ -52,7 +52,7 @@ def get(player_id: str) -> dsp.DSPConfig:
 
 
 def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
-    """ Creates or reads the DSP configuration file and returns the `DSPConfig` object.
+    """Creates or reads the DSP configuration file and returns the `DSPConfig` object.
 
     Parameters
     ----------
@@ -66,7 +66,7 @@ def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
 
 
 def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
-    """ Saves the DSP configuration to `~/.audera/dsp/{player_id}.json`.
+    """Saves the DSP configuration to `~/.audera/dsp/{player_id}.json`.
 
     Parameters
     ----------
@@ -82,7 +82,7 @@ def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
 
 
 def update(new: dsp.DSPConfig) -> dsp.DSPConfig:
-    """ Updates the DSP configuration file `~/.audera/dsp/{player_id}.json`.
+    """Updates the DSP configuration file `~/.audera/dsp/{player_id}.json`.
 
     Parameters
     ----------
@@ -97,7 +97,7 @@ def update(new: dsp.DSPConfig) -> dsp.DSPConfig:
 
 
 def delete(player_id: str):
-    """ Deletes the DSP configuration file for a player.
+    """Deletes the DSP configuration file for a player.
 
     Parameters
     ----------

@@ -1,15 +1,16 @@
-""" Plex-Amp local HTTP API client """
+"""Plex-Amp local HTTP API client"""
 
 import xml.etree.ElementTree
 from typing import Optional
 
 import httpx
 
+import audera
 from audera.models import stream
 
 
-class PlexAmpClient():
-    """ A synchronous client for the Plex-Amp local HTTP API.
+class PlexAmpClient:
+    """A synchronous client for the Plex-Amp local HTTP API.
 
     Parameters
     ----------
@@ -19,13 +20,13 @@ class PlexAmpClient():
         The HTTP port of Plex-Amp (default 32500).
     """
 
-    def __init__(self, host: str, port: int = 32500):
+    def __init__(self, host: str, port: int = audera.PLEXAMP_PORT):
         self.host = host
         self.port = port
         self._base = 'http://%s:%d' % (host, port)
 
     def get_now_playing(self) -> Optional[stream.Stream]:
-        """ Returns the currently playing stream via the timeline poll endpoint,
+        """Returns the currently playing stream via the timeline poll endpoint,
         or `None` if nothing is playing.
         """
         response = httpx.get(
@@ -52,7 +53,7 @@ class PlexAmpClient():
         )
 
     def play(self, machine_id: str):
-        """ Resumes playback on the given Plex player.
+        """Resumes playback on the given Plex player.
 
         Parameters
         ----------
@@ -65,7 +66,7 @@ class PlexAmpClient():
         ).raise_for_status()
 
     def pause(self, machine_id: str):
-        """ Pauses playback on the given Plex player.
+        """Pauses playback on the given Plex player.
 
         Parameters
         ----------
@@ -78,7 +79,7 @@ class PlexAmpClient():
         ).raise_for_status()
 
     def skip(self, machine_id: str):
-        """ Skips to the next track on the given Plex player.
+        """Skips to the next track on the given Plex player.
 
         Parameters
         ----------

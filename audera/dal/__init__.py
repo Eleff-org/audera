@@ -1,4 +1,4 @@
-""" Data-access layer """
+"""Data-access layer"""
 
 import os
 

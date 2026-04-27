@@ -1,4 +1,4 @@
-""" Network interfaces """
+"""Network interfaces"""
 
 import asyncio
 import socket
@@ -12,14 +12,14 @@ from audera.services import platform
 
 
 def get_gateway_ip_address() -> str:
-    """ Returns the local gateway ip-address. """
+    """Returns the local gateway ip-address."""
     gateways = netifaces.gateways()
     gateway_address = gateways['default'][netifaces.AF_INET][0]
     return str(gateway_address)
 
 
 def get_interface_ip_address(interface: Literal['wlan0'] = 'wlan0') -> str:
-    """ Returns the interface ip-address.
+    """Returns the interface ip-address.
 
     Parameters
     ----------
@@ -32,14 +32,14 @@ def get_interface_ip_address(interface: Literal['wlan0'] = 'wlan0') -> str:
 
 
 def get_local_mac_address() -> str:
-    """ Returns the local hardware mac-address. """
-    mac = "%12X" % uuid.getnode()
-    mac = ':'.join([mac[i:i+2] for i in range(0, 12, 2)])
+    """Returns the local hardware mac-address."""
+    mac = '%12X' % uuid.getnode()
+    mac = ':'.join([mac[i : i + 2] for i in range(0, 12, 2)])
     return str(mac)
 
 
 def connected(interface: Literal['wlan0'] = 'wlan0') -> bool:
-    """ Returns `True` when the network device is connected to the internet.
+    """Returns `True` when the network device is connected to the internet.
 
     Parameters
     ----------
@@ -47,16 +47,13 @@ def connected(interface: Literal['wlan0'] = 'wlan0') -> bool:
         The network interface for the Wi-Fi connection.
     """
     try:
-
         # Try to resolve Cloudflare's public DNS to check if DNS resolution works
-        socket.gethostbyname("www.cloudflare.com")
+        socket.gethostbyname('www.cloudflare.com')
 
         # Ping Cloudflare DNS to check for internet access
         if platform.NAME in ['dietpi', 'linux', 'darwin']:
             result = subprocess.run(
-                ['ping', '-c', '3', '-I', f"{interface}", '1.1.1.1'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                ['ping', '-c', '3', '-I', f'{interface}', '1.1.1.1'], stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             if result.returncode == 0:
                 return True
@@ -64,11 +61,7 @@ def connected(interface: Literal['wlan0'] = 'wlan0') -> bool:
                 return False
 
         elif platform.NAME == 'windows':
-            result = subprocess.run(
-                ['ping', '-n', '3', '1.1.1.1'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
+            result = subprocess.run(['ping', '-n', '3', '1.1.1.1'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode == 0:
                 return True
             else:
@@ -81,7 +74,7 @@ def connected(interface: Literal['wlan0'] = 'wlan0') -> bool:
 
 
 def get_local_ip_address() -> str:
-    """ Connects to an external ip-address, which determines the appropriate
+    """Connects to an external ip-address, which determines the appropriate
     interface for the connection, and then returns the local ip-address used
     in that connection.
     """
@@ -96,7 +89,7 @@ def get_local_ip_address() -> str:
 
 @platform.requires('dietpi')
 def get_preferred_security_type(supported_security_types: Union[List[str], None]) -> str:
-    """ Returns the preferred security type from a list of supported security types. WPA / WPA2
+    """Returns the preferred security type from a list of supported security types. WPA / WPA2
     security protocols are preferred, with experimental support for WPA3. WEP and WPA2-enterprise
     are not currently supported.
 
@@ -111,19 +104,17 @@ def get_preferred_security_type(supported_security_types: Union[List[str], None]
 
     supported_security_types = [s.upper() for s in supported_security_types]
 
-    if any(x in supported_security_types for x in ["WPA2", "WPA1", "WPA"]):
-        return "wpa-psk"  # WPA/WPA2
-    if any(x in supported_security_types for x in ["SAE", "WPA3"]):
-        return "sae"  # WPA3
+    if any(x in supported_security_types for x in ['WPA2', 'WPA1', 'WPA']):
+        return 'wpa-psk'  # WPA/WPA2
+    if any(x in supported_security_types for x in ['SAE', 'WPA3']):
+        return 'sae'  # WPA3
     else:
-        raise NetworkConnectionError(
-            "Unknown supported security types ['%s']." % ("', '".join(supported_security_types))
-        )
+        raise NetworkConnectionError("Unknown supported security types ['%s']." % ("', '".join(supported_security_types)))
 
 
 @platform.requires('dietpi')
 def has_supported_security_type(supported_security_types: Union[List[str], None]) -> bool:
-    """ Returns `True` when there is a valid security type in the list of supported
+    """Returns `True` when there is a valid security type in the list of supported
     security types, otherwise returns `False`.
 
     Parameters
@@ -134,7 +125,7 @@ def has_supported_security_type(supported_security_types: Union[List[str], None]
     if not supported_security_types:
         return True  # Open network
 
-    if any(x in supported_security_types for x in ["WPA2", "WPA1", "WPA", "SAE", "WPA3"]):
+    if any(x in supported_security_types for x in ['WPA2', 'WPA1', 'WPA', 'SAE', 'WPA3']):
         return True
 
     return False
@@ -142,7 +133,7 @@ def has_supported_security_type(supported_security_types: Union[List[str], None]
 
 @platform.requires('dietpi')
 async def get_wifi_networks(interface: Literal['wlan0'] = 'wlan0') -> Dict[str, List[str]]:
-    """ Returns a dictionary of network SSIDs and their security types.
+    """Returns a dictionary of network SSIDs and their security types.
 
     Parameters
     ----------
@@ -151,13 +142,19 @@ async def get_wifi_networks(interface: Literal['wlan0'] = 'wlan0') -> Dict[str, 
     """
     try:
         proc = await asyncio.create_subprocess_exec(
-            "nmcli", "--terse",
-            "--fields", "SSID,SECURITY",
-            "device", "wifi", "list",
-            "ifname", f"{interface}",
-            "--rescan", "yes",
+            'nmcli',
+            '--terse',
+            '--fields',
+            'SSID,SECURITY',
+            'device',
+            'wifi',
+            'list',
+            'ifname',
+            f'{interface}',
+            '--rescan',
+            'yes',
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
         )
 
         stdout, _ = await proc.communicate()
@@ -170,10 +167,10 @@ async def get_wifi_networks(interface: Literal['wlan0'] = 'wlan0') -> Dict[str, 
         for line in output.split('\n'):
             if not line:
                 continue
-            parts = line.split(":")
+            parts = line.split(':')
             ssid = parts[0].strip()
-            security = parts[1].strip() if len(parts) > 1 else ""
-            if ssid and ssid != "--":
+            security = parts[1].strip() if len(parts) > 1 else ''
+            if ssid and ssid != '--':
                 networks[ssid] = security.split() if security else []
 
         return {k: v for k, v in networks.items() if has_supported_security_type(v)}
@@ -184,7 +181,7 @@ async def get_wifi_networks(interface: Literal['wlan0'] = 'wlan0') -> Dict[str, 
 
 @platform.requires('dietpi')
 def connection_exists(con_name: str) -> bool:
-    """ Returns whether the network-manager connection exists.
+    """Returns whether the network-manager connection exists.
 
     Parameters
     ----------
@@ -193,10 +190,7 @@ def connection_exists(con_name: str) -> bool:
     """
     try:
         subprocess.run(
-            ["nmcli", "connection", "show", f"{con_name}"],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            ['nmcli', 'connection', 'show', f'{con_name}'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
         return True
     except subprocess.CalledProcessError:
@@ -208,9 +202,9 @@ async def connect(
     ssid: str,
     supported_security_types: Union[List[str], None],
     password: Union[str, None],
-    interface: Literal['wlan0'] = 'wlan0'
+    interface: Literal['wlan0'] = 'wlan0',
 ):
-    """ Connects to a Wi-Fi network {ssid} with {password}.
+    """Connects to a Wi-Fi network {ssid} with {password}.
 
     Parameters
     ----------
@@ -234,11 +228,10 @@ async def connect(
 
     # Delete the connection if it already exists
     if connection_exists(con_name=ssid):
-        delete_connection_result = subprocess.run(["nmcli", "connection", "delete", f"{ssid}"])
+        delete_connection_result = subprocess.run(['nmcli', 'connection', 'delete', f'{ssid}'])
 
         # Wait for the service
         if delete_connection_result.returncode == 0:
-
             # Check the service, time-out if the service fails to start after 10 seconds
             time_out = 0
 
@@ -251,42 +244,52 @@ async def connect(
                 time_out += 1
 
             if connection_exists(con_name=ssid):
-                raise NetworkConnectionError(
-                    'Unable to delete Wi-Fi connection `%s` on interface `%s`.' % (
-                        ssid,
-                        interface
-                    )
-                )
+                raise NetworkConnectionError('Unable to delete Wi-Fi connection `%s` on interface `%s`.' % (ssid, interface))
 
     # Add the connection
     if password:
         add_connection_result = subprocess.run(
             [
-                "nmcli", "connection", "add",
-                "type", "wifi",
-                "ifname", f"{interface}",
-                "con-name", f"{ssid}",
-                "ssid", f"{ssid}",
-                "wifi-sec.key-mgmt", f"{get_preferred_security_type(supported_security_types)}",
-                "wifi-sec.psk", f"{password}",
-                "connection.autoconnect", "yes"
+                'nmcli',
+                'connection',
+                'add',
+                'type',
+                'wifi',
+                'ifname',
+                f'{interface}',
+                'con-name',
+                f'{ssid}',
+                'ssid',
+                f'{ssid}',
+                'wifi-sec.key-mgmt',
+                f'{get_preferred_security_type(supported_security_types)}',
+                'wifi-sec.psk',
+                f'{password}',
+                'connection.autoconnect',
+                'yes',
             ]
         )
     else:
         add_connection_result = subprocess.run(
             [
-                "nmcli", "connection", "add",
-                "type", "wifi",
-                "ifname", f"{interface}",
-                "con-name", f"{ssid}",
-                "ssid", f"{ssid}",
-                "connection.autoconnect", "yes"
+                'nmcli',
+                'connection',
+                'add',
+                'type',
+                'wifi',
+                'ifname',
+                f'{interface}',
+                'con-name',
+                f'{ssid}',
+                'ssid',
+                f'{ssid}',
+                'connection.autoconnect',
+                'yes',
             ]
         )
 
     # Wait for the service
     if add_connection_result.returncode == 0:
-
         # Check the service, time-out if the service fails to start after 10 seconds
         time_out = 0
 
@@ -299,14 +302,9 @@ async def connect(
             time_out += 1
 
         if not connection_exists(con_name=ssid):
-            raise NetworkConnectionError(
-                'Unable to add Wi-Fi connection `%s` on interface `%s`.' % (
-                    ssid,
-                    interface
-                )
-            )
+            raise NetworkConnectionError('Unable to add Wi-Fi connection `%s` on interface `%s`.' % (ssid, interface))
 
-    result = subprocess.run(["nmcli", "connection", "up", f"{ssid}"])
+    result = subprocess.run(['nmcli', 'connection', 'up', f'{ssid}'])
 
     if result.returncode == 0:
         pass

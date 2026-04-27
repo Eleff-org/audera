@@ -1,4 +1,4 @@
-""" Streamer service settings """
+"""Streamer service settings"""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from pytensils import config
 
 
 @dataclass
-class Settings():
-    """ A `class` that represents the streamer service settings.
+class Settings:
+    """A `class` that represents the streamer service settings.
 
     Attributes
     ----------
@@ -19,11 +19,12 @@ class Settings():
     snapserver_host: `str`
         The hostname or IP address of the Snapserver instance.
     """
+
     plexamp_host: str
     snapserver_host: str
 
     def from_dict(dict_object: dict) -> Settings:
-        """ Returns a `Settings` object from a `dict`.
+        """Returns a `Settings` object from a `dict`.
 
         Parameters
         ----------
@@ -33,21 +34,17 @@ class Settings():
         if not isinstance(dict_object, dict):
             raise TypeError('Object must be a `dict`.')
 
-        missing_keys = [
-            key for key in ['plexamp_host', 'snapserver_host']
-            if key not in dict_object
-        ]
+        missing_keys = [key for key in ['plexamp_host', 'snapserver_host'] if key not in dict_object]
         if missing_keys:
             raise KeyError(
-                'Missing keys. The `dict` object is missing the following required keys [%s].' % (
-                    ','.join(["'%s'" % key for key in missing_keys])
-                )
+                'Missing keys. The `dict` object is missing the following required keys [%s].'
+                % (','.join(["'%s'" % key for key in missing_keys]))
             )
 
         return Settings(**dict_object)
 
     def from_config(config: config.Handler) -> Settings:
-        """ Returns a `Settings` object from a `pytensils.config.Handler` object.
+        """Returns a `Settings` object from a `pytensils.config.Handler` object.
 
         Parameters
         ----------
@@ -57,18 +54,18 @@ class Settings():
         return Settings.from_dict(config.to_dict()['settings'])
 
     def to_dict(self) -> dict:
-        """ Returns a `Settings` object as a `dict`. """
+        """Returns a `Settings` object as a `dict`."""
         return {
             'plexamp_host': self.plexamp_host,
             'snapserver_host': self.snapserver_host,
         }
 
     def __repr__(self) -> str:
-        """ Returns a `Settings` object as a json-formatted `str`. """
+        """Returns a `Settings` object as a json-formatted `str`."""
         return json.dumps(self.to_dict(), indent=2)
 
     def __eq__(self, compare) -> bool:
-        """ Returns `True` when compare is an instance of self.
+        """Returns `True` when compare is an instance of self.
 
         Parameters
         ----------
@@ -76,8 +73,5 @@ class Settings():
             An instance of a `Settings` object.
         """
         if isinstance(compare, Settings):
-            return (
-                self.plexamp_host == compare.plexamp_host
-                and self.snapserver_host == compare.snapserver_host
-            )
+            return self.plexamp_host == compare.plexamp_host and self.snapserver_host == compare.snapserver_host
         return False

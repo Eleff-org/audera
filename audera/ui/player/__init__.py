@@ -1,4 +1,4 @@
-""" Remote audio output player user-interface """
+"""Remote audio output player user-interface"""
 
 from audera.ui.player import setup
 

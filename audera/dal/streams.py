@@ -1,4 +1,4 @@
-""" Stream configuration-layer """
+"""Stream configuration-layer"""
 
 import os
 from typing import List, Union
@@ -22,7 +22,7 @@ DTYPES: dict = {
 
 
 def exists(id: str) -> bool:
-    """ Returns `True` when the stream configuration file exists.
+    """Returns `True` when the stream configuration file exists.
 
     Parameters
     ----------
@@ -33,7 +33,7 @@ def exists(id: str) -> bool:
 
 
 def create(stream_: stream.Stream) -> config.Handler:
-    """ Creates the stream configuration file and returns the contents as a
+    """Creates the stream configuration file and returns the contents as a
     `pytensils.config.Handler` object.
 
     Parameters
@@ -43,17 +43,13 @@ def create(stream_: stream.Stream) -> config.Handler:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([stream_.id, 'json']),
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([stream_.id, 'json']), create=True)
     config_ = config_.from_dict({'stream': stream_.to_dict()})
     return config_
 
 
 def get(id: str) -> config.Handler:
-    """ Returns the contents of the stream configuration as a
+    """Returns the contents of the stream configuration as a
     `pytensils.config.Handler` object.
 
     Parameters
@@ -61,16 +57,13 @@ def get(id: str) -> config.Handler:
     id: `str`
         The stream identifier.
     """
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([id, 'json'])
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([id, 'json']))
     config_.validate(DTYPES)
     return config_
 
 
 def get_or_create(stream_: stream.Stream) -> config.Handler:
-    """ Creates or reads the stream configuration file and returns the contents as
+    """Creates or reads the stream configuration file and returns the contents as
     a `pytensils.config.Handler` object.
 
     Parameters
@@ -85,7 +78,7 @@ def get_or_create(stream_: stream.Stream) -> config.Handler:
 
 
 def save(stream_: stream.Stream) -> config.Handler:
-    """ Saves the stream configuration to `~/.audera/streams/{stream_.id}.json`.
+    """Saves the stream configuration to `~/.audera/streams/{stream_.id}.json`.
 
     Parameters
     ----------
@@ -94,17 +87,13 @@ def save(stream_: stream.Stream) -> config.Handler:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([stream_.id, 'json']),
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([stream_.id, 'json']), create=True)
     config_ = config_.from_dict({'stream': stream_.to_dict()})
     return config_
 
 
 def update(new: stream.Stream) -> stream.Stream:
-    """ Updates the stream configuration file `~/.audera/streams/{stream_.id}.json`.
+    """Updates the stream configuration file `~/.audera/streams/{stream_.id}.json`.
 
     Parameters
     ----------
@@ -121,7 +110,7 @@ def update(new: stream.Stream) -> stream.Stream:
 
 
 def delete(id: str):
-    """ Deletes the configuration file for a stream.
+    """Deletes the configuration file for a stream.
 
     Parameters
     ----------
@@ -133,14 +122,13 @@ def delete(id: str):
 
 
 def get_stream(id: str) -> stream.Stream:
-    """ Returns the stream as an `audera.models.stream.Stream` object. """
+    """Returns the stream as an `audera.models.stream.Stream` object."""
     return stream.Stream.from_config(get(id))
 
 
 def connection() -> duckdb.DuckDBPyConnection:
     return duckdb.connect().execute(
-        'CREATE TABLE streams AS SELECT "stream".* FROM read_json_auto(?)',
-        (os.path.join(PATH, '*.json'),)
+        'CREATE TABLE streams AS SELECT "stream".* FROM read_json_auto(?)', (os.path.join(PATH, '*.json'),)
     )
 
 
@@ -150,7 +138,7 @@ def query_to_streams(cursor: duckdb.DuckDBPyConnection) -> List[stream.Stream]:
 
 
 def get_all_streams() -> List[stream.Stream]:
-    """ Returns all streams as a list of `audera.models.stream.Stream` objects. """
+    """Returns all streams as a list of `audera.models.stream.Stream` objects."""
     try:
         with connection() as conn:
             return query_to_streams(conn.execute('SELECT * FROM streams'))

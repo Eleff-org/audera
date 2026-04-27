@@ -98,15 +98,15 @@ The migration replaced the entire custom transport with Snapcast + Plex-Amp + Ca
 | Models (`player`, `group`, `stream`, `dsp`) | Complete |
 | DAL (`players`, `groups`, `streams`, `dsp`) | Complete |
 | Service clients (`snapserver`, `camilladsp`, `plexamp`) | Complete — not yet integration-tested |
-| Server webserver — Players tab (`server/streamer/app.py`) | Needs simplification — Players tab only for MVP |
-| Server webserver — Streams / Groups tabs | Deferred |
-| Player webserver (`server/player/app.py`) | Deferred — no player webserver in MVP |
-| WiFi onboarding wizard — player (`ui/player/setup.py`) | Retained from pre-migration; needs audit |
-| WiFi onboarding wizard — server | Not started |
+| Server webserver — Players tab (`server/streamer/app.py`) | Complete — per-client volume/mute via Snapserver JSON-RPC |
+| Player webserver (`server/player/app.py`) | Complete — lightweight FastAPI server (`/health`, `/ready`, `/identity`) with mDNS broadcast on startup |
+| WiFi onboarding wizard — player (`ui/player/setup.py`) | Complete — audited; supports both `player` and `streamer` roles |
+| WiFi onboarding wizard — server | Complete — `commands.py` checks connectivity and launches wizard with `role='streamer'` before starting server |
 | CLI (`audera run streamer-server / player-server / player-setup`) | Complete |
-| nginx reverse proxy + avahi (`audera.local`) | Not started |
-| DietPi server OS scripts | Complete — snapclient missing; not yet tested on device |
-| DietPi player OS scripts | Complete — not yet tested on device |
+| nginx reverse proxy + avahi (`audera.local`) | Complete — `avahi-daemon` configured with hostname `audera`; self-signed TLS cert generated; nginx reverse-proxies `https://audera.local:443` → `http://localhost:80` with WebSocket upgrade headers |
+| DietPi server OS scripts | Complete — `snapclient` included; systemd units for `snapserver`, `snapclient`, `camilladsp` registered; not yet tested on device |
+| DietPi player OS scripts | Complete — `snapclient` + `camilladsp` systemd units registered; not yet tested on device |
+| mDNS discovery (`services/mdns.py`) | Complete — `PlayerBroadcaster` (player startup) and `PlayerDiscovery` (server-side); test coverage added |
 | SSH test harness | Not started |
 | Integration test (server ↔ player via Snapcast) | Not started |
 
@@ -126,29 +126,12 @@ Final release of the custom streaming daemon. Added async orchestrator, shairpor
 
 The guiding principle is **simplicity first, ship incrementally**. Each workstream targets a shippable state. Deferred workstreams are listed at the bottom and are explicitly out of scope for v0.1.0.
 
-### WS-1: Server device MVP
-- Update `os/dietpi/streamer/automation/setup.sh` to install and configure `snapclient` alongside `snapserver`
-- Add a `snapclient` systemd unit to the server setup; configure it to connect to `localhost:1704`
-- Update `os/dietpi/streamer/conf/camilladsp.yml` to reflect the Snapclient audio path: Snapclient → ALSA loopback capture → CamillaDSP → physical output (`hw:0,0`)
-- Add WiFi onboarding to the server: `audera run streamer-server` checks connectivity first and launches the wizard if not connected (mirror `commands.py` player-server logic)
-
-### WS-2: Unified server webserver — Players tab only
-- Simplify `server/streamer/app.py` to a single **Players** tab: list all Snapcast clients (including the server's own Snapclient), per-client volume slider and mute toggle via the Snapserver JSON-RPC API
-- Remove or stub out the Streams and Groups tabs (deferred)
-- Handle Snapserver unavailable gracefully (show an offline state rather than crashing)
-- Add nginx reverse proxy config to `os/dietpi/streamer/automation/setup.sh`: proxy `https://audera.local` → `http://localhost:80`
-- Install and configure `avahi-daemon` on the server for mDNS (`audera.local` hostname resolution)
-- Generate a self-signed TLS cert in `setup.sh` for the nginx listener
-
-### WS-3: Player device MVP
-- Verify `os/dietpi/player/automation/setup.sh` correctly installs `snapclient` + CamillaDSP and registers both systemd units
-- Confirm player has no webserver — all management is via the server webserver through the Snapserver JSON-RPC API
-- Update `os/dietpi/player/conf/camilladsp.yml` to reflect the Snapclient audio path: ALSA loopback capture → physical output (`hw:0,0`)
-
-### WS-4: WiFi onboarding wizard audit
-- Audit `ui/player/setup.py` for any remaining references to old models (`self.player` → `self.identity`)
-- Confirm the wizard works on both server and player first-boot flows (no WiFi configured)
-- Smoke-test on a device with a fresh DietPi image
+| Workstream | Description | Status |
+|---|---|---|
+| WS-1: Server device MVP | DietPi `setup.sh` for server: `snapclient` + `snapserver` + CamillaDSP systemd units; correct ALSA loopback audio path | ✓ Complete |
+| WS-2: Server webserver — Players tab | Per-client volume/mute via Snapserver JSON-RPC; nginx reverse proxy + avahi at `audera.local`; self-signed TLS | ✓ Complete |
+| WS-3: Player device MVP | DietPi `setup.sh` for player: `snapclient` + CamillaDSP systemd units; lightweight FastAPI player webserver (`/health`, `/ready`, `/identity`) | ✓ Complete |
+| WS-4: WiFi onboarding wizard | `ui/player/setup.py` supports both `player` and `streamer` roles; connectivity check on server and player startup | ✓ Complete |
 
 ### WS-5: SSH test harness
 - Write a shell script (`os/test/reprovision.sh`) that SSHes into a target device and re-runs the appropriate `setup.sh` without a full SD card re-flash

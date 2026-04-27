@@ -18,9 +18,7 @@ _TIMELINE_IDLE = (_FIXTURES / 'timeline_idle.xml').read_text()
 
 @respx.mock
 def test_get_now_playing_active():
-    respx.get(re.compile(r'.*/player/timeline/poll.*')).mock(
-        return_value=Response(200, text=_TIMELINE_ACTIVE)
-    )
+    respx.get(re.compile(r'.*/player/timeline/poll.*')).mock(return_value=Response(200, text=_TIMELINE_ACTIVE))
     result = _CLIENT.get_now_playing()
     assert isinstance(result, Stream)
     assert result.id == '200896'
@@ -31,9 +29,7 @@ def test_get_now_playing_active():
 
 @respx.mock
 def test_get_now_playing_idle():
-    respx.get(re.compile(r'.*/player/timeline/poll.*')).mock(
-        return_value=Response(200, text=_TIMELINE_IDLE)
-    )
+    respx.get(re.compile(r'.*/player/timeline/poll.*')).mock(return_value=Response(200, text=_TIMELINE_IDLE))
     result = _CLIENT.get_now_playing()
     assert result is None
 

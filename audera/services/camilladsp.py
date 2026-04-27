@@ -1,12 +1,14 @@
-""" CamillaDSP WebSocket client """
+"""CamillaDSP WebSocket client"""
 
 import json
 
 import websockets.sync.client
 
+import audera
 
-class CamillaDSPClient():
-    """ A synchronous client for the CamillaDSP WebSocket API.
+
+class CamillaDSPClient:
+    """A synchronous client for the CamillaDSP WebSocket API.
 
     Parameters
     ----------
@@ -16,13 +18,13 @@ class CamillaDSPClient():
         The WebSocket port of CamillaDSP (default 1234).
     """
 
-    def __init__(self, host: str, port: int = 1234):
+    def __init__(self, host: str, port: int = audera.CAMILLADSP_PORT):
         self.host = host
         self.port = port
         self._url = 'ws://%s:%d' % (host, port)
 
     def _call(self, command: str, value=None) -> dict:
-        """ Sends a command to CamillaDSP and returns the response.
+        """Sends a command to CamillaDSP and returns the response.
 
         Parameters
         ----------
@@ -40,14 +42,14 @@ class CamillaDSPClient():
         return response
 
     def get_config(self) -> dict:
-        """ Returns the current CamillaDSP pipeline configuration as a `dict`. """
+        """Returns the current CamillaDSP pipeline configuration as a `dict`."""
         response = self._call('GetConfig')
         if isinstance(response, dict):
             return response.get('GetConfig', response)
         return {}
 
     def set_config(self, config: dict):
-        """ Applies a new CamillaDSP pipeline configuration.
+        """Applies a new CamillaDSP pipeline configuration.
 
         Parameters
         ----------
@@ -57,14 +59,14 @@ class CamillaDSPClient():
         self._call('SetConfig', config)
 
     def get_volume(self) -> float:
-        """ Returns the current CamillaDSP volume level in dB. """
+        """Returns the current CamillaDSP volume level in dB."""
         response = self._call('GetVolume')
         if isinstance(response, dict):
             return response.get('GetVolume', 0.0)
         return 0.0
 
     def set_volume(self, level: float):
-        """ Sets the CamillaDSP volume level.
+        """Sets the CamillaDSP volume level.
 
         Parameters
         ----------

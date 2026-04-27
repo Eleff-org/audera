@@ -1,4 +1,4 @@
-""" Audio-player """
+"""Audio-player"""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from pytensils import config
 
 
 @dataclass
-class Player():
-    """ A `class` that represents a Snapcast client.
+class Player:
+    """A `class` that represents a Snapcast client.
 
     Attributes
     ----------
@@ -30,6 +30,7 @@ class Player():
     group_id: `str`
         The identifier of the Snapcast group this client belongs to.
     """
+
     id: str
     host: str
     port: int
@@ -39,27 +40,25 @@ class Player():
     group_id: str = field(default='')
 
     def from_dict(dict_object: dict) -> Player:
-        """ Returns a `Player` object from a `dict`. """
+        """Returns a `Player` object from a `dict`."""
         if not isinstance(dict_object, dict):
             raise TypeError('Object must be a `dict`.')
         missing_keys = [
-            key for key in ['id', 'host', 'port', 'connected', 'volume', 'muted', 'group_id']
-            if key not in dict_object
+            key for key in ['id', 'host', 'port', 'connected', 'volume', 'muted', 'group_id'] if key not in dict_object
         ]
         if missing_keys:
             raise KeyError(
-                'Missing keys. The `dict` object is missing the following required keys [%s].' % (
-                    ','.join(["'%s'" % key for key in missing_keys])
-                )
+                'Missing keys. The `dict` object is missing the following required keys [%s].'
+                % (','.join(["'%s'" % key for key in missing_keys]))
             )
         return Player(**dict_object)
 
     def from_config(config: config.Handler) -> Player:
-        """ Returns a `Player` object from a `pytensils.config.Handler` object. """
+        """Returns a `Player` object from a `pytensils.config.Handler` object."""
         return Player.from_dict(config.to_dict()['player'])
 
     def to_dict(self):
-        """ Returns a `Player` object as a `dict`. """
+        """Returns a `Player` object as a `dict`."""
         return {
             'id': self.id,
             'host': self.host,
@@ -71,11 +70,11 @@ class Player():
         }
 
     def __repr__(self):
-        """ Returns a `Player` object as a json-formatted `str`. """
+        """Returns a `Player` object as a json-formatted `str`."""
         return json.dumps(self.to_dict(), indent=2)
 
     def __eq__(self, compare):
-        """ Returns `True` when compare is an instance of self. """
+        """Returns `True` when compare is an instance of self."""
         if isinstance(compare, Player):
             return (
                 self.id == compare.id
@@ -90,8 +89,8 @@ class Player():
 
 
 @dataclass
-class Group():
-    """ A `class` that represents a Snapcast group.
+class Group:
+    """A `class` that represents a Snapcast group.
 
     Attributes
     ----------
@@ -108,6 +107,7 @@ class Group():
     volume: `int`
         An integer value from 0 to 100 that sets the loudness of playback.
     """
+
     id: str
     name: str
     client_ids: List[str] = field(default_factory=list)
@@ -116,27 +116,23 @@ class Group():
     volume: int = field(default=100)
 
     def from_dict(dict_object: dict) -> Group:
-        """ Returns a `Group` object from a `dict`. """
+        """Returns a `Group` object from a `dict`."""
         if not isinstance(dict_object, dict):
             raise TypeError('Object must be a `dict`.')
-        missing_keys = [
-            key for key in ['id', 'name', 'client_ids', 'stream_id', 'muted', 'volume']
-            if key not in dict_object
-        ]
+        missing_keys = [key for key in ['id', 'name', 'client_ids', 'stream_id', 'muted', 'volume'] if key not in dict_object]
         if missing_keys:
             raise KeyError(
-                'Missing keys. The `dict` object is missing the following required keys [%s].' % (
-                    ','.join(["'%s'" % key for key in missing_keys])
-                )
+                'Missing keys. The `dict` object is missing the following required keys [%s].'
+                % (','.join(["'%s'" % key for key in missing_keys]))
             )
         return Group(**dict_object)
 
     def from_config(config: config.Handler) -> Group:
-        """ Returns a `Group` object from a `pytensils.config.Handler` object. """
+        """Returns a `Group` object from a `pytensils.config.Handler` object."""
         return Group.from_dict(config.to_dict()['group'])
 
     def to_dict(self):
-        """ Returns a `Group` object as a `dict`. """
+        """Returns a `Group` object as a `dict`."""
         return {
             'id': self.id,
             'name': self.name,
@@ -147,11 +143,11 @@ class Group():
         }
 
     def __repr__(self):
-        """ Returns a `Group` object as a json-formatted `str`. """
+        """Returns a `Group` object as a json-formatted `str`."""
         return json.dumps(self.to_dict(), indent=2)
 
     def __eq__(self, compare):
-        """ Returns `True` when compare is an instance of self. """
+        """Returns `True` when compare is an instance of self."""
         if isinstance(compare, Group):
             return (
                 self.id == compare.id

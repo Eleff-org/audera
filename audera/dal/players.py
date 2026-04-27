@@ -1,4 +1,4 @@
-""" Player configuration-layer """
+"""Player configuration-layer"""
 
 import os
 from typing import List, Union
@@ -24,7 +24,7 @@ DTYPES: dict = {
 
 
 def exists(id: str) -> bool:
-    """ Returns `True` when the player configuration file exists.
+    """Returns `True` when the player configuration file exists.
 
     Parameters
     ----------
@@ -35,7 +35,7 @@ def exists(id: str) -> bool:
 
 
 def create(player_: player.Player) -> config.Handler:
-    """ Creates the player configuration file and returns the contents as a
+    """Creates the player configuration file and returns the contents as a
     `pytensils.config.Handler` object.
 
     Parameters
@@ -45,17 +45,13 @@ def create(player_: player.Player) -> config.Handler:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([player_.id, 'json']),
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([player_.id, 'json']), create=True)
     config_ = config_.from_dict({'player': player_.to_dict()})
     return config_
 
 
 def get(id: str) -> config.Handler:
-    """ Returns the contents of the player configuration as a
+    """Returns the contents of the player configuration as a
     `pytensils.config.Handler` object.
 
     Parameters
@@ -63,16 +59,13 @@ def get(id: str) -> config.Handler:
     id: `str`
         The Snapcast client identifier.
     """
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([id, 'json'])
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([id, 'json']))
     config_.validate(DTYPES)
     return config_
 
 
 def get_or_create(player_: player.Player) -> config.Handler:
-    """ Creates or reads the player configuration file and returns the contents as
+    """Creates or reads the player configuration file and returns the contents as
     a `pytensils.config.Handler` object.
 
     Parameters
@@ -87,7 +80,7 @@ def get_or_create(player_: player.Player) -> config.Handler:
 
 
 def save(player_: player.Player) -> config.Handler:
-    """ Saves the player configuration to `~/.audera/players/{player_.id}.json`.
+    """Saves the player configuration to `~/.audera/players/{player_.id}.json`.
 
     Parameters
     ----------
@@ -96,17 +89,13 @@ def save(player_: player.Player) -> config.Handler:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    config_ = config.Handler(
-        path=PATH,
-        file_name='.'.join([player_.id, 'json']),
-        create=True
-    )
+    config_ = config.Handler(path=PATH, file_name='.'.join([player_.id, 'json']), create=True)
     config_ = config_.from_dict({'player': player_.to_dict()})
     return config_
 
 
 def update(new: player.Player) -> player.Player:
-    """ Updates the player configuration file `~/.audera/players/{player_.id}.json`.
+    """Updates the player configuration file `~/.audera/players/{player_.id}.json`.
 
     Parameters
     ----------
@@ -123,7 +112,7 @@ def update(new: player.Player) -> player.Player:
 
 
 def delete(id: str):
-    """ Deletes the configuration file for a player.
+    """Deletes the configuration file for a player.
 
     Parameters
     ----------
@@ -135,14 +124,13 @@ def delete(id: str):
 
 
 def get_player(id: str) -> player.Player:
-    """ Returns the player as an `audera.models.player.Player` object. """
+    """Returns the player as an `audera.models.player.Player` object."""
     return player.Player.from_config(get(id))
 
 
 def connection() -> duckdb.DuckDBPyConnection:
     return duckdb.connect().execute(
-        'CREATE TABLE players AS SELECT player.* FROM read_json_auto(?)',
-        (os.path.join(PATH, '*.json'),)
+        'CREATE TABLE players AS SELECT player.* FROM read_json_auto(?)', (os.path.join(PATH, '*.json'),)
     )
 
 
@@ -152,7 +140,7 @@ def query_to_players(cursor: duckdb.DuckDBPyConnection) -> List[player.Player]:
 
 
 def get_player_by_host(host: str) -> player.Player:
-    """ Returns the player with the given host address.
+    """Returns the player with the given host address.
 
     Parameters
     ----------
@@ -161,17 +149,13 @@ def get_player_by_host(host: str) -> player.Player:
     """
     try:
         with connection() as conn:
-            return query_to_players(
-                conn.execute(
-                    "SELECT * FROM players WHERE host = '%s'" % str(host)
-                )
-            )[0]
+            return query_to_players(conn.execute("SELECT * FROM players WHERE host = '%s'" % str(host)))[0]
     except (duckdb.IOException, IndexError):
         return None
 
 
 def get_all_players() -> List[player.Player]:
-    """ Returns all players as a list of `audera.models.player.Player` objects. """
+    """Returns all players as a list of `audera.models.player.Player` objects."""
     try:
         with connection() as conn:
             return query_to_players(conn.execute('SELECT * FROM players'))
@@ -180,11 +164,9 @@ def get_all_players() -> List[player.Player]:
 
 
 def get_all_connected_players() -> List[player.Player]:
-    """ Returns all connected players as a list of `audera.models.player.Player` objects. """
+    """Returns all connected players as a list of `audera.models.player.Player` objects."""
     try:
         with connection() as conn:
-            return query_to_players(
-                conn.execute('SELECT * FROM players WHERE connected = True')
-            )
+            return query_to_players(conn.execute('SELECT * FROM players WHERE connected = True'))
     except duckdb.IOException:
         return []

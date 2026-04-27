@@ -1,4 +1,4 @@
-""" Logging """
+"""Logging"""
 
 import logging
 
@@ -25,16 +25,11 @@ class Logger(logging.Logger):
         super().__init__(*args, **kwargs)
 
 
-class logger():
-    """ A `class` that represents a generic logging handler. """
+class logger:
+    """A `class` that represents a generic logging handler."""
 
-    def __init__(
-        self,
-        name: str = __name__,
-        level: int = logging.DEBUG,
-        text_color: str = RESET
-    ):
-        """ Creates an instance of the generic logger.
+    def __init__(self, name: str = __name__, level: int = logging.DEBUG, text_color: str = RESET):
+        """Creates an instance of the generic logger.
 
         Parameters
         ----------
@@ -52,94 +47,80 @@ class logger():
         if not self.logger.handlers:
             debugger = logging.StreamHandler()
             debugger.setLevel(level=level)
-            debugger.setFormatter(
-                fmt=logging.Formatter(
-                    f'{text_color}[{name}] %(message)s{RESET}'
-                )
-            )
+            debugger.setFormatter(fmt=logging.Formatter(f'{text_color}[{name}] %(message)s{RESET}'))
             self.logger.addHandler(hdlr=debugger)
 
     def get(self):
-        """ Returns the logger instance. """
+        """Returns the logger instance."""
         return self.logger
 
     def message(self, message: str):
-        """ Logs message with an un-set severity.
+        """Logs message with an un-set severity.
 
         Parameters
         ----------
         message: `str`
             The log-message content.
         """
-        self.logger.info(f"{message}")
+        self.logger.info(f'{message}')
 
     def debug(self, message: str):
-        """ Logs message with severity `DEBUG`.
+        """Logs message with severity `DEBUG`.
 
         Parameters
         ----------
         message: `str`
             The log-message content.
         """
-        self.logger.debug(
-            f"{COLORS['blue']}    DEBUG: {message}{RESET}"
-        )
+        self.logger.debug(f'{COLORS["blue"]}    DEBUG: {message}{RESET}')
 
     def info(self, message: str):
-        """ Logs message with severity `INFO`.
+        """Logs message with severity `INFO`.
 
         Parameters
         ----------
         message: `str`
             The log-message content.
         """
-        self.logger.info(
-            f"    INFO: {message}"
-        )
+        self.logger.info(f'    INFO: {message}')
 
     def warning(self, message: str):
-        """ Logs message with severity `WARNING`.
+        """Logs message with severity `WARNING`.
 
         Parameters
         ----------
         message: `str`
             The log-message content.
         """
-        self.logger.warning(
-            f"{COLORS['yellow']}  * WARNING: {message}{RESET}"
-        )
+        self.logger.warning(f'{COLORS["yellow"]}  * WARNING: {message}{RESET}')
 
     def error(self, message: str):
-        """ Logs message with severity `ERROR`.
+        """Logs message with severity `ERROR`.
 
         Parameters
         ----------
         message: `str`
             The log-message content.
         """
-        self.logger.error(
-            f"{COLORS['red']} ** ERROR: {message}{RESET}"
-        )
+        self.logger.error(f'{COLORS["red"]} ** ERROR: {message}{RESET}')
 
     def critical(self, message: str):
-        """ Logs message with severity `CRITICAL`.
+        """Logs message with severity `CRITICAL`.
 
         Parameters
         ----------
         message: `str`
             The log-message content.
         """
-        self.logger.critical(
-            f"{COLORS['bold_red']}*** CRITICAL: {message}{RESET}"
-        )
+        self.logger.critical(f'{COLORS["bold_red"]}*** CRITICAL: {message}{RESET}')
 
 
 # Create application-loggers
 def get_streamer_logger() -> logger:
-    """ Get the `audera` streamer console logger. """
+    """Get the `audera` streamer console logger."""
     return logger(name='streamer')
 
 
 def get_player_logger() -> logger:
-    """ Get the `audera` player console logger. """
+    """Get the `audera` player console logger."""
     return logger(name=' player ')

@@ -1,4 +1,4 @@
-""" Settings configuration-layer """
+"""Settings configuration-layer"""
 
 import os
 from typing import Union
@@ -19,7 +19,7 @@ DTYPES: dict = {
 
 
 def exists() -> bool:
-    """ Returns `True` when the settings configuration file exists. """
+    """Returns `True` when the settings configuration file exists."""
     if os.path.isfile(os.path.abspath(os.path.join(PATH, FILE_NAME))):
         return True
     else:
@@ -27,7 +27,7 @@ def exists() -> bool:
 
 
 def create(settings_: settings.Settings) -> config.Handler:
-    """ Creates the settings configuration file and returns the contents
+    """Creates the settings configuration file and returns the contents
     as a `pytensils.config.Handler` object.
 
     Parameters
@@ -44,7 +44,7 @@ def create(settings_: settings.Settings) -> config.Handler:
 
 
 def get() -> config.Handler:
-    """ Returns the contents of the settings configuration as a
+    """Returns the contents of the settings configuration as a
     `pytensils.config.Handler` object.
     """
     config_ = config.Handler(path=PATH, file_name=FILE_NAME)
@@ -53,7 +53,7 @@ def get() -> config.Handler:
 
 
 def get_or_create(settings_: settings.Settings) -> config.Handler:
-    """ Creates or reads the settings configuration file and returns the contents as
+    """Creates or reads the settings configuration file and returns the contents as
     a `pytensils.config.Handler` object.
 
     Parameters
@@ -68,7 +68,7 @@ def get_or_create(settings_: settings.Settings) -> config.Handler:
 
 
 def save(settings_: settings.Settings) -> config.Handler:
-    """ Saves the settings configuration to `~/.audera/settings.json`.
+    """Saves the settings configuration to `~/.audera/settings.json`.
 
     Parameters
     ----------
@@ -84,7 +84,7 @@ def save(settings_: settings.Settings) -> config.Handler:
 
 
 def update(new: settings.Settings) -> settings.Settings:
-    """ Updates the settings configuration file `~/.audera/settings.json`.
+    """Updates the settings configuration file `~/.audera/settings.json`.
 
     Parameters
     ----------
@@ -102,11 +102,11 @@ def update(new: settings.Settings) -> settings.Settings:
 
 
 def delete():
-    """ Deletes the settings configuration file. """
+    """Deletes the settings configuration file."""
     if exists():
         os.remove(os.path.join(PATH, FILE_NAME))
 
 
 def get_settings() -> settings.Settings:
-    """ Returns the streamer settings as a `Settings` object. """
+    """Returns the streamer settings as a `Settings` object."""
     return settings.Settings.from_config(get())

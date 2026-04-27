@@ -1,1 +1,1 @@
-""" Audera streamer webserver """
+"""Audera streamer webserver"""

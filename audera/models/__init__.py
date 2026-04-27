@@ -1,4 +1,4 @@
-""" Structures """
+"""Structures"""
 
 from audera.models import dsp, identity, player, settings, stream
 

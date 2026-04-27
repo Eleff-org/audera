@@ -1,4 +1,4 @@
-""" Data-access directory management """
+"""Data-access directory management"""
 
 import os
 

@@ -22,9 +22,7 @@ def _wait_for_http(container, internal_port: int, path: str = '/', timeout: floa
             time.sleep(1)
     stdout, stderr = container.get_logs()
     raise TimeoutError(
-        f'HTTP {url} not ready after {timeout}s.\n'
-        f'stdout: {stdout.decode()[-2000:]}\n'
-        f'stderr: {stderr.decode()[-2000:]}'
+        f'HTTP {url} not ready after {timeout}s.\nstdout: {stdout.decode()[-2000:]}\nstderr: {stderr.decode()[-2000:]}'
     )
 
 
