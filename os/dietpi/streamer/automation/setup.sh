@@ -211,15 +211,26 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 
+# Create PlexAmp data directories
+mkdir -p /root/.local/share/Plexamp/Offline
+mkdir -p /root/.cache/Plexamp/log
+
 # plexamp service
 cat > /etc/systemd/system/plexamp.service <<'EOF'
 [Unit]
 Description=PlexAmp Headless
-After=network-online.target
+After=network-online.target nss-lookup.target
+Wants=network-online.target nss-lookup.target
 
 [Service]
-ExecStart=/usr/bin/node /opt/plexamp/js/index.js
+Environment=HOME=/root
+WorkingDirectory=/opt/plexamp
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do getent hosts plex.tv > /dev/null 2>&1 && break || sleep 2; done'
+ExecStart=/bin/bash -c 'export CLIENT_NAME=$(hostname -s); exec /usr/bin/node /opt/plexamp/js/index.js'
 Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -288,6 +299,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 echo
 echo ">>> Configuring avahi hostname"
 hostnamectl set-hostname audera
+grep -qxF '127.0.1.1 audera' /etc/hosts || echo '127.0.1.1 audera' >> /etc/hosts
 systemctl enable avahi-daemon
 systemctl restart avahi-daemon
 echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {audera.local}"

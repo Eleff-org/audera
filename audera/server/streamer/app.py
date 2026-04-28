@@ -1,10 +1,14 @@
 """Audera streamer NiceGUI webserver"""
 
+import asyncio
 import os
-import re
+import socket
 import subprocess
-from typing import Optional
+import uuid
+from importlib.metadata import version as _pkg_version
+from typing import Literal, Optional
 
+import httpx
 from dotenv import load_dotenv
 from nicegui import ui
 
@@ -14,6 +18,15 @@ from audera.models.settings import Settings
 from audera.services.snapserver import SnapserverClient
 
 load_dotenv()
+
+_PLEX_CLIENT_ID = str(uuid.uuid4())
+_PLEX_HEADERS = {
+    'X-Plex-Product': audera.NAME,
+    'X-Plex-Version': _pkg_version('audera'),
+    'X-Plex-Client-Identifier': _PLEX_CLIENT_ID,
+    'X-Plex-Platform': 'Linux',
+    'Accept': 'application/json',
+}
 
 
 def _load_settings() -> Settings:
@@ -29,42 +42,167 @@ def _snapserver(settings: Settings) -> SnapserverClient:
     return SnapserverClient(host=settings.snapserver_host, port=audera.SNAPSERVER_PORT)
 
 
-def _plexamp_status() -> str:
+def _plexamp_state() -> Literal['inactive', 'unclaimed', 'claimed']:
     try:
         result = subprocess.run(
             ['systemctl', 'is-active', 'plexamp'],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
-        return result.stdout.strip()
+        if result.stdout.strip() != 'active':
+            return 'inactive'
     except Exception:
-        return 'unknown'
-
-
-def _plexamp_claim_url() -> Optional[str]:
+        return 'inactive'
     try:
-        result = subprocess.run(
-            ['journalctl', '-u', 'plexamp', '-n', '200', '--no-pager', '-o', 'cat'],
-            capture_output=True, text=True, timeout=5,
-        )
-        match = re.search(r'https://plex\.tv/claim/\S+', result.stdout)
-        return match.group(0) if match else None
-    except Exception:
-        return None
+        with socket.create_connection(('127.0.0.1', audera.PLEXAMP_PORT), timeout=1):
+            return 'claimed'
+    except OSError:
+        return 'unclaimed'
 
 
+def _create_plex_pin() -> tuple[int, str]:
+    resp = httpx.post(
+        'https://plex.tv/api/v2/pins',
+        params={'strong': 'true'},
+        headers=_PLEX_HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data['id'], data['code']
+
+
+def _poll_plex_pin(pin_id: int) -> Optional[str]:
+    resp = httpx.get(
+        f'https://plex.tv/api/v2/pins/{pin_id}',
+        headers=_PLEX_HEADERS,
+        timeout=5,
+    )
+    resp.raise_for_status()
+    return resp.json().get('authToken') or None
+
+
+def _get_claim_token(auth_token: str) -> str:
+    resp = httpx.get(
+        'https://plex.tv/api/claim/token.json',
+        headers={**_PLEX_HEADERS, 'X-Plex-Token': auth_token},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()['token']
+
+
+def _restart_plexamp_with_claim(claim_token: str) -> None:
+    subprocess.run(['systemctl', 'stop', 'plexamp'], timeout=15, check=True)
+    override_dir = '/etc/systemd/system/plexamp.service.d'
+    os.makedirs(override_dir, exist_ok=True)
+    with open(f'{override_dir}/claim.conf', 'w') as f:
+        f.write(f'[Service]\nEnvironment=PLEXAMP_CLAIM_TOKEN={claim_token}\n')
+    subprocess.run(['systemctl', 'daemon-reload'], timeout=10, check=True)
+    subprocess.run(['systemctl', 'start', 'plexamp'], timeout=10, check=True)
+
+
+def _remove_claim_override() -> None:
+    override = '/etc/systemd/system/plexamp.service.d/claim.conf'
+    if os.path.exists(override):
+        os.remove(override)
+    subprocess.run(['systemctl', 'daemon-reload'], timeout=10)
+
+
+@ui.refreshable
 def _build_services_tab():
-    """Renders the Services tab — shows status and claim URL for background services."""
-    status = _plexamp_status()
+    """Renders the Services tab — shows PlexAmp status and a browser-based OAuth claiming flow."""
+    state = _plexamp_state()
+
     with ui.card().classes('w-full mb-2'):
         with ui.row().classes('items-center justify-between w-full'):
             ui.label('PlexAmp Headless').classes('font-medium')
-            ui.label(status).classes('text-sm ' + ('text-green-500' if status == 'active' else 'text-red-500'))
-        claim_url = _plexamp_claim_url()
-        if claim_url:
-            ui.label('Claim this player:').classes('text-sm text-gray-500 mt-1')
-            ui.link(claim_url, claim_url).classes('text-sm break-all')
-        elif status == 'active':
+            if state == 'claimed':
+                ui.label('available').classes('text-sm text-green-500')
+            elif state == 'unclaimed':
+                ui.label('setup required').classes('text-sm text-amber-500')
+            else:
+                ui.label('inactive').classes('text-sm text-red-500')
+
+        if state == 'claimed':
             ui.link('Open PlexAmp', 'https://plexamp.local').classes('text-sm mt-1')
+
+        elif state == 'unclaimed':
+            connect_btn = ui.button('Connect with Plex').classes('mt-2')
+            status_label = ui.label('').classes('text-sm text-gray-500 mt-1')
+
+            async def _on_connect():
+                connect_btn.disable()
+                status_label.set_text('Opening Plex authorization…')
+
+                try:
+                    pin_id, pin_code = await asyncio.to_thread(_create_plex_pin)
+                except Exception as exc:
+                    status_label.set_text(f'Error: {exc}')
+                    connect_btn.enable()
+                    return
+
+                auth_url = (
+                    f'https://app.plex.tv/auth/#!?clientID={_PLEX_CLIENT_ID}'
+                    f'&code={pin_code}'
+                    f'&context%5Bdevice%5D%5Bproduct%5D={audera.NAME}'
+                )
+                await ui.run_javascript(f"window.open('{auth_url}', '_blank')")
+                status_label.set_text('Waiting for Plex authorization…')
+
+                deadline = asyncio.get_event_loop().time() + 300  # 5-minute timeout
+                poll_timer: list[ui.timer] = []
+
+                async def _poll_auth():
+                    if asyncio.get_event_loop().time() > deadline:
+                        poll_timer[0].cancel()
+                        status_label.set_text('Authorization timed out. Please try again.')
+                        connect_btn.enable()
+                        return
+
+                    try:
+                        auth_token = await asyncio.to_thread(_poll_plex_pin, pin_id)
+                    except Exception:
+                        return  # transient error; retry on next tick
+
+                    if not auth_token:
+                        return
+
+                    poll_timer[0].cancel()
+                    status_label.set_text('Authorized. Claiming PlexAmp…')
+
+                    try:
+                        claim_token = await asyncio.to_thread(_get_claim_token, auth_token)
+                        await asyncio.to_thread(_restart_plexamp_with_claim, claim_token)
+                    except Exception as exc:
+                        status_label.set_text(f'Claim failed: {exc}')
+                        connect_btn.enable()
+                        return
+
+                    status_label.set_text('PlexAmp restarting…')
+
+                    port_deadline = asyncio.get_event_loop().time() + 120
+                    port_timer: list[ui.timer] = []
+
+                    async def _poll_port():
+                        if asyncio.get_event_loop().time() > port_deadline:
+                            port_timer[0].cancel()
+                            _remove_claim_override()
+                            status_label.set_text('PlexAmp did not come up in time. Check the service.')
+                            connect_btn.enable()
+                            return
+
+                        if _plexamp_state() == 'claimed':
+                            port_timer[0].cancel()
+                            _remove_claim_override()
+                            _build_services_tab.refresh()
+
+                    port_timer.append(ui.timer(2.0, _poll_port))
+
+                poll_timer.append(ui.timer(2.0, _poll_auth))
+
+            connect_btn.on('click', _on_connect)
 
 
 def _build_players_tab(settings_: Settings):
