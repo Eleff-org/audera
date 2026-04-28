@@ -131,6 +131,8 @@ def _build_services_tab():
         elif state == 'unclaimed':
             connect_btn = ui.button('Connect with Plex').classes('mt-2')
             status_label = ui.label('').classes('text-sm text-gray-500 mt-1')
+            auth_link = ui.link("Didn't open? Click here to authorize with Plex", '#', new_tab=True).classes('text-sm mt-1')
+            auth_link.set_visibility(False)
 
             async def _on_connect():
                 connect_btn.disable()
@@ -148,8 +150,10 @@ def _build_services_tab():
                     f'&code={pin_code}'
                     f'&context%5Bdevice%5D%5Bproduct%5D={audera.NAME}'
                 )
-                await ui.run_javascript(f"window.open('{auth_url}', '_blank')")
+                ui.navigate.to(auth_url, new_tab=True)
                 status_label.set_text('Waiting for Plex authorization…')
+                auth_link.props(f'href="{auth_url}"')
+                auth_link.set_visibility(True)
 
                 deadline = asyncio.get_event_loop().time() + 300  # 5-minute timeout
                 poll_timer: list[ui.timer] = []
