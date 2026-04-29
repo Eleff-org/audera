@@ -61,6 +61,7 @@ class SnapserverClient:
         clients = []
         for group in status.get('server', {}).get('groups', []):
             for client in group.get('clients', []):
+                config_name = client.get('config', {}).get('name', '').strip()
                 clients.append(
                     player.Player(
                         id=client['id'],
@@ -70,6 +71,7 @@ class SnapserverClient:
                         volume=client['config']['volume']['percent'],
                         muted=client['config']['volume']['muted'],
                         group_id=group['id'],
+                        name=config_name if config_name else client['host'].get('name', client['host']['ip']),
                     )
                 )
         return clients
@@ -99,7 +101,7 @@ class SnapserverClient:
         client_id: `str`
             The Snapcast client identifier.
         percent: `int`
-            The volume level (0–100).
+            The volume level (0-100).
         muted: `bool`
             Whether the client is muted.
         """

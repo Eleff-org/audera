@@ -38,6 +38,7 @@ class Player:
     volume: int = field(default=100)
     muted: bool = field(default=False)
     group_id: str = field(default='')
+    name: str = field(default='')
 
     def from_dict(dict_object: dict) -> Player:
         """Returns a `Player` object from a `dict`."""

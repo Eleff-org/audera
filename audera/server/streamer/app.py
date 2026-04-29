@@ -1,6 +1,7 @@
 """Audera streamer NiceGUI webserver"""
 
 import asyncio
+import json
 import os
 import socket
 import subprocess
@@ -228,14 +229,25 @@ def _build_players_tab(settings_: Settings):
     for client in clients:
         with ui.card().classes('w-full mb-2'):
             with ui.row().classes('items-center justify-between w-full'):
-                ui.label(client.host).classes('font-medium')
-                ui.label(
-                    '%s%s'
-                    % (
-                        group_map.get(client.group_id, client.group_id),
-                        '' if client.connected else ' (disconnected)',
+                ui.label(client.name).classes('font-medium')
+                with ui.row().classes('items-center gap-2'):
+                    ui.label(
+                        '%s%s'
+                        % (
+                            group_map.get(client.group_id, client.group_id),
+                            '' if client.connected else ' (disconnected)',
+                        )
+                    ).classes('text-sm text-gray-500')
+                    with ui.dialog() as detail_dialog, ui.card():
+                        ui.label(client.name).classes('font-medium mb-2')
+                        ui.code(
+                            json.dumps({**client.to_dict(), 'name': client.name}, indent=2),
+                            language='json',
+                        ).classes('text-xs')
+                        ui.button('Close', on_click=detail_dialog.close).props('flat dense').classes('mt-2')
+                    ui.button(on_click=detail_dialog.open).props('icon=info flat dense round size=xs').classes(
+                        'text-gray-400'
                     )
-                ).classes('text-sm text-gray-500')
             with ui.row().classes('items-center gap-4'):
                 ui.slider(
                     min=0,
