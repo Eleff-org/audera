@@ -213,7 +213,11 @@ EOF
 
 # Create PlexAmp data directories
 mkdir -p /root/.local/share/Plexamp/Offline
+mkdir -p /root/.local/share/Plexamp/Settings
 mkdir -p /root/.cache/Plexamp/log
+
+# Pre-configure PlexAmp audio device to route through snapfifo pipe
+echo -n "Splexamp_output" > "/root/.local/share/Plexamp/Settings/%40Plexamp%3Asettings%3AaudioDeviceUuid"
 
 # plexamp service
 cat > /etc/systemd/system/plexamp.service <<'EOF'
