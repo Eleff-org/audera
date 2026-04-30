@@ -140,13 +140,6 @@ audera conf streamer snapserver.conf > "$SNAPSERVER_CONFIG"
 chmod 644 "$SNAPSERVER_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] Snapserver configured successfully"
 
-# Write ALSA configuration
-echo
-echo ">>> Installing ALSA configuration"
-audera conf streamer asound.conf > "$ASOUND_CONFIG"
-chmod 644 "$ASOUND_CONFIG"
-echo -e "[  ${GREEN}OK${RESET}  ] ALSA configured successfully"
-
 # Write CamillaDSP configuration
 echo
 echo ">>> Creating the CamillaDSP configuration"
@@ -376,6 +369,12 @@ echo ">>> Configuring alsa"
 SOUNDCARD=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 echo ">>> Assigning {$SOUNDCARD} as the default soundcard"
 /boot/dietpi/func/dietpi-set_hardware soundcard $SOUNDCARD
+
+# Write ALSA configuration (must run after dietpi-set_hardware, which overwrites asound.conf)
+echo
+echo ">>> Installing ALSA configuration"
+audera conf streamer asound.conf > "$ASOUND_CONFIG"
+chmod 644 "$ASOUND_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
 
 # Set up the autostart script
