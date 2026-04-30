@@ -190,7 +190,7 @@ Wants=avahi-daemon.service
 After=network-online.target time-sync.target sound.target avahi-daemon.service snapserver.service
 
 [Service]
-ExecStart=/usr/bin/snapclient --soundcard hw:Loopback,0 --sampleformat 48000:32:*
+ExecStart=/usr/bin/snapclient --host 127.0.0.1 --soundcard hw:Loopback,0 --sampleformat 48000:32:*
 Restart=on-failure
 
 [Install]

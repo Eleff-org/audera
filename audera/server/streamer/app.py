@@ -210,6 +210,19 @@ def _build_services_tab():
             connect_btn.on('click', _on_connect)
 
 
+def _build_volume_controls(client_id: str, initial_volume: int, initial_muted: bool, settings_: Settings):
+    """Renders volume slider and mute checkbox with live cross-references to avoid stale closure bugs."""
+
+    def _on_volume(e):
+        _snapserver(settings_).set_client_volume(client_id, int(e.value), mute_cb.value)
+
+    def _on_mute(e):
+        _snapserver(settings_).set_client_volume(client_id, int(slider.value), e.value)
+
+    slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
+    mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
+
+
 def _build_players_tab(settings_: Settings):
     """Renders the Players tab — lists Snapcast clients with per-client volume and mute controls."""
     snap = _snapserver(settings_)
@@ -249,21 +262,7 @@ def _build_players_tab(settings_: Settings):
                         'text-gray-400'
                     )
             with ui.row().classes('items-center gap-4'):
-                ui.slider(
-                    min=0,
-                    max=100,
-                    value=client.volume,
-                    on_change=lambda e, cid=client.id, m=client.muted: _snapserver(settings_).set_client_volume(
-                        cid, int(e.value), m
-                    ),
-                ).classes('w-48')
-                ui.checkbox(
-                    'Mute',
-                    value=client.muted,
-                    on_change=lambda e, cid=client.id, v=client.volume: _snapserver(settings_).set_client_volume(
-                        cid, v, e.value
-                    ),
-                )
+                _build_volume_controls(client.id, client.volume, client.muted, settings_)
 
 
 def _build_settings_tab(settings_: Settings):
