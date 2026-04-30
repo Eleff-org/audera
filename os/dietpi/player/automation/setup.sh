@@ -140,7 +140,8 @@ After=sound.target snapclient.service
 
 [Service]
 ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG -p 1234
-Restart=on-failure
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -186,7 +187,9 @@ echo
 echo ">>> Setting up network-manager"
 sed -i '/^\[ifupdown\]/,/^\[/s/managed=false/managed=true/' /etc/NetworkManager/NetworkManager.conf
 systemctl enable NetworkManager
-systemctl restart NetworkManager
+# Restart in a detached subshell so a transient SSH disconnect doesn't kill the script
+nohup sh -c 'sleep 1 && systemctl restart NetworkManager' > /dev/null 2>&1 &
+sleep 5
 nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
