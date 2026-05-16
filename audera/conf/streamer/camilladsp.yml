@@ -2,18 +2,70 @@
 devices:
   samplerate: 48000
   chunksize: 1024
+  
+  # DRIFT: Enables monitoring the buffer level to sync Capture and Playback clocks.
+  enable_rate_adjust: true
+  
+  # LATENCY STABILITY: Desired number of samples in the playback buffer. 
+  # Set to equal chunksize for a balance of stability and low "blind" latency.
+  target_level: 1024
+  
+  # REACTION SPEED: How often (in seconds) to calculate the correction ratio.
+  # 5s is responsive enough for network streams without causing audible pitch "wobble."
+  adjust_period: 5
+
+  # EFFICIENCY: Set to 'false' to use ALSA's internal clock adjustment for the loopback.
+  # This saves significant CPU power on the RPi Zero 2 W.
+  enable_resampling: false
+
+  # RESAMPLER SETTINGS (Commented Out):
+  # resampler:
+    #   type: FastAsync
+    #   # capture_samplerate: 44100 # Uncomment if your source is 44.1k and DAC is 48k.
+
+    # --- RESAMPLER PROFILE GUIDE ---
+    # If 'enable_resampling: false' causes clicks/pops, switch to 'true' and use:
+    #
+    # 1. FastAsync:
+    #    - The "Pi Zero" choice. Uses the least CPU. 
+    #    - Good for rate adjustment where the ratio is very close to 1:1.
+    # 2. BalancedAsync:
+    #    - Higher quality, but may cause CPU spikes on a Pi Zero 2 W.
+    # 3. AccurateAsync:
+    #    - Best quality. Avoid on Pi Zero; intended for Pi 4 or desktop PCs.
+
+  # ADVANCED POWER/SAFETY SETTINGS: Saves CPU when music is paused
+  silence_threshold: -100
+  silence_timeout: 10.0
+
+  # HANGING: Ensures CamillaDSP exits cleanly if the input sample rate changes
+  stop_on_rate_change: true
+
   capture:
     type: Alsa
     channels: 2
     device: "hw:Loopback,1"
     format: S32LE
-    # snapclient writes to hw:Loopback,0 at 48000:32:2; this paired device reads it
+
+    # Explicit buffer prevents driver-negotiated values from varying across DAC hardware
+    buffersize: 4096
+
+    # Prevent the service from crashing if Snapclient is not sending data yet
+    retry_on_error: true
+
   playback:
     type: Alsa
     channels: 2
-    device: "hw:0"
+    device: "hw:0" # Must match the DAC soundcard index
     format: S32LE
 
+    # Explicit buffer prevents driver-negotiated values from varying across DAC hardware
+    buffersize: 4096
+
+    # Prevent quantization noise for digital volume/filters  
+    dither_type: Triangular
+
+# Essential even if empty for the config to be valid
 filters: {}
 
 pipeline: []
