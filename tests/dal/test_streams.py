@@ -22,7 +22,7 @@ def test_stream_get(audera_home):
     stream = _make_stream()
     streams.create(stream)
 
-    result = streams.get_stream(stream.id)
+    result = streams.get(stream.id)
     assert result == stream
 
 
@@ -39,7 +39,7 @@ def test_stream_update(audera_home):
     )
     streams.update(updated)
 
-    result = streams.get_stream(stream.id)
+    result = streams.get(stream.id)
     assert result.status == 'playing'
     assert result.current_track == 'Artist — Song'
 
@@ -71,7 +71,7 @@ def test_stream_current_track_none_roundtrip(audera_home):
     stream = _make_stream()
     streams.create(stream)
 
-    result = streams.get_stream(stream.id)
+    result = streams.get(stream.id)
     assert result.current_track is None
 
 
@@ -79,5 +79,5 @@ def test_stream_current_track_set_roundtrip(audera_home):
     stream = Stream(id='s1', name='Test', uri='', status='playing', current_track='Band — Track')
     streams.create(stream)
 
-    result = streams.get_stream(stream.id)
+    result = streams.get(stream.id)
     assert result.current_track == 'Band — Track'

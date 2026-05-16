@@ -25,7 +25,7 @@ subdirectory, so no real `~/.audera` files are touched.
 Do not patch `audera.dal.path.HOME` — the `PATH` constants are computed at
 import time and will not reflect a late patch.
 
-## Service tests
+## Client tests
 
 | File | Strategy |
 |---|---|
@@ -43,7 +43,7 @@ Each fixture directory contains a `README.md` that documents what the fixtures c
 
 ```bash
 uv run pytest tests/dal/ -v                          # DAL only — no Docker required
-uv run pytest tests/services/test_snapserver.py -v  # requires Docker
-uv run pytest tests/services/ -v                     # all service tests
+uv run pytest tests/clients/test_snapserver.py -v   # requires Docker
+uv run pytest tests/clients/ -v                      # all client tests
 uv run pytest -v                                     # everything
 ```

@@ -178,6 +178,16 @@ apt-get purge -y ifupdown
 sed -i '/^[[:space:]]*[^#[:space:]]/s/^/# /' /etc/network/interfaces
 echo -e "[  ${GREEN}OK${RESET}  ] ifupdown purged successfully"
 
+# Derive hostname from MAC address
+echo
+echo ">>> Configuring hostname from MAC address"
+MAC=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address)
+SHORT=$(echo "$MAC" | tr -d ':' | tail -c 7)
+NEW_HOSTNAME="audera-${SHORT}"
+hostnamectl set-hostname "$NEW_HOSTNAME"
+echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
+echo -e "[  ${GREEN}OK${RESET}  ] Hostname configured as {${NEW_HOSTNAME}}"
+
 # Setup network-manager
 
 # Network-manager should manage all network devices,

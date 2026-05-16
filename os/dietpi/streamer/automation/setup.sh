@@ -224,7 +224,7 @@ Wants=network-online.target nss-lookup.target
 Environment=HOME=/root
 WorkingDirectory=/opt/plexamp
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do getent hosts plex.tv > /dev/null 2>&1 && break || sleep 2; done'
-ExecStart=/bin/bash -c 'export CLIENT_NAME=$(hostname -s); exec /usr/bin/node /opt/plexamp/js/index.js'
+ExecStart=/bin/bash -c 'export CLIENT_NAME=Audera; exec /usr/bin/node /opt/plexamp/js/index.js'
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT
@@ -295,14 +295,17 @@ sleep 5
 nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
-# Configure avahi hostname
+# Derive hostname from MAC address
 echo
-echo ">>> Configuring avahi hostname"
-hostnamectl set-hostname audera
-grep -qxF '127.0.1.1 audera' /etc/hosts || echo '127.0.1.1 audera' >> /etc/hosts
+echo ">>> Configuring hostname from MAC address"
+MAC=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address)
+SHORT=$(echo "$MAC" | tr -d ':' | tail -c 7)
+NEW_HOSTNAME="audera-${SHORT}"
+hostnamectl set-hostname "$NEW_HOSTNAME"
+echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
 systemctl enable avahi-daemon
 systemctl restart avahi-daemon
-echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {audera.local}"
+echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {${NEW_HOSTNAME}.local}"
 
 # Generate self-signed TLS certificate for audera.local
 echo

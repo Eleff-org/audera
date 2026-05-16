@@ -4,8 +4,8 @@ from pathlib import Path
 import respx
 from httpx import Response
 
+from audera.clients import PlexAmpClient
 from audera.models.stream import Stream
-from audera.services.plexamp import PlexAmpClient
 
 _BASE = 'http://127.0.0.1:32500'
 _CLIENT = PlexAmpClient('127.0.0.1', 32500)

@@ -1,11 +1,10 @@
 """Access point management"""
 
+import socket
 import subprocess
 import time
+from typing import Literal
 
-from typing_extensions import Literal
-
-from audera import models
 from audera.services import netifaces, platform
 
 
@@ -18,9 +17,6 @@ class AccessPoint:
         The name of the access point.
     url: `str`
         The url web-address for accessing the access point.
-    identity: `audera.struct.identity.Identity`
-        The `audera.struct.identity.Identity` containing the unique identity of the
-            network device.
     interface: `str`
         The wireless network interface.
     ap_interface: `str`
@@ -32,7 +28,6 @@ class AccessPoint:
         self,
         name: str,
         url: str,
-        identity: models.identity.Identity,
         interface: Literal['wlan0'],
         ap_interface: Literal['ap0'] = 'ap0',
     ):
@@ -44,9 +39,6 @@ class AccessPoint:
             The name of the access point.
         url: `str`
             The url web-address for accessing the access point.
-        identity: `audera.struct.identity.Identity`
-            The `audera.struct.identity.Identity` containing the unique identity of the
-                network device.
         interface: `Literal['wlan0']`
             The wireless network interface.
         ap_interface: `Literal['ap0']`
@@ -55,7 +47,7 @@ class AccessPoint:
         self.url = url.replace('https://', '').replace('http://', '')
         self.interface = interface
         self.ap_interface = ap_interface
-        self.hostname = '-'.join([name.strip().lower(), identity.short_uuid])
+        self.hostname = socket.gethostname()
 
     @platform.requires('dietpi')
     def start(self):

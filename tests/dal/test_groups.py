@@ -23,7 +23,7 @@ def test_group_get(audera_home):
     group = _make_group()
     groups.create(group)
 
-    result = groups.get_group(group.id)
+    result = groups.get(group.id)
     assert result == group
 
 
@@ -41,7 +41,7 @@ def test_group_update(audera_home):
     )
     groups.update(updated)
 
-    result = groups.get_group(group.id)
+    result = groups.get(group.id)
     assert result.volume == 60
     assert result.muted is True
     assert result.stream_id == 'stream-1'
@@ -77,7 +77,7 @@ def test_attach_client(audera_home):
     result = groups.attach_client(group.id, 'client-x')
     assert 'client-x' in result.client_ids
 
-    on_disk = groups.get_group(group.id)
+    on_disk = groups.get(group.id)
     assert 'client-x' in on_disk.client_ids
 
 
@@ -87,7 +87,7 @@ def test_attach_client_idempotent(audera_home):
     groups.attach_client(group.id, 'client-x')
     groups.attach_client(group.id, 'client-x')
 
-    result = groups.get_group(group.id)
+    result = groups.get(group.id)
     assert result.client_ids.count('client-x') == 1
 
 
@@ -96,7 +96,7 @@ def test_detach_client(audera_home):
     groups.create(group)
 
     groups.detach_client(group.id, 'client-x')
-    result = groups.get_group(group.id)
+    result = groups.get(group.id)
     assert 'client-x' not in result.client_ids
 
 
@@ -105,5 +105,5 @@ def test_assign_stream(audera_home):
     groups.create(group)
 
     groups.assign_stream(group.id, 'stream-abc')
-    result = groups.get_group(group.id)
+    result = groups.get(group.id)
     assert result.stream_id == 'stream-abc'

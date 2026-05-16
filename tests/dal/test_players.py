@@ -24,7 +24,7 @@ def test_player_get(audera_home):
     player = _make_player()
     players.create(player)
 
-    result = players.get_player(player.id)
+    result = players.get(player.id)
     assert result == player
 
 
@@ -43,7 +43,7 @@ def test_player_update(audera_home):
     )
     players.update(updated)
 
-    result = players.get_player(player.id)
+    result = players.get(player.id)
     assert result.volume == 50
     assert result.muted is True
     assert result.group_id == 'group-1'

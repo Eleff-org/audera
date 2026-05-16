@@ -14,9 +14,9 @@ from dotenv import load_dotenv
 from nicegui import ui
 
 import audera
+from audera.clients import SnapserverClient
 from audera.dal import settings as settings_dal
 from audera.models.settings import Settings
-from audera.services.snapserver import SnapserverClient
 
 load_dotenv()
 
@@ -32,7 +32,7 @@ _PLEX_HEADERS = {
 
 def _load_settings() -> Settings:
     if settings_dal.exists():
-        return settings_dal.get_settings()
+        return settings_dal.get()
     return Settings(
         plexamp_host=os.getenv('AUDERA_PLEXAMP_HOST', 'localhost'),
         snapserver_host=os.getenv('AUDERA_SNAPSERVER_HOST', 'localhost'),
@@ -210,6 +210,11 @@ def _build_services_tab():
             connect_btn.on('click', _on_connect)
 
 
+def _rename_client(client_id: str, name: str, settings_: Settings) -> None:
+    if name:
+        _snapserver(settings_).set_client_name(client_id, name)
+
+
 def _build_volume_controls(client_id: str, initial_volume: int, initial_muted: bool, settings_: Settings):
     """Renders volume slider and mute checkbox with live cross-references to avoid stale closure bugs."""
 
@@ -258,11 +263,17 @@ def _build_players_tab(settings_: Settings):
                             language='json',
                         ).classes('text-xs')
                         ui.button('Close', on_click=detail_dialog.close).props('flat dense').classes('mt-2')
-                    ui.button(on_click=detail_dialog.open).props('icon=info flat dense round size=xs').classes(
-                        'text-gray-400'
-                    )
+                    ui.button(on_click=detail_dialog.open).props('icon=info flat dense round size=xs').classes('text-gray-400')
             with ui.row().classes('items-center gap-4'):
                 _build_volume_controls(client.id, client.volume, client.muted, settings_)
+            with ui.row().classes('items-center gap-2 mt-1'):
+                rename_input = (
+                    ui.input(value=client.name, placeholder='Rename').props('dense outlined rounded-md').classes('w-40')
+                )
+                ui.button(
+                    'Rename',
+                    on_click=lambda c=client, inp=rename_input: _rename_client(c.id, inp.value, settings_),
+                ).props('flat dense rounded')
 
 
 def _build_settings_tab(settings_: Settings):

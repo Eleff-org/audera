@@ -7,7 +7,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(ls \"T:\\\\Documents\\\\Projects\\\\Audera\\\\tests\\\\services\\\\\\\\\")",
       "Bash(bash *)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "Bash(find *)"
     ]
   }
 }

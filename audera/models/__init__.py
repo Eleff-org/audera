@@ -1,5 +1,5 @@
 """Structures"""
 
-from audera.models import dsp, identity, player, settings, stream
+from audera.models import dsp, player, settings, stream
 
-__all__ = ['identity', 'player', 'stream', 'dsp', 'settings']
+__all__ = ['player', 'stream', 'dsp', 'settings']

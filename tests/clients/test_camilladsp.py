@@ -1,6 +1,6 @@
 import pytest
 
-from audera.services.camilladsp import CamillaDSPClient
+from audera.clients import CamillaDSPClient
 
 
 @pytest.fixture

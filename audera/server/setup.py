@@ -2,10 +2,9 @@
 
 import os
 import time
-from typing import Literal
+from typing import Dict, List, Literal, Optional, Union
 
 from nicegui import app, ui
-from typing_extensions import Dict, List, Union
 
 import audera
 
@@ -15,8 +14,6 @@ class Page:
 
     Parameters
     ----------
-    identity: `audera.models.identity.Identity`
-        An instance of an `audera.models.identity.Identity` object.
     role: `Literal['streamer', 'player']`
         The device role, used to customise page labels and finish-page instructions.
     """
@@ -24,20 +21,16 @@ class Page:
     @audera.platform.requires('dietpi')
     def __init__(
         self,
-        identity: audera.models.identity.Identity,
         role: Literal['streamer', 'player'] = 'player',
     ):
         """Initializes an instance of the device setup app.
 
         Parameters
         ----------
-        identity: `audera.models.identity.Identity`
-            An instance of an `audera.models.identity.Identity` object.
         role: `Literal['streamer', 'player']`
             The device role, used to customise page labels and finish-page instructions.
         """
 
-        self.identity = identity
         self.role = role
 
         # Initialize connected network ssid
@@ -48,9 +41,7 @@ class Page:
         self.wifi_networks: Dict[str, List[str]] = {}
 
         # Initialize access-point
-        self.ap = audera.ap.AccessPoint(
-            name=audera.NAME, url='http://%s-setup.audera.com' % role, interface='wlan0', identity=identity
-        )
+        self.ap = audera.ap.AccessPoint(name=audera.NAME, url='http://%s-setup.audera.com' % role, interface='wlan0')
 
         try:
             self.ap.start()
@@ -58,25 +49,8 @@ class Page:
             raise audera.ap.AccessPointError('Access-point setup is only available on dietpi-os.')
 
     @property
-    def name(self):
-        return self.identity.name
-
-    @property
     def available_networks(self):
         return [f'{key} 🔒' if value else key for key, value in self.wifi_networks.items()]
-
-    def update_name_callback(self, name: Union[str, None]):
-        """Updates the name of the device.
-
-        Parameters
-        ----------
-        name: `Union[str, None]`
-            The new name of the device.
-        """
-        if name and name != self.identity.name:
-            self.identity.name = str(name)
-            audera.dal.identities.save(self.identity)
-            ui.notify('%s name updated.' % self.role.capitalize(), position='top-right', type='positive')
 
     async def refresh_callback(self):
         """Refreshes the list of available Wi-Fi networks."""
@@ -90,7 +64,7 @@ class Page:
         # Stop
         self.network_refreshing = False
 
-    async def connect_callback(self, ssid: str, password: str):
+    async def connect_callback(self, ssid: str, password: Optional[str]):
         """Connects to an available Wi-Fi network and checks for a valid internet connection.
 
         Parameters
@@ -121,19 +95,6 @@ class Page:
                 )
                 self.connected_profile = ssid
 
-                # Update the identity with the now-assigned IP address.
-                try:
-                    self.identity = audera.dal.identities.update(
-                        audera.models.identity.Identity(
-                            name=self.identity.name,
-                            uuid=self.identity.uuid,
-                            mac_address=self.identity.mac_address,
-                            address=audera.netifaces.get_local_ip_address(),
-                        )
-                    )
-                except audera.netifaces.NetworkConnectionError:
-                    pass
-
                 ui.notify('Network `%s` connected successfully.' % ssid, position='top-right', type='positive')
 
             except RuntimeError:
@@ -141,9 +102,6 @@ class Page:
 
             except audera.netifaces.NetworkConnectionError as e:
                 ui.notify(str(e), position='top-right', type='negative')
-
-            except audera.netifaces.InternetConnectionError:
-                ui.notify('`%s` has no internet.' % ssid, position='top-right', type='negative')
 
             except audera.netifaces.NetworkTimeoutError:
                 ui.notify('`%s` is inaccessible.' % ssid, position='top-right', type='negative')
@@ -157,8 +115,6 @@ class Page:
     def load(self):
         """Returns the page content."""
         ui.page('/', title='%s \u2014 Welcome' % audera.NAME.lower())(self.welcome)
-        ui.page('/discover', title='%s \u2014 Discover' % audera.NAME.lower())(self.discover)
-        ui.page('/setup', title='%s \u2014 Setup' % audera.NAME.lower())(self.setup)
         ui.page('/connect', title='%s \u2014 Connect' % audera.NAME.lower())(self.connect)
         ui.page('/finish', title='%s \u2014 Finish' % audera.NAME.lower())(self.finish)
 
@@ -169,8 +125,6 @@ class Page:
             ui.label('%s \u2014 Welcome' % audera.NAME.lower()).classes('self-center text-sm ml-3')
             ui.icon('circle', size='.7rem', color='primary').classes('self-center ml-auto')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
 
         # Welcome
@@ -180,80 +134,7 @@ class Page:
             ui.markdown('Click **Start** to set up your %s.' % self.role)
 
             with ui.row().classes('flex w-full'):
-                ui.button('Start', on_click=lambda: ui.navigate.to('/discover')).props('rounded').classes('ml-auto normal-case')
-
-    async def discover(self):
-        """Returns the discover page content."""
-
-        with ui.row().classes('flex w-full'):
-            ui.label('%s \u2014 Discover' % audera.NAME.lower()).classes('self-center text-sm ml-3')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
-            ui.icon('circle', size='.7rem', color='primary').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
-
-        # Discover
-        with ui.card().classes('flex mx-auto w-full'):
-            ui.markdown('✨ Your **audera** %s connected successfully' % self.role).classes('text-3xl')
-
-            with ui.card().classes('mx-auto flex w-full'):
-                with ui.row().classes('flex items-center justify-center'):
-                    ui.icon('sym_r_speaker', size='lg').classes('text-lg')
-                    ui.chip(icon='sym_r_cast_connected', color='gray-200').bind_text_from(self, 'name').classes('font-md')
-
-            with ui.row().classes('flex w-full'):
-                ui.button('Back', on_click=lambda: ui.navigate.to('/')).props('flat rounded').classes('normal-case')
-                ui.button('Setup', on_click=lambda: ui.navigate.to('/setup')).props('rounded').classes('ml-auto normal-case')
-
-        # Pre-load the list of available Wi-Fi networks
-        self.wifi_networks = await audera.netifaces.get_wifi_networks(interface='wlan0')
-
-    def setup(self):
-        """Returns the setup page content."""
-
-        with ui.row().classes('flex w-full'):
-            ui.label('%s \u2014 Setup' % audera.NAME.lower()).classes('self-center text-sm ml-3')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='primary').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
-
-        # Setup
-        with ui.card().classes('mx-auto flex w-full'):
-            ui.markdown('Name your %s' % self.role).classes('text-3xl')
-            ui.markdown('Naming your **audera** %s will help organize your devices for playback sessions.' % self.role)
-            ui.input(
-                placeholder='Name',
-                value=self.identity.name,
-                autocomplete=[
-                    'Living Room',
-                    'Kitchen',
-                    'Bedroom',
-                    'Bathroom',
-                    'Dining Room',
-                    'Office',
-                    'Laundry Room',
-                    'Hallway',
-                    'Garage',
-                    'Guest Room',
-                    'Basement',
-                    'Utility Room',
-                    'She shed',
-                ],
-                validation={'The %s name cannot be empty.' % self.role: lambda value: value is not None},
-            ).props('clearable rounded-md outlined dense').classes('w-full').on(
-                'blur', lambda event: self.update_name_callback(event.sender.value)
-            ).on('keyboard.enter', lambda event: self.update_name_callback(event.sender.value)).on(
-                'keyboard.down', lambda event: self.update_name_callback(event.sender.value)
-            )
-
-            with ui.row().classes('flex w-full'):
-                ui.button('Back', on_click=lambda: ui.navigate.to('/discover')).props('flat rounded').classes('normal-case')
-                ui.button('Continue', on_click=lambda: ui.navigate.to('/connect')).props('rounded').classes(
-                    'ml-auto normal-case'
-                )
+                ui.button('Start', on_click=lambda: ui.navigate.to('/connect')).props('rounded').classes('ml-auto normal-case')
 
     def connect(self):
         """Returns the connect page content."""
@@ -261,8 +142,6 @@ class Page:
         with ui.row().classes('flex w-full'):
             ui.label('%s \u2014 Connect' % audera.NAME.lower()).classes('self-center text-sm ml-3')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
             ui.icon('circle', size='.7rem', color='primary').classes('self-center')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
 
@@ -305,7 +184,7 @@ class Page:
                     ui.spinner(size='md').bind_visibility_from(self, 'network_refreshing')
 
             with ui.row().classes('flex w-full'):
-                ui.button('Back', on_click=lambda: ui.navigate.to('/setup')).props('flat rounded').classes('normal-case')
+                ui.button('Back', on_click=lambda: ui.navigate.to('/')).props('flat rounded').classes('normal-case')
                 ui.button('Continue', on_click=lambda: ui.navigate.to('/finish')).bind_enabled_from(
                     self, 'connected_profile', backward=lambda enabled: True if enabled else False
                 ).props('rounded').classes('ml-auto normal-case')
@@ -324,8 +203,6 @@ class Page:
         with ui.row().classes('flex w-full'):
             ui.label('%s \u2014 Finish' % audera.NAME.lower()).classes('self-center text-sm ml-3')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
             ui.icon('circle', size='.7rem', color='primary').classes('self-center mr-3')
 
@@ -359,24 +236,8 @@ def run(role: Literal['streamer', 'player'] = 'player'):
         The device role, used to customise page labels and finish-page instructions.
     """
 
-    # Initialize identity
-    mac_address = audera.netifaces.get_local_mac_address()
-    try:
-        ip_address = audera.netifaces.get_local_ip_address()
-    except audera.netifaces.NetworkConnectionError:
-        ip_address = ''  # The device may not have an ip-address yet during initial setup
-
-    identity: audera.models.identity.Identity = audera.dal.identities.update(
-        audera.models.identity.Identity(
-            name=audera.models.identity.generate_cool_name(),
-            uuid=audera.models.identity.generate_uuid_from_mac_address(mac_address),
-            mac_address=mac_address,
-            address=ip_address,
-        )
-    )
-
     # Initialize the ui
-    page = Page(identity, role=role)
+    page = Page(role=role)
 
     # Load the page content
     page.load()

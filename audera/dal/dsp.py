@@ -29,12 +29,7 @@ def create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
     dsp_config: `audera.models.dsp.DSPConfig`
         An instance of an `audera.models.dsp.DSPConfig` object.
     """
-    if not os.path.isdir(PATH):
-        os.makedirs(PATH)
-    file_path = os.path.join(PATH, '.'.join([dsp_config.player_id, 'json']))
-    with open(file_path, 'w') as f:
-        json.dump({'dsp': dsp_config.to_dict()}, f, indent=2)
-    return dsp_config
+    return save(dsp_config)
 
 
 def get(player_id: str) -> dsp.DSPConfig:

@@ -19,12 +19,6 @@ COLORS = {
 RESET = '\033[0m'
 
 
-# Alias logging.Logger for type hinting
-class Logger(logging.Logger):
-    def __init__(self, args, kwargs):
-        super().__init__(*args, **kwargs)
-
-
 class logger:
     """A `class` that represents a generic logging handler."""
 
@@ -113,14 +107,3 @@ class logger:
             The log-message content.
         """
         self.logger.critical(f'{COLORS["bold_red"]}*** CRITICAL: {message}{RESET}')
-
-
-# Create application-loggers
-def get_streamer_logger() -> logger:
-    """Get the `audera` streamer console logger."""
-    return logger(name='streamer')
-
-
-def get_player_logger() -> logger:
-    """Get the `audera` player console logger."""
-    return logger(name=' player ')
