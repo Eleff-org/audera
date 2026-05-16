@@ -289,9 +289,7 @@ echo
 echo ">>> Setting up network-manager"
 sed -i '/^\[ifupdown\]/,/^\[/s/managed=false/managed=true/' /etc/NetworkManager/NetworkManager.conf
 systemctl enable NetworkManager
-# Restart in a detached subshell so a transient SSH disconnect doesn't kill the script
-nohup sh -c 'sleep 1 && systemctl restart NetworkManager' > /dev/null 2>&1 &
-sleep 5
+systemctl start NetworkManager
 nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
