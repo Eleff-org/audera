@@ -28,9 +28,9 @@ This combination introduces a fixed "blind" latency of approximately **43 ms** a
 
 ### 2. Hardware rate adjustment is preferred over software resampling
 
-`enable_resampling: false` is the default. This delegates clock adjustment to the ALSA loopback kernel driver, which has near-zero CPU cost. On an RPi Zero 2 W, software resampling imposes a measurable CPU load that competes with CamillaDSP's real-time processing budget.
+Omitting the `resampler` key entirely disables software resampling, delegating clock adjustment to the ALSA loopback kernel driver at near-zero CPU cost. On an RPi Zero 2 W, software resampling imposes a measurable CPU load that competes with CamillaDSP's real-time processing budget.
 
-If the ALSA loopback adjustment is insufficient (symptom: persistent clicks or pops), `enable_resampling: true` with `resampler.type: FastAsync` is the fallback. The resampler type hierarchy by CPU cost is:
+If the ALSA loopback adjustment is insufficient (symptom: persistent clicks or pops), add a `resampler` block with `type: FastAsync` as the fallback. The resampler type hierarchy by CPU cost is:
 
 1. **FastAsync** — lowest cost; sufficient when capture/playback ratio is close to 1:1.
 2. **BalancedAsync** — higher quality; may cause CPU spikes on the RPi Zero 2 W.
@@ -49,11 +49,7 @@ The pipeline is currently empty (`filters: {}`, `pipeline: []`). When filters ar
 
 `silence_threshold: -100` and `silence_timeout: 10.0` instruct CamillaDSP to suspend processing after 10 seconds of silence at or below −100 dBFS. This reduces CPU and power consumption when playback is paused.
 
-### 5. Triangular dither is applied at playback
-
-`dither_type: Triangular` is set on the playback device. As documented in ADR 002, CamillaDSP receives zero-padded 32-bit data (originally 16-bit from Snapserver). Any digital volume adjustment or filter operation produces sub-LSB residuals that truncation would alias. Triangular dither shapes this quantization noise below the audible threshold.
-
-### 6. Playback device address
+### 5. Playback device address
 
 Both player and streamer configs use `device: "hw:0"`. ADR 001 noted `hw:0,0` for the player historically; this has been unified to `hw:0` for consistency with the streamer. The `,0` sub-device specifier is redundant for the DigiAMP+ and ALSA resolves both forms to the same device node.
 
