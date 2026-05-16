@@ -301,9 +301,10 @@ SHORT=$(echo "$MAC" | tr -d ':' | tail -c 7)
 NEW_HOSTNAME="audera-${SHORT}"
 hostnamectl set-hostname "$NEW_HOSTNAME"
 echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
+sed -i '/^\[server\]/a host-name=audera' /etc/avahi/avahi-daemon.conf
 systemctl enable avahi-daemon
 systemctl restart avahi-daemon
-echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {${NEW_HOSTNAME}.local}"
+echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {audera.local} (system hostname: ${NEW_HOSTNAME})"
 
 # Generate self-signed TLS certificate for audera.local
 echo
