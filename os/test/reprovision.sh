@@ -64,7 +64,9 @@ done
 [[ "$DEVICE" == 'streamer' || "$DEVICE" == 'player' ]] || die "--device must be 'streamer' or 'player'"
 [[ "$WIPE_NETWORKS" -eq 1 && "$CHECK" -eq 1 ]] && die "--wipe-networks and --check are incompatible (device won't have WiFi after wipe)"
 
-SETUP_URL="https://raw.githubusercontent.com/Eleff-org/audera/${BRANCH}/os/dietpi/${DEVICE}/automation/setup.sh"
+BRANCH_URL="${BRANCH//#/%23}"
+
+SETUP_URL="https://raw.githubusercontent.com/Eleff-org/audera/${BRANCH_URL}/os/dietpi/${DEVICE}/automation/setup.sh"
 
 SED_STRIP="sed -i '/^echo.*Restarting/d; /^sleep 5\$/d; /^[[:space:]]*reboot[[:space:]]*\$/d' /tmp/audera_setup.sh"
 
