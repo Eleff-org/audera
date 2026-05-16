@@ -102,7 +102,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] uv installed successfully"
 # Install audera CLI
 echo
 echo ">>> Installing audera"
-UV_TOOL_BIN_DIR=/usr/local/bin uv tool install "git+${GIT_REPO_URL}@${GIT_BRANCH}"
+UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall "git+${GIT_REPO_URL}@${GIT_BRANCH}"
 export PATH="/usr/local/bin:$PATH"
 echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 
