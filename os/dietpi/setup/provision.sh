@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-provision an Audera device (streamer or player) from a Git branch over SSH.
+# Provision an Audera device (streamer or player) from a Git branch over SSH.
 set -euo pipefail
 
 DEVICE=''
