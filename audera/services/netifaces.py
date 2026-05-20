@@ -4,9 +4,9 @@ import asyncio
 import socket
 import subprocess
 import uuid
+from typing import Dict, List, Literal, Optional, Union
 
-import netifaces
-from typing_extensions import Dict, List, Literal, Union
+import netifaces  # type: ignore
 
 from audera.services import platform
 
@@ -88,7 +88,7 @@ def get_local_ip_address() -> str:
 
 
 @platform.requires('dietpi')
-def get_preferred_security_type(supported_security_types: Union[List[str], None]) -> str:
+def get_preferred_security_type(supported_security_types: Union[List[str], None]) -> Optional[str]:
     """Returns the preferred security type from a list of supported security types. WPA / WPA2
     security protocols are preferred, with experimental support for WPA3. WEP and WPA2-enterprise
     are not currently supported.

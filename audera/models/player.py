@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from typing import List
 
-from pytensils import config
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class Player:
+class Player(BaseModel):
     """A `class` that represents a Snapcast client.
 
     Attributes
@@ -29,36 +27,25 @@ class Player:
         Whether the client is muted.
     group_id: `str`
         The identifier of the Snapcast group this client belongs to.
+    name: `str`
+        The display name from Snapcast responses; not persisted.
     """
 
     id: str
     host: str
     port: int
-    connected: bool = field(default=False)
-    volume: int = field(default=100)
-    muted: bool = field(default=False)
-    group_id: str = field(default='')
-    name: str = field(default='')
+    connected: bool = False
+    volume: int = 100
+    muted: bool = False
+    group_id: str = ''
+    name: str = Field(default='', exclude=True)
 
-    def from_dict(dict_object: dict) -> Player:
+    @classmethod
+    def from_dict(cls, dict_object: dict) -> 'Player':
         """Returns a `Player` object from a `dict`."""
-        if not isinstance(dict_object, dict):
-            raise TypeError('Object must be a `dict`.')
-        missing_keys = [
-            key for key in ['id', 'host', 'port', 'connected', 'volume', 'muted', 'group_id'] if key not in dict_object
-        ]
-        if missing_keys:
-            raise KeyError(
-                'Missing keys. The `dict` object is missing the following required keys [%s].'
-                % (','.join(["'%s'" % key for key in missing_keys]))
-            )
-        return Player(**dict_object)
+        return cls.model_validate(dict_object)
 
-    def from_config(config: config.Handler) -> Player:
-        """Returns a `Player` object from a `pytensils.config.Handler` object."""
-        return Player.from_dict(config.to_dict()['player'])
-
-    def to_dict(self):
+    def to_dict(self) -> dict:
         """Returns a `Player` object as a `dict`."""
         return {
             'id': self.id,
@@ -70,12 +57,12 @@ class Player:
             'group_id': self.group_id,
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Returns a `Player` object as a json-formatted `str`."""
         return json.dumps(self.to_dict(), indent=2)
 
-    def __eq__(self, compare):
-        """Returns `True` when compare is an instance of self."""
+    def __eq__(self, compare) -> bool:
+        """Returns `True` when compare is an instance of self, excluding `name`."""
         if isinstance(compare, Player):
             return (
                 self.id == compare.id
@@ -88,9 +75,11 @@ class Player:
             )
         return False
 
+    def __hash__(self) -> int:
+        return hash(self.id)
 
-@dataclass
-class Group:
+
+class Group(BaseModel):
     """A `class` that represents a Snapcast group.
 
     Attributes
@@ -111,28 +100,17 @@ class Group:
 
     id: str
     name: str
-    client_ids: List[str] = field(default_factory=list)
-    stream_id: str = field(default='')
-    muted: bool = field(default=False)
-    volume: int = field(default=100)
+    client_ids: List[str] = Field(default_factory=list)
+    stream_id: str = ''
+    muted: bool = False
+    volume: int = 100
 
-    def from_dict(dict_object: dict) -> Group:
+    @classmethod
+    def from_dict(cls, dict_object: dict) -> 'Group':
         """Returns a `Group` object from a `dict`."""
-        if not isinstance(dict_object, dict):
-            raise TypeError('Object must be a `dict`.')
-        missing_keys = [key for key in ['id', 'name', 'client_ids', 'stream_id', 'muted', 'volume'] if key not in dict_object]
-        if missing_keys:
-            raise KeyError(
-                'Missing keys. The `dict` object is missing the following required keys [%s].'
-                % (','.join(["'%s'" % key for key in missing_keys]))
-            )
-        return Group(**dict_object)
+        return cls.model_validate(dict_object)
 
-    def from_config(config: config.Handler) -> Group:
-        """Returns a `Group` object from a `pytensils.config.Handler` object."""
-        return Group.from_dict(config.to_dict()['group'])
-
-    def to_dict(self):
+    def to_dict(self) -> dict:
         """Returns a `Group` object as a `dict`."""
         return {
             'id': self.id,
@@ -143,19 +121,6 @@ class Group:
             'volume': self.volume,
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Returns a `Group` object as a json-formatted `str`."""
         return json.dumps(self.to_dict(), indent=2)
-
-    def __eq__(self, compare):
-        """Returns `True` when compare is an instance of self."""
-        if isinstance(compare, Group):
-            return (
-                self.id == compare.id
-                and self.name == compare.name
-                and self.client_ids == compare.client_ids
-                and self.stream_id == compare.stream_id
-                and self.muted == compare.muted
-                and self.volume == compare.volume
-            )
-        return False

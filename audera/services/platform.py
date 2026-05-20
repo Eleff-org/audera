@@ -43,7 +43,7 @@ def requires(platform_: Literal['any', 'dietpi', 'windows', 'linux', 'darwin'] =
                 if NAME.strip().lower() != platform_.strip().lower():
                     raise RuntimeError(
                         'Invalid platform {%s}. %s() requires {%s}.'
-                        % (NAME.strip().lower(), func.__name__, platform_.strip().lower())
+                        % (NAME.strip().lower(), getattr(func, '__name__', repr(func)), platform_.strip().lower())
                     )
 
             return func(*args, **kwargs)

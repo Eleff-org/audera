@@ -1,7 +1,6 @@
 """Command-line utility"""
 
 import argparse
-import errno
 import sys
 
 from audera.cli import commands
@@ -58,10 +57,7 @@ def main():
     _KWARGS = {key: vars(_ARGS)[key] for key in vars(_ARGS).keys() if key != 'func'}
 
     # Execute sub-command
-    if _ARG_PARSER.parse_args():
-        _ARGS.func(**_KWARGS)
-    else:
-        return errno.EINVAL
+    _ARGS.func(**_KWARGS)
 
 
 if __name__ == '__main__':

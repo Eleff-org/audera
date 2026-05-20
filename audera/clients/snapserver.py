@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import websockets.sync.client
 
@@ -37,7 +37,7 @@ class SnapserverClient:
         params: `dict`, optional
             The method parameters.
         """
-        payload = {
+        payload: dict[str, Any] = {
             'id': str(uuid.uuid4()),
             'jsonrpc': '2.0',
             'method': method,
@@ -146,5 +146,23 @@ class SnapserverClient:
             {
                 'id': group_id,
                 'mute': muted,
+            },
+        )
+
+    def set_client_name(self, client_id: str, name: str) -> dict:
+        """Sets the display name for a Snapcast client.
+
+        Parameters
+        ----------
+        client_id: `str`
+            The Snapcast client identifier.
+        name: `str`
+            The new display name for the client.
+        """
+        return self._call(
+            'Client.SetName',
+            {
+                'id': client_id,
+                'name': name,
             },
         )

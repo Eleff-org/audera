@@ -20,7 +20,7 @@ fi
 
 # Variables
 GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
-CAMILLADSP_VERSION="2.0.3"
+CAMILLADSP_VERSION="3.0.1"
 CAMILLADSP_ARCHIVE="camilladsp-linux-aarch64.tar.gz"
 CAMILLADSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CAMILLADSP_VERSION}/${CAMILLADSP_ARCHIVE}"
 CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
@@ -129,7 +129,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] PlexAmp headless installed successfully"
 # Install audera CLI
 echo
 echo ">>> Installing audera"
-UV_TOOL_BIN_DIR=/usr/local/bin uv tool install "git+${GIT_REPO_URL}@${GIT_BRANCH}"
+UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall "git+${GIT_REPO_URL}@${GIT_BRANCH}"
 export PATH="/usr/local/bin:$PATH"
 echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 
@@ -224,7 +224,7 @@ Wants=network-online.target nss-lookup.target
 Environment=HOME=/root
 WorkingDirectory=/opt/plexamp
 ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do getent hosts plex.tv > /dev/null 2>&1 && break || sleep 2; done'
-ExecStart=/bin/bash -c 'export CLIENT_NAME=$(hostname -s); exec /usr/bin/node /opt/plexamp/js/index.js'
+ExecStart=/bin/bash -c 'export CLIENT_NAME=Audera; exec /usr/bin/node /opt/plexamp/js/index.js'
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT
@@ -289,20 +289,22 @@ echo
 echo ">>> Setting up network-manager"
 sed -i '/^\[ifupdown\]/,/^\[/s/managed=false/managed=true/' /etc/NetworkManager/NetworkManager.conf
 systemctl enable NetworkManager
-# Restart in a detached subshell so a transient SSH disconnect doesn't kill the script
-nohup sh -c 'sleep 1 && systemctl restart NetworkManager' > /dev/null 2>&1 &
-sleep 5
+systemctl start NetworkManager
 nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
-# Configure avahi hostname
+# Derive hostname from MAC address
 echo
-echo ">>> Configuring avahi hostname"
-hostnamectl set-hostname audera
-grep -qxF '127.0.1.1 audera' /etc/hosts || echo '127.0.1.1 audera' >> /etc/hosts
+echo ">>> Configuring hostname from MAC address"
+MAC=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address)
+SHORT=$(echo "$MAC" | tr -d ':' | tail -c 7)
+NEW_HOSTNAME="audera-${SHORT}"
+hostnamectl set-hostname "$NEW_HOSTNAME"
+echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
+sed -i '/^\[server\]/a host-name=audera' /etc/avahi/avahi-daemon.conf
 systemctl enable avahi-daemon
 systemctl restart avahi-daemon
-echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {audera.local}"
+echo -e "[  ${GREEN}OK${RESET}  ] avahi hostname configured as {audera.local} (system hostname: ${NEW_HOSTNAME})"
 
 # Generate self-signed TLS certificate for audera.local
 echo

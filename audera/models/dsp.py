@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel, Field
 
 
-@dataclass
-class DSPConfig:
+class DSPConfig(BaseModel):
     """A `class` that represents a CamillaDSP pipeline configuration.
 
     Attributes
@@ -24,22 +24,15 @@ class DSPConfig:
 
     id: str
     player_id: str
-    pipeline: dict = field(default_factory=dict)
-    enabled: bool = field(default=True)
+    pipeline: dict = Field(default_factory=dict)
+    enabled: bool = True
 
-    def from_dict(dict_object: dict) -> DSPConfig:
+    @classmethod
+    def from_dict(cls, dict_object: dict) -> 'DSPConfig':
         """Returns a `DSPConfig` object from a `dict`."""
-        if not isinstance(dict_object, dict):
-            raise TypeError('Object must be a `dict`.')
-        missing_keys = [key for key in ['id', 'player_id', 'pipeline', 'enabled'] if key not in dict_object]
-        if missing_keys:
-            raise KeyError(
-                'Missing keys. The `dict` object is missing the following required keys [%s].'
-                % (','.join(["'%s'" % key for key in missing_keys]))
-            )
-        return DSPConfig(**dict_object)
+        return cls.model_validate(dict_object)
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         """Returns a `DSPConfig` object as a `dict`."""
         return {
             'id': self.id,
@@ -48,17 +41,6 @@ class DSPConfig:
             'enabled': self.enabled,
         }
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Returns a `DSPConfig` object as a json-formatted `str`."""
         return json.dumps(self.to_dict(), indent=2)
-
-    def __eq__(self, compare):
-        """Returns `True` when compare is an instance of self."""
-        if isinstance(compare, DSPConfig):
-            return (
-                self.id == compare.id
-                and self.player_id == compare.player_id
-                and self.pipeline == compare.pipeline
-                and self.enabled == compare.enabled
-            )
-        return False

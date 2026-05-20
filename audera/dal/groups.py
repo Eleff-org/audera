@@ -1,25 +1,15 @@
 """Group configuration-layer"""
 
+import json
 import os
 from typing import List, Union
 
 import duckdb
-from pytensils import config
 
 from audera.dal import path
 from audera.models import player
 
 PATH: Union[str, os.PathLike] = os.path.join(path.HOME, 'groups')
-DTYPES: dict = {
-    'group': {
-        'id': 'str',
-        'name': 'str',
-        'client_ids': 'list',
-        'stream_id': 'str',
-        'muted': 'bool',
-        'volume': 'int',
-    }
-}
 
 
 def exists(id: str) -> bool:
@@ -33,39 +23,33 @@ def exists(id: str) -> bool:
     return os.path.isfile(os.path.abspath(os.path.join(PATH, '.'.join([id, 'json']))))
 
 
-def create(group: player.Group) -> config.Handler:
-    """Creates the group configuration file and returns the contents as a
-    `pytensils.config.Handler` object.
+def create(group: player.Group) -> player.Group:
+    """Creates the group configuration file and returns the `Group` object.
 
     Parameters
     ----------
     group: `audera.models.player.Group`
         An instance of an `audera.models.player.Group` object.
     """
-    if not os.path.isdir(PATH):
-        os.makedirs(PATH)
-    config_ = config.Handler(path=PATH, file_name='.'.join([group.id, 'json']), create=True)
-    config_ = config_.from_dict({'group': group.to_dict()})
-    return config_
+    return save(group)
 
 
-def get(id: str) -> config.Handler:
-    """Returns the contents of the group configuration as a
-    `pytensils.config.Handler` object.
+def get(id: str) -> player.Group:
+    """Returns the group configuration as a `Group` object.
 
     Parameters
     ----------
     id: `str`
         The Snapcast group identifier.
     """
-    config_ = config.Handler(path=PATH, file_name='.'.join([id, 'json']))
-    config_.validate(DTYPES)
-    return config_
+    file_path = os.path.join(PATH, '.'.join([id, 'json']))
+    with open(file_path, 'r') as f:
+        data = json.load(f)
+    return player.Group.from_dict(data['group'])
 
 
-def get_or_create(group: player.Group) -> config.Handler:
-    """Creates or reads the group configuration file and returns the contents as
-    a `pytensils.config.Handler` object.
+def get_or_create(group: player.Group) -> player.Group:
+    """Creates or reads the group configuration file and returns the `Group` object.
 
     Parameters
     ----------
@@ -78,7 +62,7 @@ def get_or_create(group: player.Group) -> config.Handler:
         return create(group)
 
 
-def save(group: player.Group) -> config.Handler:
+def save(group: player.Group) -> player.Group:
     """Saves the group configuration to `~/.audera/groups/{group.id}.json`.
 
     Parameters
@@ -88,9 +72,10 @@ def save(group: player.Group) -> config.Handler:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    config_ = config.Handler(path=PATH, file_name='.'.join([group.id, 'json']), create=True)
-    config_ = config_.from_dict({'group': group.to_dict()})
-    return config_
+    file_path = os.path.join(PATH, '.'.join([group.id, 'json']))
+    with open(file_path, 'w') as f:
+        json.dump({'group': group.to_dict()}, f, indent=2)
+    return group
 
 
 def update(new: player.Group) -> player.Group:
@@ -101,13 +86,11 @@ def update(new: player.Group) -> player.Group:
     new: `audera.models.player.Group`
         An instance of an `audera.models.player.Group` object.
     """
-    config_ = get_or_create(new)
-    group = player.Group.from_config(config=config_)
-    if not group == new:
-        config_ = config_.from_dict({'group': new.to_dict()})
-        return new
+    existing = get_or_create(new)
+    if not existing == new:
+        return save(new)
     else:
-        return group
+        return existing
 
 
 def delete(id: str):
@@ -122,11 +105,6 @@ def delete(id: str):
         os.remove(os.path.join(PATH, '.'.join([id, 'json'])))
 
 
-def get_group(id: str) -> player.Group:
-    """Returns the group as an `audera.models.player.Group` object."""
-    return player.Group.from_config(get(id))
-
-
 def attach_client(group_id: str, client_id: str) -> player.Group:
     """Attaches a Snapcast client to a group.
 
@@ -137,7 +115,7 @@ def attach_client(group_id: str, client_id: str) -> player.Group:
     client_id: `str`
         The Snapcast client identifier.
     """
-    group = get_group(group_id)
+    group = get(group_id)
     if client_id in group.client_ids:
         return group
     group.client_ids.append(client_id)
@@ -154,7 +132,7 @@ def detach_client(group_id: str, client_id: str) -> player.Group:
     client_id: `str`
         The Snapcast client identifier.
     """
-    group = get_group(group_id)
+    group = get(group_id)
     if client_id not in group.client_ids:
         return group
     group.client_ids.remove(client_id)
@@ -171,7 +149,7 @@ def assign_stream(group_id: str, stream_id: str) -> player.Group:
     stream_id: `str`
         The Snapcast stream identifier.
     """
-    group = get_group(group_id)
+    group = get(group_id)
     if group.stream_id == stream_id:
         return group
     group.stream_id = stream_id

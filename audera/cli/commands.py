@@ -34,12 +34,12 @@ def run(type_: Literal['streamer-server', 'player-server', 'player-setup']):
     ```
 
     """
-    type_ = type_.strip().lower()
+    type_normalized = type_.strip().lower()
 
-    if type_ not in ['streamer-server', 'player-server', 'player-setup']:
+    if type_normalized not in ['streamer-server', 'player-server', 'player-setup']:
         raise NotImplementedError
 
-    if type_ == 'streamer-server':
+    if type_normalized == 'streamer-server':
         if not netifaces.connected():
             from audera.server import setup
 
@@ -48,16 +48,13 @@ def run(type_: Literal['streamer-server', 'player-server', 'player-setup']):
 
         app.run()
 
-    elif type_ == 'player-server':
+    elif type_normalized == 'player-server':
         if not netifaces.connected():
             from audera.server import setup
 
             setup.run(role='player')
-        from audera.server.player import app
 
-        app.run()
-
-    elif type_ == 'player-setup':
+    elif type_normalized == 'player-setup':
         from audera.server import setup
 
         setup.run(role='player')

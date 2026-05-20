@@ -29,15 +29,13 @@ def _wait_for_http(container, internal_port: int, path: str = '/', timeout: floa
 @pytest.fixture
 def audera_home(tmp_path, monkeypatch):
     for module, subdir in [
-        ('audera.dal.identities', ''),
         ('audera.dal.players', 'players'),
         ('audera.dal.groups', 'groups'),
         ('audera.dal.streams', 'streams'),
         ('audera.dal.dsp', 'dsp'),
     ]:
-        dest = str(tmp_path / subdir) if subdir else str(tmp_path)
-        if subdir:
-            (tmp_path / subdir).mkdir(parents=True, exist_ok=True)
+        dest = str(tmp_path / subdir)
+        (tmp_path / subdir).mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(module + '.PATH', dest)
     return tmp_path
 

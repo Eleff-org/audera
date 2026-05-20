@@ -20,7 +20,7 @@ fi
 
 # Variables
 GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
-CAMILLADSP_VERSION="2.0.3"
+CAMILLADSP_VERSION="3.0.1"
 CAMILLADSP_ARCHIVE="camilladsp-linux-aarch64.tar.gz"
 CAMILLADSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CAMILLADSP_VERSION}/${CAMILLADSP_ARCHIVE}"
 CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
@@ -102,7 +102,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] uv installed successfully"
 # Install audera CLI
 echo
 echo ">>> Installing audera"
-UV_TOOL_BIN_DIR=/usr/local/bin uv tool install "git+${GIT_REPO_URL}@${GIT_BRANCH}"
+UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall "git+${GIT_REPO_URL}@${GIT_BRANCH}"
 export PATH="/usr/local/bin:$PATH"
 echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 
@@ -178,6 +178,16 @@ apt-get purge -y ifupdown
 sed -i '/^[[:space:]]*[^#[:space:]]/s/^/# /' /etc/network/interfaces
 echo -e "[  ${GREEN}OK${RESET}  ] ifupdown purged successfully"
 
+# Derive hostname from MAC address
+echo
+echo ">>> Configuring hostname from MAC address"
+MAC=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address)
+SHORT=$(echo "$MAC" | tr -d ':' | tail -c 7)
+NEW_HOSTNAME="audera-${SHORT}"
+hostnamectl set-hostname "$NEW_HOSTNAME"
+echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
+echo -e "[  ${GREEN}OK${RESET}  ] Hostname configured as {${NEW_HOSTNAME}}"
+
 # Setup network-manager
 
 # Network-manager should manage all network devices,
@@ -187,9 +197,7 @@ echo
 echo ">>> Setting up network-manager"
 sed -i '/^\[ifupdown\]/,/^\[/s/managed=false/managed=true/' /etc/NetworkManager/NetworkManager.conf
 systemctl enable NetworkManager
-# Restart in a detached subshell so a transient SSH disconnect doesn't kill the script
-nohup sh -c 'sleep 1 && systemctl restart NetworkManager' > /dev/null 2>&1 &
-sleep 5
+systemctl start NetworkManager
 nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 

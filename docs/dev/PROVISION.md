@@ -1,6 +1,6 @@
-# Reprovisioning an Audera Device
+# Provisioning an Audera Device
 
-`os/test/reprovision.sh` re-provisions a streamer or player over SSH by fetching and running the appropriate `setup.sh` from a given Git branch.
+`os/dietpi/setup/provision.sh` provisions a streamer or player over SSH by fetching and running the appropriate `setup.sh` from a given Git branch.
 
 ## Prerequisites
 
@@ -24,20 +24,20 @@ Run the script from the project root using Git's bundled bash.
 **Streamer:**
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/test/reprovision.sh --device streamer --host <IP> --branch <branch>
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host <IP> --branch <branch>
 ```
 
 **Player:**
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/test/reprovision.sh --device player --host <IP> --branch <branch>
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device player --host <IP> --branch <branch>
 ```
 
 ### Example
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/test/reprovision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/test/reprovision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1
 ```
 
 ## Options
@@ -62,7 +62,7 @@ Run the script from the project root using Git's bundled bash.
 Pass `--check` to have the script wait for the device to come back after reboot and verify that all expected systemd services are active:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/test/reprovision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1 --check
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1 --check
 ```
 
 Services verified per device type:

@@ -1,7 +1,7 @@
 import pytest
 
+from audera.clients import SnapserverClient
 from audera.models.player import Group, Player
-from audera.services.snapserver import SnapserverClient
 
 
 @pytest.fixture(scope='module')
