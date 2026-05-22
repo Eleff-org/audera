@@ -1,4 +1,4 @@
-"""Audera streamer NiceGUI webserver"""
+"""Audera streamer dashboard pages"""
 
 import asyncio
 import json
@@ -17,6 +17,7 @@ import audera
 from audera.clients import SnapserverClient
 from audera.dal import settings as settings_dal
 from audera.models.settings import Settings
+from audera.ui import components
 
 load_dotenv()
 
@@ -112,7 +113,7 @@ def _remove_claim_override() -> None:
 
 
 @ui.refreshable
-def _build_services_tab():
+def _build_services_tab() -> None:
     """Renders the Services tab — shows PlexAmp status and a browser-based OAuth claiming flow."""
     state = _plexamp_state()
 
@@ -210,109 +211,103 @@ def _build_services_tab():
             connect_btn.on('click', _on_connect)
 
 
-def _rename_client(client_id: str, name: str, settings_: Settings) -> None:
-    if name:
-        _snapserver(settings_).set_client_name(client_id, name)
+class Page:
+    """A `class` that represents the streamer dashboard app."""
 
+    def __init__(self):
+        """Initializes an instance of the streamer dashboard app."""
+        self.settings = _load_settings()
+        self._client = _snapserver(self.settings)
 
-def _build_volume_controls(client_id: str, initial_volume: int, initial_muted: bool, settings_: Settings):
-    """Renders volume slider and mute checkbox with live cross-references to avoid stale closure bugs."""
+    def load(self) -> None:
+        """Registers page routes."""
+        ui.page('/')(self.index)
 
-    def _on_volume(e):
-        _snapserver(settings_).set_client_volume(client_id, int(e.value), mute_cb.value)
+    def index(self) -> None:
+        """Renders the main dashboard page."""
+        components.header.render(audera.NAME, 'Streamer')
 
-    def _on_mute(e):
-        _snapserver(settings_).set_client_volume(client_id, int(slider.value), e.value)
+        with ui.tabs().classes('w-full') as tabs:
+            players_tab = ui.tab('Players')
+            services_tab = ui.tab('Services')
+            settings_tab = ui.tab('Settings')
 
-    slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
-    mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
+        with ui.tab_panels(tabs, value=players_tab).classes('w-full'):
+            with ui.tab_panel(players_tab):
+                self._build_players_tab()  # type: ignore
+            with ui.tab_panel(services_tab):
+                _build_services_tab()
+            with ui.tab_panel(settings_tab):
+                self._build_settings_tab()
 
+        ui.timer(10.0, self._build_players_tab.refresh)
 
-def _build_players_tab(settings_: Settings):
-    """Renders the Players tab — lists Snapcast clients with per-client volume and mute controls."""
-    snap = _snapserver(settings_)
-    try:
-        clients = snap.get_clients()
-        snap_groups = snap.get_groups()
-    except Exception:
-        clients = []
-        snap_groups = []
+    @ui.refreshable
+    def _build_players_tab(self) -> None:
+        """Renders the Players tab — lists Snapcast clients with per-client volume and mute controls."""
+        snap = _snapserver(self.settings)
+        try:
+            clients = snap.get_clients()
+        except Exception:
+            clients = []
 
-    group_map = {g.id: g.name or g.id for g in snap_groups}
+        if not clients:
+            ui.label('No Snapcast clients found.').classes('text-gray-500')
+            return
 
-    if not clients:
-        ui.label('No Snapcast clients found.').classes('text-gray-500')
-        return
+        connected_clients = [client for client in clients if client.connected]
 
-    for client in clients:
-        with ui.card().classes('w-full mb-2'):
-            with ui.row().classes('items-center justify-between w-full'):
-                ui.label(client.name).classes('font-medium')
-                with ui.row().classes('items-center gap-2'):
-                    ui.label(
-                        '%s%s'
-                        % (
-                            group_map.get(client.group_id, client.group_id),
-                            '' if client.connected else ' (disconnected)',
+        for client in connected_clients:
+            with ui.card().classes('w-full mb-2'):
+                with ui.row().classes('items-center justify-between w-full'):
+                    ui.label(client.name).classes('font-medium')
+                    with ui.row().classes('items-center gap-2'):
+                        with ui.dialog() as detail_dialog, ui.card():
+                            ui.label(client.name).classes('font-medium mb-2')
+                            ui.code(
+                                json.dumps({**client.to_dict(), 'name': client.name}, indent=2),
+                                language='json',
+                            ).classes('text-xs')
+                            ui.button('Close', on_click=detail_dialog.close).props('flat dense').classes('mt-2')
+                        ui.button(on_click=detail_dialog.open).props('icon=info flat dense round size=xs').classes(
+                            'text-gray-400'
                         )
-                    ).classes('text-sm text-gray-500')
-                    with ui.dialog() as detail_dialog, ui.card():
-                        ui.label(client.name).classes('font-medium mb-2')
-                        ui.code(
-                            json.dumps({**client.to_dict(), 'name': client.name}, indent=2),
-                            language='json',
-                        ).classes('text-xs')
-                        ui.button('Close', on_click=detail_dialog.close).props('flat dense').classes('mt-2')
-                    ui.button(on_click=detail_dialog.open).props('icon=info flat dense round size=xs').classes('text-gray-400')
-            with ui.row().classes('items-center gap-4'):
-                _build_volume_controls(client.id, client.volume, client.muted, settings_)
-            with ui.row().classes('items-center gap-2 mt-1'):
-                rename_input = (
-                    ui.input(value=client.name, placeholder='Rename').props('dense outlined rounded-md').classes('w-40')
-                )
-                ui.button(
-                    'Rename',
-                    on_click=lambda c=client, inp=rename_input: _rename_client(c.id, inp.value, settings_),
-                ).props('flat dense rounded')
+                with ui.row().classes('items-center gap-4'):
+                    self._build_volume_controls(client.id, client.volume, client.muted)
+                with ui.row().classes('items-center gap-2 mt-1'):
+                    rename_input = (
+                        ui.input(value=client.name, placeholder='Rename').props('dense outlined rounded-md').classes('w-40')
+                    )
 
+                    def _on_rename(c=client, inp=rename_input):
+                        if inp.value:
+                            _snapserver(self.settings).set_client_name(c.id, inp.value)
+                            self._build_players_tab.refresh()
 
-def _build_settings_tab(settings_: Settings):
-    """Renders the Settings tab — configure service hosts and persist to ~/.audera/settings.json."""
-    plexamp_input = ui.input('PlexAmp Host', value=settings_.plexamp_host).classes('w-64')
-    snapserver_input = ui.input('Snapserver Host', value=settings_.snapserver_host).classes('w-64')
-    status_label = ui.label('').classes('text-sm text-gray-500')
+                    ui.button('Rename', on_click=_on_rename).props('flat dense rounded')
 
-    def _save():
-        settings_.plexamp_host = plexamp_input.value
-        settings_.snapserver_host = snapserver_input.value
-        settings_dal.save(settings_)
-        status_label.set_text('Settings saved.')
+    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool) -> None:
+        """Renders volume slider and mute checkbox for a single Snapcast client."""
 
-    ui.button('Save', on_click=_save).props('flat dense')
+        def _on_volume(e):
+            _snapserver(self.settings).set_client_volume(client_id, int(e.value), mute_cb.value)
 
+        def _on_mute(e):
+            _snapserver(self.settings).set_client_volume(client_id, int(slider.value), e.value)
 
-@ui.page('/')
-def index():
-    settings_ = _load_settings()
+        slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
+        mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
 
-    with ui.header().classes('bg-primary text-white items-center'):
-        ui.label(audera.NAME).classes('text-xl font-bold')
-        ui.label('Streamer').classes('text-sm ml-2 opacity-75')
+    def _build_settings_tab(self) -> None:
+        """Renders the Settings tab — configure service hosts and persist to ~/.audera/settings.json."""
+        plexamp_input = ui.input('PlexAmp Host', value=self.settings.plexamp_host).classes('w-64')
+        snapserver_input = ui.input('Snapserver Host', value=self.settings.snapserver_host).classes('w-64')
+        status_label = ui.label('').classes('text-sm text-gray-500')
 
-    with ui.tabs().classes('w-full') as tabs:
-        players_tab = ui.tab('Players')
-        services_tab = ui.tab('Services')
-        settings_tab = ui.tab('Settings')
+        def _save():
+            self.settings.plexamp_host = plexamp_input.value
+            self.settings.snapserver_host = snapserver_input.value
+            settings_dal.save(self.settings)
+            status_label.set_text('Settings saved.')
 
-    with ui.tab_panels(tabs, value=players_tab).classes('w-full'):
-        with ui.tab_panel(players_tab):
-            _build_players_tab(settings_)
-        with ui.tab_panel(services_tab):
-            _build_services_tab()
-        with ui.tab_panel(settings_tab):
-            _build_settings_tab(settings_)
-
-
-def run():
-    """Starts the Audera streamer NiceGUI webserver."""
-    ui.run(host='0.0.0.0', port=audera.SERVER_PORT, title=audera.NAME, reload=False)
+        ui.button('Save', on_click=_save).props('flat dense')

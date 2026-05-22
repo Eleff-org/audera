@@ -6,57 +6,98 @@ import sys
 from audera.cli import commands
 
 
-# Define audera CLI tool function(s)
 def main():
     """
-    usage: audera [-h] {run} ...
+    usage: audera [-h] {streamer,player} ...
 
     CLI application for running `audera` services.
 
     options:
     -h, --help  show this help message and exit
 
-    commands:
-    The `audera` command options.
+    subjects:
+    {streamer,player}
+        streamer  Manage the audera streamer.
+        player    Manage the audera player.
 
-    {run}
-        run       Runs an `audera` service.
-
-    Execute `audera {command} --help` for more help.
+    Execute `audera {subject} --help` for more help.
     """
 
-    # Setup CLI argument option(s)
     _ARG_PARSER = argparse.ArgumentParser(
         prog='audera',
         description='CLI application for running `audera` services.',
-        epilog='Execute `audera {command} --help` for more help.',
+        epilog='Execute `audera {subject} --help` for more help.',
     )
 
-    # Setup command argument option(s)
-    _ARG_SUBPARSER = _ARG_PARSER.add_subparsers(title='commands', prog='audera', description='The `audera` command options.')
-
-    # Setup `run` command CLI argument option(s)
-    _RUN_ARG_PARSER = _ARG_SUBPARSER.add_parser(
-        name='run', help='Runs an `audera` service.', epilog='Execute `audera run --help` for help.'
+    _SUBJECT_SUBPARSER = _ARG_PARSER.add_subparsers(
+        title='subjects',
+        prog='audera',
+        description='The `audera` subject options.',
+        dest='subject',
     )
-    _RUN_ARG_PARSER.add_argument(
-        'type_', help='The type of `audera` service.', type=str, choices=['streamer-server', 'player-server', 'player-setup']
-    )
-    _RUN_ARG_PARSER.set_defaults(func=commands.run)
+    _SUBJECT_SUBPARSER.required = True
 
-    # Setup `conf` command CLI argument option(s)
-    _CONF_ARG_PARSER = _ARG_SUBPARSER.add_parser(
-        name='conf', help='Prints a bundled config file to stdout.', epilog='Execute `audera conf --help` for help.'
+    # streamer subject
+    _STREAMER_PARSER = _SUBJECT_SUBPARSER.add_parser(
+        name='streamer',
+        help='Manage the audera streamer.',
+        epilog='Execute `audera streamer --help` for help.',
     )
-    _CONF_ARG_PARSER.add_argument('role', help='The audera device role.', type=str, choices=['streamer', 'player'])
-    _CONF_ARG_PARSER.add_argument('filename', help='The config file name.', type=str)
-    _CONF_ARG_PARSER.set_defaults(func=commands.conf)
+    _STREAMER_VERB_SUBPARSER = _STREAMER_PARSER.add_subparsers(
+        title='verbs',
+        prog='audera streamer',
+        description='The `audera streamer` verb options.',
+        dest='verb',
+    )
+    _STREAMER_VERB_SUBPARSER.required = True
 
-    # Parse arguments
+    _STREAMER_START_PARSER = _STREAMER_VERB_SUBPARSER.add_parser(
+        name='start',
+        help='Start the audera streamer service.',
+        epilog='Execute `audera streamer start --help` for help.',
+    )
+    _STREAMER_START_PARSER.set_defaults(func=commands.streamer_start)
+
+    _STREAMER_CONF_PARSER = _STREAMER_VERB_SUBPARSER.add_parser(
+        name='conf',
+        help='Print a bundled streamer config file to stdout.',
+        epilog='Execute `audera streamer conf --help` for help.',
+    )
+    _STREAMER_CONF_PARSER.add_argument('filename', help='The config file name.', type=str)
+    _STREAMER_CONF_PARSER.set_defaults(func=commands.streamer_conf)
+
+    # player subject
+    _PLAYER_PARSER = _SUBJECT_SUBPARSER.add_parser(
+        name='player',
+        help='Manage the audera player.',
+        epilog='Execute `audera player --help` for help.',
+    )
+    _PLAYER_VERB_SUBPARSER = _PLAYER_PARSER.add_subparsers(
+        title='verbs',
+        prog='audera player',
+        description='The `audera player` verb options.',
+        dest='verb',
+    )
+    _PLAYER_VERB_SUBPARSER.required = True
+
+    _PLAYER_START_PARSER = _PLAYER_VERB_SUBPARSER.add_parser(
+        name='start',
+        help='Start the audera player service.',
+        epilog='Execute `audera player start --help` for help.',
+    )
+    _PLAYER_START_PARSER.set_defaults(func=commands.player_start)
+
+    _PLAYER_CONF_PARSER = _PLAYER_VERB_SUBPARSER.add_parser(
+        name='conf',
+        help='Print a bundled player config file to stdout.',
+        epilog='Execute `audera player conf --help` for help.',
+    )
+    _PLAYER_CONF_PARSER.add_argument('filename', help='The config file name.', type=str)
+    _PLAYER_CONF_PARSER.set_defaults(func=commands.player_conf)
+
     _ARGS = _ARG_PARSER.parse_args()
-    _KWARGS = {key: vars(_ARGS)[key] for key in vars(_ARGS).keys() if key != 'func'}
+    _KWARGS = {key: value for key, value in vars(_ARGS).items() if key not in ('func', 'subject', 'verb')}
 
-    # Execute sub-command
     _ARGS.func(**_KWARGS)
 
 

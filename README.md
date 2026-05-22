@@ -13,55 +13,46 @@
 | Service | Role | Port |
 |---|---|---|
 | **Plex-Amp** (headless) | Music source / playback queue | 32500 (HTTP) |
-| **Snapserver / Snapclient** | Synchronized multi-room audio distribution | 1704 (audio), 1705 (JSON-RPC WS) |
+| **Snapserver / Snapclient** | Synchronized multi-room audio distribution | 1704 (audio), 1780 (HTTP API) |
 | **CamillaDSP** | Per-device DSP pipeline (EQ, room correction) | 1234 (WebSocket) |
 
 ### Devices
 
-**Server** — one per system (or zone)
+**Streamer** — one per system (or zone)
 - Runs Plex-Amp (headless), Snapserver, Snapclient, and CamillaDSP
-- Hosts the Audera webserver at `https://audera.local` — manages volume and mute for all connected players
+- Hosts the Audera web UI at `https://audera.local` — manages volume and mute for all connected players
 - CamillaDSP sits in the Snapclient audio path so each device DSPs independently
 
 **Player** — one per room
 - Runs Snapclient and CamillaDSP
-- Connects to the server automatically on boot; managed via the server webserver
-- No local webserver required
+- Connects to the streamer automatically on boot; managed via the streamer web UI
+- No local web UI required
 
-## Installation
+## Getting started
 
-Audera is designed for [DietPi](https://dietpi.com/) on Raspberry Pi hardware. Setup scripts are provided for both device types.
+Audera is designed for [DietPi](https://dietpi.com/) on Raspberry Pi hardware. Devices are provisioned remotely from a host machine using `os/dietpi/setup/provision.sh`.
 
-### Server
+### 1. Flash DietPi
 
-1. Flash DietPi to an SD card and copy `os/dietpi/streamer/dietpi.txt` to the boot partition.
-2. Boot the device and SSH in as `root`.
-3. Run the setup script, optionally passing a branch name (defaults to `main`):
+Flash DietPi to an SD card and copy the appropriate `dietpi.txt` to the boot partition:
 
-   ```bash
-   sudo bash os/dietpi/streamer/automation/setup.sh [branch]
-   ```
+- Streamer: `os/dietpi/streamer/dietpi.txt`
+- Player: `os/dietpi/player/dietpi.txt`
 
-### Player
+Boot the device and ensure it is reachable over SSH.
 
-1. Flash DietPi to an SD card and copy `os/dietpi/player/dietpi.txt` to the boot partition.
-2. Boot the device and SSH in as `root`.
-3. Run the setup script, optionally passing a branch name (defaults to `main`):
+### 2. Provision
 
-   ```bash
-   sudo bash os/dietpi/player/automation/setup.sh [branch]
-   ```
-
-## Development
-
-`audera` supports Python >= 3.11. To install from source:
+Run `provision.sh` from your host machine, pointing it at the target device:
 
 ```bash
-git clone -b main https://github.com/Eleff-org/audera.git
-cd audera
-pip install -e .
+# Provision a streamer
+bash os/dietpi/setup/provision.sh --device streamer --host <IP>
+
+# Provision a player
+bash os/dietpi/setup/provision.sh --device player --host <IP>
 ```
 
-## Roadmap
+The script fetches and runs the appropriate `setup.sh` on the device over SSH, then reboots it. Once provisioning is complete, the streamer web UI is available at `https://audera.local`.
 
-See [PROJECT.md](./PROJECT.md) for current status, planned workstreams, and release milestones.
+See [docs/dev/PROVISION.md](docs/dev/PROVISION.md) for the full options reference, examples, and post-provisioning verification.

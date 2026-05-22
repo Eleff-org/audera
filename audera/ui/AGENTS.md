@@ -1,0 +1,52 @@
+# AGENTS.md
+
+## Package layout
+
+List @audera/ui for the Python package layout.
+
+## App pattern
+
+Every UI app follows this two-file pattern:
+
+**`pages.py`** — contains a `Page` class:
+- `__init__`: loads state (settings, clients); no platform decorator unless dietpi-only
+- `load()`: registers routes via `ui.page(route)(self.method)`
+- Page methods: one per route (e.g. `index()`, `welcome()`, `connect()`)
+- Tab builder methods: `_build_<name>_tab()` — private, called from a page method
+
+**`__init__.py`** — thin `run()` entry point only:
+```python
+def run() -> None:
+    page = Page()
+    page.load()
+    components.theme.apply_defaults()
+    try:
+        ui.run(...)
+    except KeyboardInterrupt:
+        app.shutdown()
+```
+
+No implementation logic belongs in `__init__.py`.
+
+## NiceGUI conventions
+
+- **Page registration**: `ui.page(route)(self.method)` inside `load()`
+- **Refreshable sections**: `@ui.refreshable` on tab-builder methods; call `self._build_<name>_tab.refresh()` to re-render
+- **Reactive binding**: `bind_visibility_from(obj, 'attr', backward=fn)`, `bind_enabled_from(obj, 'attr', backward=fn)`
+- **Async operations**: page and callback methods marked `async`; blocking I/O wrapped in `asyncio.to_thread()`
+- **Polling timers**: `ui.timer(interval, callback, once=False)`; store handle in a `list[ui.timer]` when the reference is needed inside the callback
+- **Notifications**: `ui.notify(message, position='top-right', type='positive'|'negative'|'warning')`
+
+## Components
+
+- `header.render(title, subtitle)` — renders the app header bar
+- `theme.apply_defaults()` — applies the dark colour palette; call once in `run()` before `ui.run()`
+- `theme.PRIMARY / SECONDARY / ACCENT / TEXT` — colour constants for consistent styling
+
+## Code style (UI additions)
+
+- Private tab builders: `_build_<name>_tab()` naming convention
+- Async callbacks inside tab builders: `_on_<action>()` for user-triggered events, `_poll_<thing>()` for timer callbacks
+- Tailwind utility classes for layout; keep consistent with existing NiceGUI patterns in the codebase
+- No `ui.run()` calls outside of `__init__.py`
+- Module-level helpers (no instance state needed) stay as module-level private functions, not `@staticmethod`

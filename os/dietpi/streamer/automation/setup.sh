@@ -136,14 +136,14 @@ echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 # Write Snapserver configuration
 echo
 echo ">>> Creating the Snapserver configuration"
-audera conf streamer snapserver.conf > "$SNAPSERVER_CONFIG"
+audera streamer conf snapserver.conf > "$SNAPSERVER_CONFIG"
 chmod 644 "$SNAPSERVER_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] Snapserver configured successfully"
 
 # Write CamillaDSP configuration
 echo
 echo ">>> Creating the CamillaDSP configuration"
-audera conf streamer camilladsp.yml > "$CAMILLADSP_CONFIG"
+audera streamer conf camilladsp.yml > "$CAMILLADSP_CONFIG"
 chmod 644 "$CAMILLADSP_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
 
@@ -378,7 +378,7 @@ echo ">>> Assigning {$SOUNDCARD} as the default soundcard"
 # Append ALSA configuration (must run after dietpi-set_hardware, which writes the defaults)
 echo
 echo ">>> Installing ALSA configuration"
-audera conf streamer asound.conf >> "$ASOUND_CONFIG"
+audera streamer conf asound.conf >> "$ASOUND_CONFIG"
 chmod 644 "$ASOUND_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
 
@@ -393,7 +393,7 @@ cat > "$AUTOSTART_SCRIPT" <<'EOF'
 
 set -e
 
-exec audera run streamer-server
+exec audera streamer start
 EOF
 chmod +x "$AUTOSTART_SCRIPT"
 echo -e "[  ${GREEN}OK${RESET}  ] Custom autostart script created successfully"
