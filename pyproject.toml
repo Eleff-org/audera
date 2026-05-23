@@ -60,3 +60,7 @@ select = ["E", "F", "W", "I"]
 [tool.ruff.format]
 quote-style = "single"
 indent-style = "space"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+main_file = ""

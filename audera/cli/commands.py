@@ -4,7 +4,6 @@ import importlib.resources
 import sys
 
 from audera.services import netifaces
-from audera.ui import setup, streamer
 
 
 def streamer_start(**_) -> None:
@@ -23,6 +22,11 @@ def streamer_start(**_) -> None:
     ```
 
     """
+    # Lazy import so tests can patch audera.ui.streamer.run and audera.ui.setup.run
+    # without fighting module-level binding, and to avoid importing heavy UI
+    # dependencies when running non-start commands.
+    from audera.ui import setup, streamer
+
     if not netifaces.connected():
         setup.run(role='streamer')
 
@@ -45,6 +49,11 @@ def player_start(**_) -> None:
     ```
 
     """
+    # Lazy import so tests can patch audera.ui.setup.run without fighting
+    # module-level binding, and to avoid importing heavy UI dependencies when
+    # running non-start commands.
+    from audera.ui import setup
+
     if not netifaces.connected():
         setup.run(role='player')
 

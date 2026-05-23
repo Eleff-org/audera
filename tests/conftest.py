@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import websockets.sync.server
 
+pytest_plugins = ['nicegui.testing.user_plugin']
+
 
 def _wait_for_http(container, internal_port: int, path: str = '/', timeout: float = 180) -> None:
     import httpx
@@ -33,6 +35,7 @@ def audera_home(tmp_path, monkeypatch):
         ('audera.dal.groups', 'groups'),
         ('audera.dal.streams', 'streams'),
         ('audera.dal.dsp', 'dsp'),
+        ('audera.dal.settings', 'settings'),
     ]:
         dest = str(tmp_path / subdir)
         (tmp_path / subdir).mkdir(parents=True, exist_ok=True)

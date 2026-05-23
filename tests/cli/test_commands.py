@@ -30,47 +30,44 @@ def test_player_conf_writes_to_stdout(capsys):
 
 
 def test_streamer_start_calls_app_run():
-    mock_app = MagicMock()
     mock_netifaces = MagicMock()
     mock_netifaces.connected.return_value = True
 
     with (
-        patch.dict('sys.modules', {'audera.ui.streamer.app': mock_app}),
+        patch('audera.ui.streamer.run') as mock_run,
         patch('audera.cli.commands.netifaces', mock_netifaces),
     ):
         commands.streamer_start()
 
-    mock_app.run.assert_called_once()
+    mock_run.assert_called_once()
 
 
 def test_streamer_start_runs_setup_when_disconnected():
-    mock_app = MagicMock()
-    mock_setup = MagicMock()
     mock_netifaces = MagicMock()
     mock_netifaces.connected.return_value = False
 
     with (
-        patch.dict('sys.modules', {'audera.ui.streamer.app': mock_app, 'audera.ui.setup': mock_setup}),
+        patch('audera.ui.setup.run') as mock_setup_run,
+        patch('audera.ui.streamer.run') as mock_streamer_run,
         patch('audera.cli.commands.netifaces', mock_netifaces),
     ):
         commands.streamer_start()
 
-    mock_setup.run.assert_called_once_with(role='streamer')
-    mock_app.run.assert_called_once()
+    mock_setup_run.assert_called_once_with(role='streamer')
+    mock_streamer_run.assert_called_once()
 
 
 def test_player_start_runs_setup_when_disconnected():
-    mock_setup = MagicMock()
     mock_netifaces = MagicMock()
     mock_netifaces.connected.return_value = False
 
     with (
-        patch.dict('sys.modules', {'audera.ui.setup': mock_setup}),
+        patch('audera.ui.setup.run') as mock_setup_run,
         patch('audera.cli.commands.netifaces', mock_netifaces),
     ):
         commands.player_start()
 
-    mock_setup.run.assert_called_once_with(role='player')
+    mock_setup_run.assert_called_once_with(role='player')
 
 
 def test_player_start_does_nothing_when_connected():

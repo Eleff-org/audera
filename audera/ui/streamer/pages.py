@@ -112,105 +112,6 @@ def _remove_claim_override() -> None:
     subprocess.run(['systemctl', 'daemon-reload'], timeout=10)
 
 
-@ui.refreshable
-def _build_services_tab() -> None:
-    """Renders the Services tab — shows PlexAmp status and a browser-based OAuth claiming flow."""
-    state = _plexamp_state()
-
-    with ui.card().classes('w-full mb-2'):
-        with ui.row().classes('items-center justify-between w-full'):
-            ui.label('PlexAmp Headless').classes('font-medium')
-            if state == 'claimed':
-                ui.label('available').classes('text-sm text-green-500')
-            elif state == 'unclaimed':
-                ui.label('setup required').classes('text-sm text-amber-500')
-            else:
-                ui.label('inactive').classes('text-sm text-red-500')
-
-        if state == 'claimed':
-            ui.link('Open PlexAmp', 'https://plexamp.local').classes('text-sm mt-1')
-
-        elif state == 'unclaimed':
-            connect_btn = ui.button('Connect with Plex').classes('mt-2')
-            status_label = ui.label('').classes('text-sm text-gray-500 mt-1')
-            auth_link = ui.link("Didn't open? Click here to authorize with Plex", '#', new_tab=True).classes('text-sm mt-1')
-            auth_link.set_visibility(False)
-
-            async def _on_connect():
-                connect_btn.disable()
-                status_label.set_text('Opening Plex authorization…')
-
-                try:
-                    pin_id, pin_code = await asyncio.to_thread(_create_plex_pin)
-                except Exception as exc:
-                    status_label.set_text(f'Error: {exc}')
-                    connect_btn.enable()
-                    return
-
-                auth_url = (
-                    f'https://app.plex.tv/auth/#!?clientID={_PLEX_CLIENT_ID}'
-                    f'&code={pin_code}'
-                    f'&context%5Bdevice%5D%5Bproduct%5D={audera.NAME}'
-                )
-                ui.navigate.to(auth_url, new_tab=True)
-                status_label.set_text('Waiting for Plex authorization…')
-                auth_link.props(f'href="{auth_url}"')
-                auth_link.set_visibility(True)
-
-                deadline = asyncio.get_event_loop().time() + 300  # 5-minute timeout
-                poll_timer: list[ui.timer] = []
-
-                async def _poll_auth():
-                    if asyncio.get_event_loop().time() > deadline:
-                        poll_timer[0].cancel()
-                        status_label.set_text('Authorization timed out. Please try again.')
-                        connect_btn.enable()
-                        return
-
-                    try:
-                        auth_token = await asyncio.to_thread(_poll_plex_pin, pin_id)
-                    except Exception:
-                        return  # transient error; retry on next tick
-
-                    if not auth_token:
-                        return
-
-                    poll_timer[0].cancel()
-                    status_label.set_text('Authorized. Claiming PlexAmp…')
-
-                    try:
-                        claim_token = await asyncio.to_thread(_get_claim_token, auth_token)
-                        await asyncio.to_thread(_restart_plexamp_with_claim, claim_token)
-                    except Exception as exc:
-                        status_label.set_text(f'Claim failed: {exc}')
-                        connect_btn.enable()
-                        return
-
-                    status_label.set_text('PlexAmp restarting…')
-
-                    port_deadline = asyncio.get_event_loop().time() + 120
-                    port_timer: list[ui.timer] = []
-
-                    async def _poll_port():
-                        if asyncio.get_event_loop().time() > port_deadline:
-                            port_timer[0].cancel()
-                            _remove_claim_override()
-                            status_label.set_text('PlexAmp did not come up in time. Check the service.')
-                            connect_btn.enable()
-                            return
-
-                        if _plexamp_state() == 'claimed':
-                            port_timer[0].cancel()
-                            _remove_claim_override()
-                            _build_services_tab.refresh()
-
-                    port_timer.append(ui.timer(2.0, _poll_port))
-
-                poll_timer.append(ui.timer(2.0, _poll_auth))
-
-            connect_btn.on('click', _on_connect)
-
-
 class Page:
     """A `class` that represents the streamer dashboard app."""
 
@@ -236,11 +137,109 @@ class Page:
             with ui.tab_panel(players_tab):
                 self._build_players_tab()  # type: ignore
             with ui.tab_panel(services_tab):
-                _build_services_tab()
+                self._build_services_tab()  # type: ignore
             with ui.tab_panel(settings_tab):
                 self._build_settings_tab()
 
         ui.timer(10.0, self._build_players_tab.refresh)
+
+    @ui.refreshable
+    def _build_services_tab(self) -> None:
+        """Renders the Services tab — shows PlexAmp status and a browser-based OAuth claiming flow."""
+        state = _plexamp_state()
+
+        with ui.card().classes('w-full mb-2'):
+            with ui.row().classes('items-center justify-between w-full'):
+                ui.label('PlexAmp Headless').classes('font-medium')
+                if state == 'claimed':
+                    ui.label('available').classes('text-sm text-green-500')
+                elif state == 'unclaimed':
+                    ui.label('setup required').classes('text-sm text-amber-500')
+                else:
+                    ui.label('inactive').classes('text-sm text-red-500')
+
+            if state == 'claimed':
+                ui.link('Open PlexAmp', 'https://plexamp.local').classes('text-sm mt-1')
+
+            elif state == 'unclaimed':
+                connect_btn = ui.button('Connect with Plex').classes('mt-2')
+                status_label = ui.label('').classes('text-sm text-gray-500 mt-1')
+                auth_link = ui.link("Didn't open? Click here to authorize with Plex", '#', new_tab=True).classes('text-sm mt-1')
+                auth_link.set_visibility(False)
+
+                async def _on_connect():
+                    connect_btn.disable()
+                    status_label.set_text('Opening Plex authorization…')
+
+                    try:
+                        pin_id, pin_code = await asyncio.to_thread(_create_plex_pin)
+                    except Exception as exc:
+                        status_label.set_text(f'Error: {exc}')
+                        connect_btn.enable()
+                        return
+
+                    auth_url = (
+                        f'https://app.plex.tv/auth/#!?clientID={_PLEX_CLIENT_ID}'
+                        f'&code={pin_code}'
+                        f'&context%5Bdevice%5D%5Bproduct%5D={audera.NAME}'
+                    )
+                    ui.navigate.to(auth_url, new_tab=True)
+                    status_label.set_text('Waiting for Plex authorization…')
+                    auth_link.props(f'href="{auth_url}"')
+                    auth_link.set_visibility(True)
+
+                    deadline = asyncio.get_event_loop().time() + 300  # 5-minute timeout
+                    poll_timer: list[ui.timer] = []
+
+                    async def _poll_auth():
+                        if asyncio.get_event_loop().time() > deadline:
+                            poll_timer[0].cancel()
+                            status_label.set_text('Authorization timed out. Please try again.')
+                            connect_btn.enable()
+                            return
+
+                        try:
+                            auth_token = await asyncio.to_thread(_poll_plex_pin, pin_id)
+                        except Exception:
+                            return  # transient error; retry on next tick
+
+                        if not auth_token:
+                            return
+
+                        poll_timer[0].cancel()
+                        status_label.set_text('Authorized. Claiming PlexAmp…')
+
+                        try:
+                            claim_token = await asyncio.to_thread(_get_claim_token, auth_token)
+                            await asyncio.to_thread(_restart_plexamp_with_claim, claim_token)
+                        except Exception as exc:
+                            status_label.set_text(f'Claim failed: {exc}')
+                            connect_btn.enable()
+                            return
+
+                        status_label.set_text('PlexAmp restarting…')
+
+                        port_deadline = asyncio.get_event_loop().time() + 120
+                        port_timer: list[ui.timer] = []
+
+                        async def _poll_port():
+                            if asyncio.get_event_loop().time() > port_deadline:
+                                port_timer[0].cancel()
+                                _remove_claim_override()
+                                status_label.set_text('PlexAmp did not come up in time. Check the service.')
+                                connect_btn.enable()
+                                return
+
+                            if _plexamp_state() == 'claimed':
+                                port_timer[0].cancel()
+                                _remove_claim_override()
+                                self._build_services_tab.refresh()
+
+                        port_timer.append(ui.timer(2.0, _poll_port))
+
+                    poll_timer.append(ui.timer(2.0, _poll_auth))
+
+                connect_btn.on('click', _on_connect)
 
     @ui.refreshable
     def _build_players_tab(self) -> None:
