@@ -1,4 +1,4 @@
-from nicegui import ui
+from nicegui import app
 
 PRIMARY = '#1a1a2e'
 SECONDARY = '#16213e'
@@ -8,4 +8,4 @@ MUTED = '#888888'
 
 
 def apply_defaults() -> None:
-    ui.colors(primary=PRIMARY, secondary=SECONDARY, accent=ACCENT)
+    app.colors(primary=PRIMARY, secondary=SECONDARY, accent=ACCENT)
