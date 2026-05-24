@@ -67,9 +67,8 @@ class Page:
 
         # Stop
         self.network_refreshing = False
-        self._build_network_card.refresh()
+        self.network_selector.set_options(self.available_networks)
 
-    @ui.refreshable
     def _build_network_card(self):
         """Renders the network selector and password input."""
 
