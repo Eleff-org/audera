@@ -1,15 +1,16 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(uv sync *)",
-      "Bash(uv run *)",
-      "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(ls \"T:\\\\Documents\\\\Projects\\\\Audera\\\\tests\\\\services\\\\\\\\\")",
-      "Bash(bash *)",
-      "WebFetch(domain:api.github.com)",
-      "Bash(find *)",
-      "WebFetch(domain:henquist.github.io)"
-    ]
-  }
+    "permissions": {
+        "allow": [
+            "Bash(uv sync *)",
+            "Bash(uv run *)",
+            "WebFetch(domain:github.com)",
+            "WebFetch(domain:raw.githubusercontent.com)",
+            "Bash(ls \"T:\\\\Documents\\\\Projects\\\\Audera\\\\tests\\\\services\\\\\\\\\")",
+            "Bash(bash *)",
+            "WebFetch(domain:api.github.com)",
+            "Bash(find *)",
+            "WebFetch(domain:henquist.github.io)",
+            "Bash(rtk *)"
+        ]
+    }
 }

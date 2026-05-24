@@ -228,7 +228,7 @@ async def connect(
 
     # Delete the connection if it already exists
     if connection_exists(con_name=ssid):
-        delete_connection_result = subprocess.run(['nmcli', 'connection', 'delete', f'{ssid}'])
+        delete_connection_result = await asyncio.to_thread(subprocess.run, ['nmcli', 'connection', 'delete', f'{ssid}'])
 
         # Wait for the service
         if delete_connection_result.returncode == 0:
@@ -248,7 +248,8 @@ async def connect(
 
     # Add the connection
     if password:
-        add_connection_result = subprocess.run(
+        add_connection_result = await asyncio.to_thread(
+            subprocess.run,
             [
                 'nmcli',
                 'connection',
@@ -267,10 +268,11 @@ async def connect(
                 f'{password}',
                 'connection.autoconnect',
                 'yes',
-            ]
+            ],
         )
     else:
-        add_connection_result = subprocess.run(
+        add_connection_result = await asyncio.to_thread(
+            subprocess.run,
             [
                 'nmcli',
                 'connection',
@@ -285,7 +287,7 @@ async def connect(
                 f'{ssid}',
                 'connection.autoconnect',
                 'yes',
-            ]
+            ],
         )
 
     # Wait for the service
@@ -304,7 +306,7 @@ async def connect(
         if not connection_exists(con_name=ssid):
             raise NetworkConnectionError('Unable to add Wi-Fi connection `%s` on interface `%s`.' % (ssid, interface))
 
-    result = subprocess.run(['nmcli', 'connection', 'up', f'{ssid}'])
+    result = await asyncio.to_thread(subprocess.run, ['nmcli', 'connection', 'up', f'{ssid}'])
 
     if result.returncode == 0:
         pass

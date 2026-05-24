@@ -1,5 +1,6 @@
-"""Remote audio device setup — shared between player and streamer roles"""
+"""Remote audio device setup pages"""
 
+import asyncio
 import os
 import time
 from typing import Dict, List, Literal, Optional, Union
@@ -40,6 +41,9 @@ class Page:
         self.network_refreshing: bool = False
         self.wifi_networks: Dict[str, List[str]] = {}
 
+        # Initialize shutdown state
+        self.shutting_down: bool = False
+
         # Initialize access-point
         self.ap = audera.ap.AccessPoint(name=audera.NAME, url='http://%s-setup.audera.com' % role, interface='wlan0')
 
@@ -63,6 +67,41 @@ class Page:
 
         # Stop
         self.network_refreshing = False
+        self.network_selector.set_options(self.available_networks)
+
+    def _build_network_card(self):
+        """Renders the network selector and password input."""
+
+        self.network_selector = (
+            ui.select(
+                options=self.available_networks,
+                label='Network',
+            )
+            .props('clearable rounded-md outlined dense')
+            .classes('w-full')
+        )
+        self.password_input = (
+            ui.input(placeholder='Password', password=True, password_toggle_button=True)
+            .bind_visibility_from(
+                self,
+                'network_selector',
+                backward=lambda network_selector: network_selector.value and '🔒' in network_selector.value,
+            )
+            .props('clearable rounded-md outlined dense')
+            .classes('w-full')
+        )
+
+        with ui.row().classes('flex w-full'):
+            ui.button(
+                'Connect',
+                on_click=lambda: self.connect_callback(
+                    str(self.network_selector.value).replace('🔒', '').strip(),
+                    str(self.password_input.value).strip() if self.password_input.value else None,
+                ),
+            ).bind_enabled_from(self, 'network_selector', backward=lambda network_selector: network_selector.value).props(
+                'rounded'
+            ).classes('normal-case')
+            ui.spinner(size='md').bind_visibility_from(self, 'network_refreshing')
 
     async def connect_callback(self, ssid: str, password: Optional[str]):
         """Connects to an available Wi-Fi network and checks for a valid internet connection.
@@ -114,15 +153,15 @@ class Page:
 
     def load(self):
         """Returns the page content."""
-        ui.page('/', title='%s \u2014 Welcome' % audera.NAME.lower())(self.welcome)
-        ui.page('/connect', title='%s \u2014 Connect' % audera.NAME.lower())(self.connect)
-        ui.page('/finish', title='%s \u2014 Finish' % audera.NAME.lower())(self.finish)
+        ui.page('/', title='%s — Welcome' % audera.NAME.lower())(self.welcome)
+        ui.page('/connect', title='%s — Connect' % audera.NAME.lower())(self.connect)
+        ui.page('/finish', title='%s — Finish' % audera.NAME.lower())(self.finish)
 
     def welcome(self):
         """Returns the welcome page content."""
 
         with ui.row().classes('flex w-full'):
-            ui.label('%s \u2014 Welcome' % audera.NAME.lower()).classes('self-center text-sm ml-3')
+            ui.label('%s — Welcome' % audera.NAME.lower()).classes('self-center text-sm ml-3')
             ui.icon('circle', size='.7rem', color='primary').classes('self-center ml-auto')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
@@ -140,7 +179,7 @@ class Page:
         """Returns the connect page content."""
 
         with ui.row().classes('flex w-full'):
-            ui.label('%s \u2014 Connect' % audera.NAME.lower()).classes('self-center text-sm ml-3')
+            ui.label('%s — Connect' % audera.NAME.lower()).classes('self-center text-sm ml-3')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
             ui.icon('circle', size='.7rem', color='primary').classes('self-center')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
@@ -152,36 +191,7 @@ class Page:
             ui.button('Refresh', on_click=self.refresh_callback).props('rounded').classes('ml-auto normal-case')
 
             with ui.card().classes('mx-auto flex w-full'):
-                self.network_selector = (
-                    ui.select(
-                        options=self.available_networks,
-                        label='Network',
-                    )
-                    .props('clearable rounded-md outlined dense')
-                    .classes('w-full')
-                )
-                self.password_input = (
-                    ui.input(placeholder='Password', password=True, password_toggle_button=True)
-                    .bind_visibility_from(
-                        self,
-                        'network_selector',
-                        backward=lambda network_selector: network_selector.value and '🔒' in network_selector.value,
-                    )
-                    .props('clearable rounded-md outlined dense')
-                    .classes('w-full')
-                )
-
-                with ui.row().classes('flex w-full'):
-                    ui.button(
-                        'Connect',
-                        on_click=lambda: self.connect_callback(
-                            str(self.network_selector.value).replace('🔒', '').strip(),
-                            str(self.password_input.value).strip() if self.password_input.value else None,
-                        ),
-                    ).bind_enabled_from(
-                        self, 'network_selector', backward=lambda network_selector: network_selector.value
-                    ).props('rounded').classes('normal-case')
-                    ui.spinner(size='md').bind_visibility_from(self, 'network_refreshing')
+                self._build_network_card()  # type: ignore
 
             with ui.row().classes('flex w-full'):
                 ui.button('Back', on_click=lambda: ui.navigate.to('/')).props('flat rounded').classes('normal-case')
@@ -189,19 +199,24 @@ class Page:
                     self, 'connected_profile', backward=lambda enabled: True if enabled else False
                 ).props('rounded').classes('ml-auto normal-case')
 
+        ui.timer(0, self.refresh_callback, once=True)
+
     def finish(self):
         """Returns the finish page content."""
 
         _finish_instructions: Dict[str, str] = {
             'player': (
-                'Once your player restarts, connect to your **audera** streamer to start a playback session, or, '
-                'cast directly to your player through any AirPlay enabled device.'
+                'Once your player restarts, open [audera.local](http://audera.local) '
+                'to manage playback from your **audera** streamer.'
             ),
-            'streamer': ('Once your streamer restarts, connect your **audera** players to start a playback session.'),
+            'streamer': (
+                'Once your streamer restarts, open [audera.local](http://audera.local) '
+                'to manage your players and start a playback session.'
+            ),
         }
 
         with ui.row().classes('flex w-full'):
-            ui.label('%s \u2014 Finish' % audera.NAME.lower()).classes('self-center text-sm ml-3')
+            ui.label('%s — Finish' % audera.NAME.lower()).classes('self-center text-sm ml-3')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
             ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
             ui.icon('circle', size='.7rem', color='primary').classes('self-center mr-3')
@@ -215,46 +230,16 @@ class Page:
 
             with ui.row().classes('flex w-full'):
                 ui.button('Back', on_click=lambda: ui.navigate.to('/connect')).props('flat rounded').classes('normal-case')
-                ui.button('Finish', on_click=self.shutdown).props('rounded').classes('ml-auto normal-case')
+                ui.button('Finish', on_click=self.shutdown).bind_enabled_from(
+                    self, 'shutting_down', backward=lambda v: not v
+                ).props('rounded').classes('ml-auto normal-case')
 
-    def shutdown(self):
+    async def shutdown(self):
         """Closes the access-point, shuts down the setup app, and restarts the device."""
-        self.ap.stop()
+        self.shutting_down = True
+        ui.notify('Restarting your device, please wait…', position='top-right', type='positive')
+        await asyncio.sleep(1.5)
+        await asyncio.to_thread(self.ap.stop)
         app.shutdown()
-
-        # Restart
-        time.sleep(5)
-        os.system('sudo reboot')
-
-
-def run(role: Literal['streamer', 'player'] = 'player'):
-    """Runs the device setup wizard for configuration and Wi-Fi onboarding.
-
-    Parameters
-    ----------
-    role: `Literal['streamer', 'player']`
-        The device role, used to customise page labels and finish-page instructions.
-    """
-
-    # Initialize the ui
-    page = Page(role=role)
-
-    # Load the page content
-    page.load()
-
-    # Run the app
-    try:
-        ui.run(
-            host='0.0.0.0',  # Any interface
-            port=80,
-            title=audera.NAME.strip().lower(),
-            show=False,
-            reload=False,
-            reconnect_timeout=60,
-        )
-    except KeyboardInterrupt:
-        app.shutdown()
-
-
-if __name__ in ['__main__', '__mp_main__']:
-    run()
+        await asyncio.to_thread(time.sleep, 5)
+        await asyncio.to_thread(os.system, 'sudo reboot')

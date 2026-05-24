@@ -9,12 +9,11 @@ description = "Audera is a new era of composable audio systems that brings open-
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Tom Eleff" }]
-requires-python = ">=3.11"
+requires-python = "==3.13.*"
 classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
     "duckdb>=1.5.1",
@@ -59,3 +58,7 @@ select = ["E", "F", "W", "I"]
 [tool.ruff.format]
 quote-style = "single"
 indent-style = "space"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+main_file = ""

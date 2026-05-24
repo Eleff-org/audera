@@ -109,7 +109,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 # Write CamillaDSP configuration
 echo
 echo ">>> Creating the CamillaDSP configuration"
-audera conf player camilladsp.yml > "$CAMILLADSP_CONFIG"
+audera player conf camilladsp.yml > "$CAMILLADSP_CONFIG"
 chmod 644 "$CAMILLADSP_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
 
@@ -226,7 +226,7 @@ cat > "$AUTOSTART_SCRIPT" <<'EOF'
 
 set -e
 
-exec audera run player-server
+exec audera player start
 EOF
 chmod +x "$AUTOSTART_SCRIPT"
 echo -e "[  ${GREEN}OK${RESET}  ] Custom autostart script created successfully"

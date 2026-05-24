@@ -7,3 +7,4 @@ plans
 audera.egg-info
 testing*.py
 .env
+.claude
