@@ -39,6 +39,7 @@ class Player(BaseModel):
     muted: bool = False
     group_id: str = ''
     name: str = Field(default='', exclude=True)
+    latency_ms: int = Field(default=0, exclude=True)
 
     @classmethod
     def from_dict(cls, dict_object: dict) -> 'Player':
@@ -72,6 +73,7 @@ class Player(BaseModel):
                 and self.volume == compare.volume
                 and self.muted == compare.muted
                 and self.group_id == compare.group_id
+                and self.latency_ms == compare.latency_ms
             )
         return False
 

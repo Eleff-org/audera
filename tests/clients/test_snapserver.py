@@ -28,3 +28,11 @@ def test_get_clients(client):
     assert isinstance(result, list)
     for p in result:
         assert isinstance(p, Player)
+
+
+def test_set_client_latency(client):
+    clients = client.get_clients()
+    if not clients:
+        pytest.skip('no clients registered in test snapserver')
+    result = client.set_client_latency(clients[0].id, 50)
+    assert isinstance(result, dict)

@@ -50,6 +50,12 @@ async def test_players_tab_shows_connected_client(audera_home, mock_snapserver_w
     await user.should_see('Living Room')
 
 
+async def test_players_tab_shows_latency_control(audera_home, mock_snapserver_with_client, user: User):
+    Page().load()
+    await user.open('/')
+    await user.should_see('Latency (ms)')
+
+
 async def test_services_tab_shows_inactive(audera_home, mock_snapserver_empty, monkeypatch, user: User):
     monkeypatch.setattr(streamer_pages, '_plexamp_state', lambda: 'inactive')
     Page().load()

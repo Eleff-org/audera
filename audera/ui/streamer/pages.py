@@ -272,7 +272,7 @@ class Page:
                             'text-gray-400'
                         )
                 with ui.row().classes('items-center gap-4'):
-                    self._build_volume_controls(client.id, client.volume, client.muted)
+                    self._build_volume_controls(client.id, client.volume, client.muted, client.latency_ms)
                 with ui.row().classes('items-center gap-2 mt-1'):
                     rename_input = (
                         ui.input(value=client.name, placeholder='Rename').props('dense outlined rounded-md').classes('w-40')
@@ -285,8 +285,8 @@ class Page:
 
                     ui.button('Rename', on_click=_on_rename).props('flat dense rounded')
 
-    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool) -> None:
-        """Renders volume slider and mute checkbox for a single Snapcast client."""
+    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool, initial_latency: int = 0) -> None:
+        """Renders volume slider, mute checkbox, and latency input for a single Snapcast client."""
 
         def _on_volume(e):
             _snapserver(self.settings).set_client_volume(client_id, int(e.value), mute_cb.value)
@@ -294,8 +294,14 @@ class Page:
         def _on_mute(e):
             _snapserver(self.settings).set_client_volume(client_id, int(slider.value), e.value)
 
+        def _on_latency(e):
+            _snapserver(self.settings).set_client_latency(client_id, int(e.value))
+
         slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
         mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
+        ui.number('Latency (ms)', value=initial_latency, min=-500, max=500, step=1, on_change=_on_latency).classes('w-32').props(
+            'dense'
+        )
 
     def _build_settings_tab(self) -> None:
         """Renders the Settings tab — configure service hosts and persist to ~/.audera/settings.json."""
