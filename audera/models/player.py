@@ -39,7 +39,7 @@ class Player(BaseModel):
     muted: bool = False
     group_id: str = ''
     name: str = Field(default='', exclude=True)
-    latency_ms: int = Field(default=0, exclude=True)
+    latency_ms: int = Field(default=0, ge=-500, le=500, exclude=True)
 
     @classmethod
     def from_dict(cls, dict_object: dict) -> 'Player':

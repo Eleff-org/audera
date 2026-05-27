@@ -53,6 +53,7 @@ async def test_players_tab_shows_connected_client(audera_home, mock_snapserver_w
 async def test_players_tab_shows_latency_control(audera_home, mock_snapserver_with_client, user: User):
     Page().load()
     await user.open('/')
+    user.find(marker='player-settings').click()
     await user.should_see('Latency (ms)')
 
 

@@ -1,7 +1,6 @@
 """Audera streamer dashboard pages"""
 
 import asyncio
-import json
 import os
 import socket
 import subprocess
@@ -119,6 +118,7 @@ class Page:
         """Initializes an instance of the streamer dashboard app."""
         self.settings = _load_settings()
         self._client = _snapserver(self.settings)
+        self._dialog_open: bool = False
 
     def load(self) -> None:
         """Registers page routes."""
@@ -141,7 +141,11 @@ class Page:
             with ui.tab_panel(settings_tab):
                 self._build_settings_tab()
 
-        ui.timer(10.0, self._build_players_tab.refresh)
+        def _maybe_refresh():
+            if not self._dialog_open:
+                self._build_players_tab.refresh()
+
+        ui.timer(10.0, _maybe_refresh)
 
     @ui.refreshable
     def _build_services_tab(self) -> None:
@@ -250,43 +254,64 @@ class Page:
         except Exception:
             clients = []
 
-        if not clients:
+        connected_clients = [c for c in clients if c.connected]
+        if not connected_clients:
             ui.label('No Snapcast clients found.').classes('text-gray-500')
             return
-
-        connected_clients = [client for client in clients if client.connected]
 
         for client in connected_clients:
             with ui.card().classes('w-full mb-2'):
                 with ui.row().classes('items-center justify-between w-full'):
-                    ui.label(client.name).classes('font-medium')
                     with ui.row().classes('items-center gap-2'):
-                        with ui.dialog() as detail_dialog, ui.card():
-                            ui.label(client.name).classes('font-medium mb-2')
-                            ui.code(
-                                json.dumps({**client.to_dict(), 'name': client.name}, indent=2),
-                                language='json',
-                            ).classes('text-xs')
-                            ui.button('Close', on_click=detail_dialog.close).props('flat dense').classes('mt-2')
-                        ui.button(on_click=detail_dialog.open).props('icon=info flat dense round size=xs').classes(
-                            'text-gray-400'
-                        )
-                with ui.row().classes('items-center gap-4'):
-                    self._build_volume_controls(client.id, client.volume, client.muted, client.latency_ms)
-                with ui.row().classes('items-center gap-2 mt-1'):
-                    rename_input = (
-                        ui.input(value=client.name, placeholder='Rename').props('dense outlined rounded-md').classes('w-40')
-                    )
+                        ui.label(client.name).classes('font-medium')
+                    ui.button(on_click=lambda c=client: self._open_settings_dialog(c)).props(
+                        'icon=edit_square flat dense round size=sm'
+                    ).classes('text-gray-400').mark('player-settings')
+                with ui.row().classes('items-center gap-4 w-full'):
+                    self._build_volume_controls(client.id, client.volume, client.muted)
 
-                    def _on_rename(c=client, inp=rename_input):
-                        if inp.value:
-                            _snapserver(self.settings).set_client_name(c.id, inp.value)
-                            self._build_players_tab.refresh()
+    def _open_settings_dialog(self, client) -> None:
+        """Opens a settings popup for renaming and adjusting latency of a Snapcast client."""
+        self._dialog_open = True
 
-                    ui.button('Rename', on_click=_on_rename).props('flat dense rounded')
+        with ui.dialog() as dialog, ui.card().classes('w-96'):
+            ui.label('Settings').classes('font-medium text-lg mb-2')
 
-    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool, initial_latency: int = 0) -> None:
-        """Renders volume slider, mute checkbox, and latency input for a single Snapcast client."""
+            name_input = ui.input('Name', value=client.name).classes('w-full')
+            latency_input = ui.number('Latency (ms)', value=client.latency_ms, min=-500, max=500, step=1).classes('w-full')
+
+            ui.separator().classes('mt-4 mb-2')
+            with ui.column().classes('text-xs text-gray-500 gap-1'):
+                ui.label(f'ID      {client.id}')
+                ui.label(f'Host    {client.host}')
+                ui.label(f'Group   {client.group_id or "—"}')
+
+            with ui.row().classes('justify-between w-full mt-4'):
+
+                def _on_cancel():
+                    self._dialog_open = False
+                    dialog.close()
+
+                def _on_save(c=client, ni=name_input, li=latency_input):
+                    snap = _snapserver(self.settings)
+                    if ni.value and ni.value != c.name:
+                        snap.set_client_name(c.id, ni.value)
+                        ui.notify(f'Renamed to "{ni.value}"', type='positive', position='top-right')
+                    if int(li.value) != c.latency_ms:
+                        snap.set_client_latency(c.id, int(li.value))
+                        ui.notify(f'Latency set to {int(li.value)} ms', type='positive', position='top-right')
+                    self._dialog_open = False
+                    dialog.close()
+                    self._build_players_tab.refresh()
+
+                ui.button('Cancel', on_click=_on_cancel).props('flat dense')
+                ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
+
+        dialog.on('hide', lambda: setattr(self, '_dialog_open', False))
+        dialog.open()
+
+    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool) -> None:
+        """Renders volume slider and mute checkbox for a single Snapcast client."""
 
         def _on_volume(e):
             _snapserver(self.settings).set_client_volume(client_id, int(e.value), mute_cb.value)
@@ -294,14 +319,9 @@ class Page:
         def _on_mute(e):
             _snapserver(self.settings).set_client_volume(client_id, int(slider.value), e.value)
 
-        def _on_latency(e):
-            _snapserver(self.settings).set_client_latency(client_id, int(e.value))
-
         slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
         mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
-        ui.number('Latency (ms)', value=initial_latency, min=-500, max=500, step=1, on_change=_on_latency).classes('w-32').props(
-            'dense'
-        )
+        slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
 
     def _build_settings_tab(self) -> None:
         """Renders the Settings tab — configure service hosts and persist to ~/.audera/settings.json."""
