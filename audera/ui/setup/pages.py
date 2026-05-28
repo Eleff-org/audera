@@ -191,7 +191,7 @@ class Page:
             ui.button('Refresh', on_click=self.refresh_callback).props('rounded').classes('ml-auto normal-case')
 
             with ui.card().classes('mx-auto flex w-full'):
-                self._build_network_card()  # type: ignore
+                self._build_network_card()
 
             with ui.row().classes('flex w-full'):
                 ui.button('Back', on_click=lambda: ui.navigate.to('/')).props('flat rounded').classes('normal-case')

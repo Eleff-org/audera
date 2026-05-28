@@ -72,6 +72,7 @@ class SnapserverClient:
                         muted=client['config']['volume']['muted'],
                         group_id=group['id'],
                         name=config_name if config_name else client['host'].get('name', client['host']['ip']),
+                        latency_ms=client['config'].get('latency', 0),
                     )
                 )
         return clients
@@ -111,6 +112,21 @@ class SnapserverClient:
                 'id': client_id,
                 'volume': {'percent': percent, 'muted': muted},
             },
+        )
+
+    def set_client_latency(self, client_id: str, latency_ms: int) -> dict:
+        """Sets the latency offset for a Snapcast client.
+
+        Parameters
+        ----------
+        client_id: `str`
+            The Snapcast client identifier.
+        latency_ms: `int`
+            The latency offset in milliseconds (-500 to 500).
+        """
+        return self._call(
+            'Client.SetLatency',
+            {'id': client_id, 'latency': latency_ms},
         )
 
     def set_group_stream(self, group_id: str, stream_id: str) -> dict:

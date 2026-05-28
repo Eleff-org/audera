@@ -28,6 +28,21 @@ def _wait_for_http(container, internal_port: int, path: str = '/', timeout: floa
     )
 
 
+def _wait_for_client(host: str, port: int, timeout: float = 90) -> None:
+    from audera.clients import SnapserverClient
+
+    snap = SnapserverClient(host, port)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if snap.get_clients():
+                return
+        except Exception:
+            pass
+        time.sleep(1)
+    raise TimeoutError(f'No snapclient connected to {host}:{port} after {timeout}s')
+
+
 @pytest.fixture
 def audera_home(tmp_path, monkeypatch):
     for module, subdir in [
@@ -47,7 +62,7 @@ def audera_home(tmp_path, monkeypatch):
 def snapserver_container():
     from testcontainers.core.container import DockerContainer
 
-    conf_path = Path(__file__).parent.parent / 'os/dietpi/streamer/conf/snapserver.conf'
+    conf_path = Path(__file__).parent.parent / 'audera/conf/streamer/snapserver.conf'
     with (
         DockerContainer('debian:bookworm')
         .with_volume_mapping(str(conf_path), '/etc/snapserver.conf', 'ro')
@@ -60,14 +75,18 @@ def snapserver_container():
             ' && apt-get update -qq'
             ' && DEBIAN_FRONTEND=noninteractive'
             ' apt-get install -t bookworm-backports -y'
-            ' -o Dpkg::Options::=--force-confold snapserver'
-            ' && snapserver --config /etc/snapserver.conf"'
+            ' -o Dpkg::Options::=--force-confold snapserver snapclient'
+            ' && snapserver --config /etc/snapserver.conf &'
+            ' sleep 5'
+            ' && (while true; do snapclient --host 127.0.0.1 --player stdout >/dev/null 2>&1; sleep 2; done) &'
+            ' wait"'
         )
     ) as container:
         _wait_for_http(container, 1780, timeout=180)
         host = container.get_container_host_ip()
-        port = container.get_exposed_port(1780)
-        yield host, int(port)
+        port = int(container.get_exposed_port(1780))
+        _wait_for_client(host, port)
+        yield host, port
 
 
 def _make_camilladsp_handler(state: dict):
