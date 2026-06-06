@@ -139,7 +139,7 @@ Description=CamillaDSP
 After=sound.target snapclient.service
 
 [Service]
-ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG -p 1234
+ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG -p 1234 --address 0.0.0.0
 Restart=always
 RestartSec=5
 

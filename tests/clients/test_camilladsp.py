@@ -42,3 +42,26 @@ def test_set_volume(client):
 def test_error_response_raises(error_client):
     with pytest.raises(RuntimeError):
         error_client.get_config()
+
+
+def test_percent_to_db(client):
+    assert client.percent_to_db(100) == -3.0  # clamped to MAX_SAFE_DB
+    assert client.percent_to_db(50) == -6.020599913279624  # not clamped (quieter)
+    assert client.percent_to_db(0) == -90.0
+
+
+def test_db_to_percent(client):
+    assert client.db_to_percent(0.0) == 100
+    assert client.db_to_percent(-6.0) == 50
+    assert client.db_to_percent(-90.0) == 0
+
+
+def test_set_percent_volume(client):
+    client.set_percent_volume(75)
+    result = client.get_volume()
+    assert result == -3.0  # clamped by MAX_SAFE_DB
+
+
+def test_get_percent_volume(client):
+    client.set_volume(-6.0)
+    assert client.get_percent_volume() == 50

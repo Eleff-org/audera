@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from nicegui import ui
 
 import audera
-from audera.clients import SnapserverClient
+from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import settings as settings_dal
 from audera.models.settings import Settings
 from audera.ui import components
@@ -41,6 +41,11 @@ def _load_settings() -> Settings:
 
 def _snapserver(settings: Settings) -> SnapserverClient:
     return SnapserverClient(host=settings.snapserver_host, port=audera.SNAPSERVER_PORT)
+
+
+def _camilladsp(host: str) -> CamillaDSPClient:
+    """Returns a CamillaDSPClient for the given player host."""
+    return CamillaDSPClient(host=host)
 
 
 def _plexamp_state() -> Literal['inactive', 'unclaimed', 'claimed']:
@@ -119,6 +124,7 @@ class Page:
         self.settings = _load_settings()
         self._client = _snapserver(self.settings)
         self._dialog_open: bool = False
+        self._camilla_volumes: dict[str, int] = {}
 
     def load(self) -> None:
         """Registers page routes."""
@@ -268,10 +274,17 @@ class Page:
                         'icon=edit_square flat dense round size=sm'
                     ).classes('text-gray-400').mark('player-settings')
                 with ui.row().classes('items-center gap-4 w-full'):
-                    self._build_volume_controls(client.id, client.volume, client.muted)
+                    # Fall back to last-known on error so the 10 s periodic refresh cannot clobber a user-set slider value.
+                    host = client.host
+                    try:
+                        init_vol = _camilladsp(host).get_percent_volume()
+                        self._camilla_volumes[host] = init_vol
+                    except Exception:
+                        init_vol = self._camilla_volumes.get(host, 100)
+                    self._build_volume_controls(client.id, init_vol, client.muted, client.host)
 
     def _open_settings_dialog(self, client) -> None:
-        """Opens a settings popup for renaming and adjusting latency of a Snapcast client."""
+        """Opens a settings popup for renaming, latency, and Snapcast volume reset."""
         self._dialog_open = True
 
         with ui.dialog() as dialog, ui.card().classes('w-96'):
@@ -279,6 +292,16 @@ class Page:
 
             name_input = ui.input('Name', value=client.name).classes('w-full')
             latency_input = ui.number('Latency (ms)', value=client.latency_ms, min=-500, max=500, step=1).classes('w-full')
+
+            # Snapcast volume is a sidecar kept at 100/0; CamillaDSP controls actual loudness.
+            snap_vol = client.volume
+            with ui.row().classes('w-full items-start justify-between mt-2'):
+                with ui.column().classes('gap-0'):
+                    ui.label('Snapcast Volume').classes('text-xs')
+                    current_vol_label = ui.label(f'Current Volume {snap_vol}%').classes('text-xs text-gray-500')
+                ui.button('Reset', on_click=lambda c=client, lbl=current_vol_label: self._reset_snap_volume(c, lbl)).props(
+                    'dense'
+                ).classes('bg-gray-800 text-white')
 
             ui.separator().classes('mt-4 mb-2')
             with ui.column().classes('text-xs text-gray-500 gap-1'):
@@ -310,14 +333,40 @@ class Page:
         dialog.on('hide', lambda: setattr(self, '_dialog_open', False))
         dialog.open()
 
-    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool) -> None:
-        """Renders volume slider and mute checkbox for a single Snapcast client."""
+    def _reset_snap_volume(self, client, vol_label=None) -> None:
+        """Resets the Snapcast client volume to 100% / unmuted.
 
-        def _on_volume(e):
-            _snapserver(self.settings).set_client_volume(client_id, int(e.value), mute_cb.value)
+        If vol_label is provided (from the settings dialog), its text is updated to
+        reflect the new value. The players tab is *not* refreshed so that the CamillaDSP
+        volume sliders retain their current visual state.
+        """
+        _snapserver(self.settings).set_client_volume(client.id, 100, muted=False)
+        if vol_label is not None:
+            vol_label.set_text('Current Volume 100%')
+        ui.notify('Snapcast volume reset to 100%', type='positive', position='top-right')
 
-        def _on_mute(e):
-            _snapserver(self.settings).set_client_volume(client_id, int(slider.value), e.value)
+    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool, client_host: str = '') -> None:
+        """Renders volume slider (now routed through CamillaDSP) and mute checkbox (Snapcast)."""
+
+        async def _on_volume(e):
+            percent = int(e.value)
+            # Cache immediately so a concurrent refresh cannot reset the slider.
+            if client_host:
+                self._camilla_volumes[client_host] = percent
+            camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
+            try:
+                await asyncio.to_thread(camilla.set_percent_volume, percent)
+            except Exception:
+                pass
+            await asyncio.to_thread(
+                _snapserver(self.settings).set_client_volume,
+                client_id,
+                0 if percent == 0 else 100,
+                muted=(percent == 0),
+            )
+
+        async def _on_mute(e):
+            await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=e.value)
 
         slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
         mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
