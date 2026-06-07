@@ -93,11 +93,11 @@ def _make_camilladsp_handler(state: dict):
     def handler(ws):
         for raw in ws:
             msg = json.loads(raw)
-            if msg == 'GetConfig':
-                ws.send(json.dumps({'GetConfig': state['config']}))
-            elif isinstance(msg, dict) and 'SetConfig' in msg:
-                state['config'] = msg['SetConfig']
-                ws.send(json.dumps({'SetConfig': 'Ok'}))
+            if msg == 'GetConfigJson':
+                ws.send(json.dumps({'GetConfigJson': {'value': json.dumps(state['config'])}}))
+            elif isinstance(msg, dict) and 'SetConfigJson' in msg:
+                state['config'] = json.loads(msg['SetConfigJson'])
+                ws.send(json.dumps({'SetConfigJson': 'Ok'}))
             elif msg == 'GetVolume':
                 ws.send(json.dumps({'GetVolume': state['volume']}))
             elif isinstance(msg, dict) and 'SetVolume' in msg:

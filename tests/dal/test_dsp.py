@@ -17,8 +17,8 @@ _COMPLEX_PIPELINE = {
     },
     'pipeline': [
         {'type': 'Mixer', 'name': 'stereo'},
-        {'type': 'Filter', 'channel': 0, 'names': ['low_pass']},
-        {'type': 'Filter', 'channel': 1, 'names': ['high_pass']},
+        {'type': 'Filter', 'channels': [0], 'names': ['low_pass']},
+        {'type': 'Filter', 'channels': [1], 'names': ['high_pass']},
     ],
 }
 
@@ -97,3 +97,29 @@ def test_dsp_get_or_create_reads(audera_home):
 
     result = dsp_dal.get_or_create(config)
     assert result == config
+
+
+def test_dsp_loudness_fields_default(audera_home):
+    config = _make_dsp()
+    dsp_dal.create(config)
+    result = dsp_dal.get(config.player_id)
+    assert result.loudness_enabled is False
+    assert result.loudness_reference_level == -25.0
+
+
+def test_dsp_update_loudness_fields(audera_home):
+    config = _make_dsp()
+    dsp_dal.create(config)
+    updated = config.model_copy(update={'loudness_enabled': True})
+    dsp_dal.update(updated)
+    result = dsp_dal.get(config.player_id)
+    assert result.loudness_enabled is True
+
+
+def test_dsp_update_loudness_reference_level(audera_home):
+    config = _make_dsp()
+    dsp_dal.create(config)
+    updated = config.model_copy(update={'loudness_reference_level': -40.0})
+    dsp_dal.update(updated)
+    result = dsp_dal.get(config.player_id)
+    assert result.loudness_reference_level == -40.0

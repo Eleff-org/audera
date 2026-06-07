@@ -7,6 +7,9 @@ import websockets.sync.client
 
 import audera
 
+_CMD_GET_CONFIG_JSON = 'GetConfigJson'
+_CMD_SET_CONFIG_JSON = 'SetConfigJson'
+
 
 class CamillaDSPClient:
     """A synchronous client for the CamillaDSP WebSocket API.
@@ -40,19 +43,19 @@ class CamillaDSPClient:
         with websockets.sync.client.connect(self._url, open_timeout=5) as ws:
             ws.send(json.dumps(payload))
             response = json.loads(ws.recv())
-        if isinstance(response, dict) and response.get('result') == 'Error':
-            raise RuntimeError('CamillaDSP error [%s]: %s' % (command, response))
+        # CamillaDSP wraps responses as {"CommandName": {"result": "Ok/Error", ...}}
+        inner = response.get(command, response) if isinstance(response, dict) else response
+        if isinstance(inner, dict) and inner.get('result') == 'Error':
+            raise RuntimeError('CamillaDSP error [%s]: %s' % (command, inner))
         return response
 
     def get_config(self) -> dict:
-        """Returns the current CamillaDSP pipeline configuration as a `dict` (or the raw value)."""
-        response = self._call('GetConfig')
-        if isinstance(response, dict):
-            inner = response.get('GetConfig', response)
-            if isinstance(inner, dict) and 'value' in inner:
-                return inner['value']
-            return inner
-        return {}
+        """Returns the current CamillaDSP pipeline configuration as a `dict`."""
+        response = self._call(_CMD_GET_CONFIG_JSON)
+        inner = response.get(_CMD_GET_CONFIG_JSON, response)
+        if 'value' in inner:
+            return json.loads(inner['value'])
+        return inner
 
     def set_config(self, config: dict):
         """Applies a new CamillaDSP pipeline configuration.
@@ -62,7 +65,8 @@ class CamillaDSPClient:
         config: `dict`
             The CamillaDSP pipeline configuration.
         """
-        self._call('SetConfig', config)
+        # SetConfigJson expects the config as a JSON string, not a dict
+        self._call(_CMD_SET_CONFIG_JSON, json.dumps(config))
 
     def get_volume(self) -> float:
         """Returns the current CamillaDSP volume level in dB."""
