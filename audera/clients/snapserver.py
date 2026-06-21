@@ -1,5 +1,6 @@
 """Snapcast JSON-RPC WebSocket client"""
 
+import ipaddress
 import json
 import uuid
 from typing import Any, List, Optional
@@ -8,6 +9,16 @@ import websockets.sync.client
 
 import audera
 from audera.models import player
+
+
+def _normalize_host_ip(raw: str) -> str:
+    try:
+        ip = ipaddress.ip_address(raw)
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+    except ValueError:
+        pass
+    return raw
 
 
 class SnapserverClient:
@@ -62,10 +73,11 @@ class SnapserverClient:
         for group in status.get('server', {}).get('groups', []):
             for client in group.get('clients', []):
                 config_name = client.get('config', {}).get('name', '').strip()
+                host_ip = _normalize_host_ip(client['host']['ip'])
                 clients.append(
                     player.Player(
                         id=client['id'],
-                        host=client['host']['ip'],
+                        host=host_ip,
                         port=client['host'].get('port', 0),
                         connected=client['connected'],
                         volume=client['config']['volume']['percent'],

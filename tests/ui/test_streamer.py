@@ -1,12 +1,15 @@
 """Integration tests for the streamer dashboard UI."""
 
+import asyncio
+
 import pytest
-from nicegui import core
+from nicegui import core, ui
 from nicegui.client import Client
 from nicegui.testing import User
 
 import audera.ui.streamer.pages as streamer_pages
-from audera.clients import SnapserverClient
+from audera.clients import CamillaDSPClient, SnapserverClient
+from audera.dal import dsp as dsp_dal
 from audera.dal import settings as settings_dal
 from audera.models.player import Player
 from audera.ui import components
@@ -27,6 +30,48 @@ def mock_snapserver_with_client(monkeypatch):
 
     monkeypatch.setattr(SnapserverClient, 'get_clients', lambda self: [player])
     return player
+
+
+@pytest.fixture
+def mock_camilladsp(monkeypatch):
+    calls = {}
+
+    def _set_percent_volume(self, percent: int) -> None:
+        calls['set_percent_volume'] = percent
+
+    def _get_percent_volume(self) -> int:
+        calls['get_percent_volume'] = True
+        return 80
+
+    monkeypatch.setattr(CamillaDSPClient, 'set_percent_volume', _set_percent_volume)
+    monkeypatch.setattr(CamillaDSPClient, 'get_percent_volume', _get_percent_volume)
+    return calls
+
+
+@pytest.fixture
+def mock_camilladsp_config(monkeypatch):
+    calls = {}
+
+    def _get_config(self):
+        return {'filters': {}, 'pipeline': []}
+
+    def _set_config(self, config):
+        calls['set_config'] = config
+
+    monkeypatch.setattr(CamillaDSPClient, 'get_config', _get_config)
+    monkeypatch.setattr(CamillaDSPClient, 'set_config', _set_config)
+    return calls
+
+
+@pytest.fixture
+def mock_snapserver_volume(monkeypatch):
+    calls = {}
+
+    def _set_client_volume(self, client_id: str, percent: int, muted: bool = False):
+        calls['set_client_volume'] = (client_id, percent, muted)
+
+    monkeypatch.setattr(SnapserverClient, 'set_client_volume', _set_client_volume)
+    return calls
 
 
 async def test_index_renders_tabs(audera_home, mock_snapserver_empty, monkeypatch, user: User):
@@ -119,3 +164,85 @@ async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, u
         'apply_defaults() triggered script_mode via ui.colors(). '
         'Use app.colors() for application-wide theming instead of ui.colors().'
     )
+
+
+async def test_volume_slider_seeded_from_dal(
+    audera_home,
+    mock_snapserver_with_client,
+    mock_camilladsp,
+    monkeypatch,
+    user: User,
+):
+    monkeypatch.setattr(streamer_pages, '_camilladsp', lambda h: CamillaDSPClient(h))
+    Page().load()
+    await user.open('/')
+    # Volume is read from DAL (default 25) and pushed to CamillaDSP via set_percent_volume
+    assert mock_camilladsp.get('set_percent_volume') == 25
+
+
+async def test_reset_snap_volume_calls_snapserver(
+    audera_home,
+    mock_snapserver_with_client,
+    mock_snapserver_volume,
+    user: User,
+):
+    Page().load()
+    await user.open('/')
+    user.find(marker='player-settings').click()
+    user.find('Reset').click()
+    await user.should_see('Snapcast volume reset to 100%')
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
+
+
+async def test_reset_snap_volume_button(audera_home, mock_snapserver_with_client, monkeypatch, user: User):
+    """Player settings dialog contains Snapcast Volume control with Reset button."""
+    Page().load()
+    await user.open('/')
+    user.find(marker='player-settings').click()
+    await user.should_see('Snapcast Volume')
+
+
+async def test_settings_dialog_shows_loudness_controls(audera_home, mock_snapserver_with_client, user: User):
+    Page().load()
+    await user.open('/')
+    user.find(marker='player-settings').click()
+    await user.should_see('Loudness')
+    await user.should_see('Reference level (dB)')
+
+
+async def test_loudness_toggle_enables_and_persists(
+    audera_home,
+    mock_snapserver_with_client,
+    mock_camilladsp_config,
+    user: User,
+):
+    Page().load()
+    await user.open('/')
+    user.find(marker='player-settings').click()
+    user.find(kind=ui.switch).click()
+    await asyncio.sleep(0.1)
+    assert mock_camilladsp_config.get('set_config') is None
+    user.find('Save').click()
+    await asyncio.sleep(0.1)
+    assert mock_camilladsp_config.get('set_config') is not None
+    assert dsp_dal.get(mock_snapserver_with_client.id).loudness_enabled is True
+
+
+async def test_loudness_toggle_passes_reference_level_to_config(
+    audera_home,
+    mock_snapserver_with_client,
+    mock_camilladsp_config,
+    user: User,
+):
+    Page().load()
+    await user.open('/')
+    user.find(marker='player-settings').click()
+    user.find(kind=ui.switch).click()
+    await asyncio.sleep(0.1)
+    assert mock_camilladsp_config.get('set_config') is None
+    user.find('Save').click()
+    await asyncio.sleep(0.1)
+    config = mock_camilladsp_config.get('set_config')
+    assert config is not None
+    params = config['filters']['audera_loudness']['parameters']
+    assert params['reference_level'] == -25.0

@@ -13,8 +13,10 @@ from dotenv import load_dotenv
 from nicegui import ui
 
 import audera
-from audera.clients import SnapserverClient
+from audera.clients import CamillaDSPClient, SnapserverClient
+from audera.dal import dsp as dsp_dal
 from audera.dal import settings as settings_dal
+from audera.models.dsp import DSPConfig, apply_loudness, remove_loudness
 from audera.models.settings import Settings
 from audera.ui import components
 
@@ -41,6 +43,11 @@ def _load_settings() -> Settings:
 
 def _snapserver(settings: Settings) -> SnapserverClient:
     return SnapserverClient(host=settings.snapserver_host, port=audera.SNAPSERVER_PORT)
+
+
+def _camilladsp(host: str) -> CamillaDSPClient:
+    """Returns a CamillaDSPClient for the given player host."""
+    return CamillaDSPClient(host=host)
 
 
 def _plexamp_state() -> Literal['inactive', 'unclaimed', 'claimed']:
@@ -268,17 +275,60 @@ class Page:
                         'icon=edit_square flat dense round size=sm'
                     ).classes('text-gray-400').mark('player-settings')
                 with ui.row().classes('items-center gap-4 w-full'):
-                    self._build_volume_controls(client.id, client.volume, client.muted)
+                    host = client.host
+                    dsp_config = dsp_dal.get_or_create(DSPConfig(id=client.id, player_id=client.id))
+                    init_vol = dsp_config.volume
+                    try:
+                        _camilladsp(host).set_percent_volume(init_vol)
+                    except Exception:
+                        pass
+                    self._build_volume_controls(client.id, dsp_config, init_vol, client.muted, client.host)
 
     def _open_settings_dialog(self, client) -> None:
-        """Opens a settings popup for renaming and adjusting latency of a Snapcast client."""
+        """Opens a settings popup for renaming, latency, and Snapcast volume reset."""
         self._dialog_open = True
+        dsp_config = dsp_dal.get_or_create(DSPConfig(id=client.id, player_id=client.id))
 
         with ui.dialog() as dialog, ui.card().classes('w-96'):
             ui.label('Settings').classes('font-medium text-lg mb-2')
 
             name_input = ui.input('Name', value=client.name).classes('w-full')
             latency_input = ui.number('Latency (ms)', value=client.latency_ms, min=-500, max=500, step=1).classes('w-full')
+
+            # Snapcast volume is a sidecar kept at 100/0; CamillaDSP controls actual loudness.
+            snap_vol = client.volume
+            with ui.row().classes('w-full items-start justify-between mt-2'):
+                with ui.column().classes('gap-0'):
+                    ui.label('Snapcast Volume').classes('text-xs')
+                    current_vol_label = ui.label(f'Current Volume {snap_vol}%').classes('text-xs text-gray-500')
+                ui.button('Reset', on_click=lambda c=client, lbl=current_vol_label: self._reset_snap_volume(c, lbl)).props(
+                    'dense'
+                ).classes('bg-gray-800 text-white')
+
+            ui.separator().classes('mt-2 mb-2')
+            ui.label('DSP').classes('text-sm font-medium')
+
+            with ui.row().classes('w-full items-center justify-between mt-1'):
+                with ui.column().classes('gap-0'):
+                    ui.label('Loudness').classes('text-xs')
+                    _iso226_url = 'https://cdn.standards.iteh.ai/samples/83117/6afa5bd94e0e4f32812c28c3b0a7b8ac/ISO-226-2023.pdf'
+                    ui.html(
+                        f'See international standard ISO 226, '
+                        f'<a href="{_iso226_url}" target="_blank" class="underline">reference</a>'
+                    ).classes('text-xs text-gray-500')
+                loudness_switch = ui.switch(
+                    value=dsp_config.loudness_enabled,
+                    on_change=lambda e: ref_input.set_enabled(e.value),
+                )
+
+            ref_input = ui.number(
+                'Reference level (dB)',
+                value=dsp_config.loudness_reference_level,
+                min=-60.0,
+                max=0.0,
+                step=0.5,
+            ).classes('w-full')
+            ref_input.set_enabled(dsp_config.loudness_enabled)
 
             ui.separator().classes('mt-4 mb-2')
             with ui.column().classes('text-xs text-gray-500 gap-1'):
@@ -292,7 +342,7 @@ class Page:
                     self._dialog_open = False
                     dialog.close()
 
-                def _on_save(c=client, ni=name_input, li=latency_input):
+                async def _on_save(c=client, ni=name_input, li=latency_input):
                     snap = _snapserver(self.settings)
                     if ni.value and ni.value != c.name:
                         snap.set_client_name(c.id, ni.value)
@@ -300,6 +350,24 @@ class Page:
                     if int(li.value) != c.latency_ms:
                         snap.set_client_latency(c.id, int(li.value))
                         ui.notify(f'Latency set to {int(li.value)} ms', type='positive', position='top-right')
+
+                    loudness_on = loudness_switch.value
+                    reference_level = float(ref_input.value)
+                    if loudness_on and not (-60.0 <= reference_level <= 0.0):
+                        ui.notify('Reference level must be between -60 and 0 dB.', type='negative', position='top-right')
+                        return
+                    if loudness_on != dsp_config.loudness_enabled or reference_level != dsp_config.loudness_reference_level:
+                        cdsp = _camilladsp(c.host)
+                        pipeline = await asyncio.to_thread(cdsp.get_config)
+                        if loudness_on:
+                            pipeline = apply_loudness(remove_loudness(pipeline), reference_level)
+                        else:
+                            pipeline = remove_loudness(pipeline)
+                        await asyncio.to_thread(cdsp.set_config, pipeline)
+                        dsp_config.loudness_enabled = loudness_on
+                        dsp_config.loudness_reference_level = reference_level
+                        dsp_dal.update(dsp_config)
+
                     self._dialog_open = False
                     dialog.close()
                     self._build_players_tab.refresh()
@@ -310,14 +378,45 @@ class Page:
         dialog.on('hide', lambda: setattr(self, '_dialog_open', False))
         dialog.open()
 
-    def _build_volume_controls(self, client_id: str, initial_volume: int, initial_muted: bool) -> None:
-        """Renders volume slider and mute checkbox for a single Snapcast client."""
+    def _reset_snap_volume(self, client, vol_label=None) -> None:
+        """Resets the Snapcast client volume to 100% / unmuted.
 
-        def _on_volume(e):
-            _snapserver(self.settings).set_client_volume(client_id, int(e.value), mute_cb.value)
+        If vol_label is provided (from the settings dialog), its text is updated to
+        reflect the new value. The players tab is *not* refreshed so that the CamillaDSP
+        volume sliders retain their current visual state.
+        """
+        _snapserver(self.settings).set_client_volume(client.id, 100, muted=False)
+        if vol_label is not None:
+            vol_label.set_text('Current Volume 100%')
+        ui.notify('Snapcast volume reset to 100%', type='positive', position='top-right')
 
-        def _on_mute(e):
-            _snapserver(self.settings).set_client_volume(client_id, int(slider.value), e.value)
+    def _build_volume_controls(
+        self,
+        client_id: str,
+        dsp_config: DSPConfig,
+        initial_volume: int,
+        initial_muted: bool,
+        client_host: str = '',
+    ) -> None:
+        """Renders volume slider (now routed through CamillaDSP) and mute checkbox (Snapcast)."""
+
+        async def _on_volume(e):
+            percent = int(e.value)
+            camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
+            try:
+                await asyncio.to_thread(camilla.set_percent_volume, percent)
+            except Exception:
+                pass
+            dsp_dal.update(dsp_config.model_copy(update={'volume': percent}))
+            await asyncio.to_thread(
+                _snapserver(self.settings).set_client_volume,
+                client_id,
+                0 if percent == 0 else 100,
+                muted=(percent == 0),
+            )
+
+        async def _on_mute(e):
+            await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=e.value)
 
         slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
         mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
