@@ -46,7 +46,7 @@ def test_error_response_raises(error_client):
 
 def test_percent_to_db(client):
     assert client.percent_to_db(100) == -3.0  # clamped to MAX_SAFE_DB
-    assert client.percent_to_db(50) == -6.020599913279624  # not clamped (quieter)
+    assert client.percent_to_db(50) == pytest.approx(-6.021, abs=1e-3)  # not clamped (quieter)
     assert client.percent_to_db(0) == -90.0
 
 

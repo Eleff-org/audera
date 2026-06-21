@@ -25,6 +25,7 @@ CAMILLADSP_ARCHIVE="camilladsp-linux-aarch64.tar.gz"
 CAMILLADSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CAMILLADSP_VERSION}/${CAMILLADSP_ARCHIVE}"
 CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
 CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
+CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 
 SNAPSERVER_CONFIG="/etc/snapserver.conf"
 ASOUND_CONFIG="/etc/asound.conf"
@@ -197,7 +198,7 @@ Description=CamillaDSP
 After=sound.target snapclient.service
 
 [Service]
-ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG -p 1234 --address 0.0.0.0
+ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG --statefile $CAMILLADSP_STATEFILE -p 1234 --address 0.0.0.0
 Restart=always
 RestartSec=5
 
