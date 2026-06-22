@@ -1,10 +1,7 @@
-import json
-import threading
 import time
 from pathlib import Path
 
 import pytest
-import websockets.sync.server
 
 pytest_plugins = ['nicegui.testing.user_plugin']
 
@@ -89,47 +86,31 @@ def snapserver_container():
         yield host, port
 
 
-def _make_camilladsp_handler(state: dict):
-    def handler(ws):
-        for raw in ws:
-            msg = json.loads(raw)
-            if msg == 'GetConfigJson':
-                ws.send(json.dumps({'GetConfigJson': {'value': json.dumps(state['config'])}}))
-            elif isinstance(msg, dict) and 'SetConfigJson' in msg:
-                state['config'] = json.loads(msg['SetConfigJson'])
-                ws.send(json.dumps({'SetConfigJson': 'Ok'}))
-            elif msg == 'GetVolume':
-                ws.send(json.dumps({'GetVolume': state['volume']}))
-            elif isinstance(msg, dict) and 'SetVolume' in msg:
-                state['volume'] = msg['SetVolume']
-                ws.send(json.dumps({'SetVolume': 'Ok'}))
-            else:
-                ws.send(json.dumps({'result': 'Error', 'message': 'Unknown command'}))
+def _wait_for_websocket(container, internal_port: int, timeout: float = 60) -> None:
+    import websockets.sync.client
 
-    return handler
-
-
-@pytest.fixture
-def camilladsp_mock():
-    state = {'config': {'filters': {}, 'mixers': {}, 'pipeline': []}, 'volume': -10.0}
-    server = websockets.sync.server.serve(_make_camilladsp_handler(state), '127.0.0.1', 0)
-    port = server.socket.getsockname()[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield '127.0.0.1', port
-    server.shutdown()
+    host = container.get_container_host_ip()
+    port = int(container.get_exposed_port(internal_port))
+    url = f'ws://{host}:{port}'
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with websockets.sync.client.connect(url, open_timeout=2):
+                return
+        except Exception:
+            time.sleep(1)
+    stdout, stderr = container.get_logs()
+    raise TimeoutError(
+        f'WebSocket {url} not ready after {timeout}s.\nstdout: {stdout.decode()[-2000:]}\nstderr: {stderr.decode()[-2000:]}'
+    )
 
 
-def _error_handler(ws):
-    for _ in ws:
-        ws.send(json.dumps({'result': 'Error', 'message': 'Forced error'}))
+@pytest.fixture(scope='session')
+def camilladsp_container():
+    from testcontainers.core.container import DockerContainer
 
-
-@pytest.fixture
-def camilladsp_error_mock():
-    server = websockets.sync.server.serve(_error_handler, '127.0.0.1', 0)
-    port = server.socket.getsockname()[1]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield '127.0.0.1', port
-    server.shutdown()
+    with DockerContainer('camilladsp-test:latest').with_exposed_ports(1234) as container:
+        _wait_for_websocket(container, 1234, timeout=60)
+        host = container.get_container_host_ip()
+        port = int(container.get_exposed_port(1234))
+        yield host, port

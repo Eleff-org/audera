@@ -1,0 +1,13 @@
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: Dummy
+    channels: 2
+    format: S32LE
+  playback:
+    type: Dummy
+    channels: 2
+    format: S32LE
+filters: {}
+pipeline: []
