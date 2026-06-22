@@ -429,6 +429,29 @@ audera streamer conf asound.conf > "$ASOUND_CONFIG"
 chmod 644 "$ASOUND_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
 
+# Write boot banner
+echo ">>> Writing boot banner"
+cat > /etc/profile.d/50-audera-banner.sh <<'EOF'
+#!/bin/sh
+printf '\033[36m'
+cat << 'LOGO'
+ ________  ___  ___  ________  _______  ________  ________
+|\   __  \|\  \|\  \|\   ___ \|\   ___\|\   __  \|\   __  \
+\ \  \|\  \ \  \\\  \ \  \_|\ \ \  \__|\ \  \|\  \ \  \|\  \
+ \ \   __  \ \  \\\  \ \  \ \\ \ \   __\\ \      /\ \   __  \
+  \ \  \ \  \ \  \\\  \ \  \_\\ \ \  \_|_\ \  \  \ \ \  \ \  \
+   \ \__\ \__\ \______/\ \______/\ \______\ \__\\ _\\ \__\ \__\
+    \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__|
+LOGO
+printf '\033[0m\n'
+printf '  \033[1maudera\033[0m — composable audio for your hardware\n\n'
+printf '  \033[33m!\033[0m Do not use \033[1mdietpi-config\033[0m to manage WiFi or audio hardware.\n'
+printf '    WiFi:   nmcli device wifi connect <SSID> password <PASS>\n'
+printf '    Audio:  aplay -l  |  nano /boot/firmware/config.txt\n\n'
+EOF
+chmod +x /etc/profile.d/50-audera-banner.sh
+echo -e "[  ${GREEN}OK${RESET}  ] Boot banner written"
+
 # Log
 echo
 echo -e "[  ${GREEN}OK${RESET}  ] The Audera streamer setup & installation completed successfully"
