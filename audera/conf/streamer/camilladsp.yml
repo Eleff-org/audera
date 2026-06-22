@@ -24,12 +24,11 @@ devices:
   #   # type: AccurateAsync  # Best quality; intended for Pi 4 or desktop PCs
   #   # capture_samplerate: 44100  # Uncomment if source is 44.1k and DAC is 48k
 
-  # ADVANCED POWER/SAFETY SETTINGS: Saves CPU when music is paused
-  silence_threshold: -100
-  silence_timeout: 10.0
-
-  # HANGING: Ensures CamillaDSP exits cleanly if the input sample rate changes
-  stop_on_rate_change: true
+  # HDMI STABILITY: Keep the ALSA device open at all times to prevent HDMI audio dropout.
+  # Closing the device after silence causes the HDMI sink to de-clock and drop the connection.
+  silence_threshold: null   # keep ALSA device open, prevent HDMI dropout
+  silence_timeout: null
+  stop_on_rate_change: false
 
   capture:
     type: Alsa
