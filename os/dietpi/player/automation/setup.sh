@@ -80,6 +80,22 @@ echo "snd-aloop" > /etc/modules-load.d/snd-aloop.conf
 modprobe snd-aloop
 echo -e "[  ${GREEN}OK${RESET}  ] ALSA loopback module enabled"
 
+# Configure HDMI firmware settings for audio stability
+echo
+echo ">>> Configuring HDMI"
+cat >> /boot/firmware/config.txt <<'EOF'
+
+# Audera: HDMI audio stability
+hdmi_force_hotplug=1
+hdmi_drive=2
+hdmi_force_edid_audio=1
+hdmi_group=1
+hdmi_mode=16
+dtoverlay=vc4-fkms-v3d
+dtparam=audio=on
+EOF
+echo -e "[  ${GREEN}OK${RESET}  ] HDMI configured"
+
 # Install CamillaDSP
 echo
 echo ">>> Installing CamillaDSP v${CAMILLADSP_VERSION}"
@@ -146,6 +162,19 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+# camilladsp-hdmi-wait.path — delays CamillaDSP start until the HDMI ALSA device appears
+cat > /etc/systemd/system/camilladsp-hdmi-wait.path <<'EOF'
+[Unit]
+Description=Wait for HDMI ALSA device before starting CamillaDSP
+
+[Path]
+PathExists=/dev/snd/pcmC0D0p
+Unit=camilladsp.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # audera-player service — one-shot that starts audera player on boot
 cat > /etc/systemd/system/audera-player.service <<'EOF'
 [Unit]
@@ -163,8 +192,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable snapclient camilladsp audera-player
-systemctl start snapclient camilladsp audera-player
+systemctl enable snapclient camilladsp-hdmi-wait.path audera-player
+systemctl start snapclient camilladsp-hdmi-wait.path audera-player
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
