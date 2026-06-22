@@ -27,8 +27,6 @@ CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
 CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
 CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 
-AUTOSTART_DIRECTORY="/var/lib/dietpi/dietpi-autostart"
-AUTOSTART_SCRIPT="$AUTOSTART_DIRECTORY/custom.sh"
 
 # Start console logging
 
@@ -148,9 +146,25 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+# audera-player service — one-shot that starts audera player on boot
+cat > /etc/systemd/system/audera-player.service <<'EOF'
+[Unit]
+Description=Audera player
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/audera player start
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
-systemctl enable snapclient camilladsp
-systemctl start snapclient camilladsp
+systemctl enable snapclient camilladsp audera-player
+systemctl start snapclient camilladsp audera-player
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
@@ -207,30 +221,6 @@ echo
 echo ">>> Setting up dnsmasq"
 systemctl disable dnsmasq
 echo -e "[  ${GREEN}OK${RESET}  ] dnsmasq setup successfully"
-
-# Configure alsa
-echo
-echo ">>> Configuring alsa"
-SOUNDCARD=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-echo ">>> Assigning {$SOUNDCARD} as the default soundcard"
-/boot/dietpi/func/dietpi-set_hardware soundcard $SOUNDCARD
-echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
-
-# Set up the autostart script
-echo
-echo ">>> Creating the custom autostart script"
-mkdir -p "$AUTOSTART_DIRECTORY"
-cat > "$AUTOSTART_SCRIPT" <<'EOF'
-#!/bin/bash
-# DietPi-AutoStart custom script
-# Location: /var/lib/dietpi/dietpi-autostart/custom.sh
-
-set -e
-
-exec audera player start
-EOF
-chmod +x "$AUTOSTART_SCRIPT"
-echo -e "[  ${GREEN}OK${RESET}  ] Custom autostart script created successfully"
 
 # Log
 echo

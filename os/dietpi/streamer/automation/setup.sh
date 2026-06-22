@@ -30,8 +30,6 @@ CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 SNAPSERVER_CONFIG="/etc/snapserver.conf"
 ASOUND_CONFIG="/etc/asound.conf"
 
-AUTOSTART_DIRECTORY="/var/lib/dietpi/dietpi-autostart"
-AUTOSTART_SCRIPT="$AUTOSTART_DIRECTORY/custom.sh"
 
 # Start console logging
 
@@ -250,9 +248,25 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 
+# audera-streamer service — long-running NiceGUI UI
+cat > /etc/systemd/system/audera-streamer.service <<'EOF'
+[Unit]
+Description=Audera streamer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/audera streamer start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
-systemctl enable snapserver snapclient camilladsp plexamp plexamp-mdns
-systemctl start snapserver snapclient camilladsp plexamp plexamp-mdns
+systemctl enable snapserver snapclient camilladsp plexamp plexamp-mdns audera-streamer
+systemctl start snapserver snapclient camilladsp plexamp plexamp-mdns audera-streamer
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
@@ -372,32 +386,9 @@ echo -e "[  ${GREEN}OK${RESET}  ] dnsmasq setup successfully"
 # Configure alsa
 echo
 echo ">>> Configuring alsa"
-SOUNDCARD=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-echo ">>> Assigning {$SOUNDCARD} as the default soundcard"
-/boot/dietpi/func/dietpi-set_hardware soundcard $SOUNDCARD
-
-# Append ALSA configuration (must run after dietpi-set_hardware, which writes the defaults)
-echo
-echo ">>> Installing ALSA configuration"
-audera streamer conf asound.conf >> "$ASOUND_CONFIG"
+audera streamer conf asound.conf > "$ASOUND_CONFIG"
 chmod 644 "$ASOUND_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
-
-# Set up the autostart script
-echo
-echo ">>> Creating the custom autostart script"
-mkdir -p "$AUTOSTART_DIRECTORY"
-cat > "$AUTOSTART_SCRIPT" <<'EOF'
-#!/bin/bash
-# DietPi-AutoStart custom script
-# Location: /var/lib/dietpi/dietpi-autostart/custom.sh
-
-set -e
-
-exec audera streamer start
-EOF
-chmod +x "$AUTOSTART_SCRIPT"
-echo -e "[  ${GREEN}OK${RESET}  ] Custom autostart script created successfully"
 
 # Log
 echo
