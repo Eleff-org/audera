@@ -308,6 +308,16 @@ systemctl start NetworkManager
 nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
+# Disable WiFi power save globally
+echo
+echo ">>> Disabling WiFi power save"
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/wifi-powersave.conf <<'EOF'
+[connection]
+wifi.powersave = 2
+EOF
+echo -e "[  ${GREEN}OK${RESET}  ] WiFi power save disabled globally"
+
 # Derive hostname from MAC address
 echo
 echo ">>> Configuring hostname from MAC address"
