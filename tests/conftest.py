@@ -58,32 +58,21 @@ def audera_home(tmp_path, monkeypatch):
 @pytest.fixture(scope='session')
 def snapserver_container():
     from testcontainers.core.container import DockerContainer
+    from testcontainers.core.image import DockerImage
 
     conf_path = Path(__file__).parent.parent / 'audera/conf/streamer/snapserver.conf'
-    with (
-        DockerContainer('debian:bookworm')
-        .with_volume_mapping(str(conf_path), '/etc/snapserver.conf', 'ro')
-        .with_exposed_ports(1780)
-        .with_command(
-            'bash -c "'
-            'apt-get update -qq'
-            " && echo 'deb http://deb.debian.org/debian bookworm-backports main'"
-            ' >> /etc/apt/sources.list'
-            ' && apt-get update -qq'
-            ' && DEBIAN_FRONTEND=noninteractive'
-            ' apt-get install -t bookworm-backports -y'
-            ' -o Dpkg::Options::=--force-confold snapserver snapclient'
-            ' && snapserver --config /etc/snapserver.conf &'
-            ' sleep 5'
-            ' && (while true; do snapclient --host 127.0.0.1 --player stdout >/dev/null 2>&1; sleep 2; done) &'
-            ' wait"'
-        )
-    ) as container:
-        _wait_for_http(container, 1780, timeout=180)
-        host = container.get_container_host_ip()
-        port = int(container.get_exposed_port(1780))
-        _wait_for_client(host, port)
-        yield host, port
+    context = Path(__file__).parent / 'docker' / 'snapserver'
+    with DockerImage(path=str(context), tag='snapserver-test:latest') as image:
+        with (
+            DockerContainer(str(image))
+            .with_volume_mapping(str(conf_path), '/etc/snapserver.conf', 'ro')
+            .with_exposed_ports(1780)
+        ) as container:
+            _wait_for_http(container, 1780, timeout=180)
+            host = container.get_container_host_ip()
+            port = int(container.get_exposed_port(1780))
+            _wait_for_client(host, port)
+            yield host, port
 
 
 def _wait_for_websocket(container, internal_port: int, timeout: float = 60) -> None:
