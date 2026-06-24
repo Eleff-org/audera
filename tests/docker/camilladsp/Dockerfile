@@ -1,7 +1,7 @@
 FROM debian:trixie-slim
 
 ARG CDSP_VERSION=3.0.1
-ARG CDSP_ARCH=x86_64
+ARG CDSP_ARCH=amd64
 
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends wget ca-certificates \

@@ -33,10 +33,9 @@ def test_set_volume(client):
     assert result == -20.0
 
 
-def test_error_response_raises():
-    c = CamillaDSPClient('localhost', 0)
+def test_error_response_raises(client):
     with pytest.raises(RuntimeError):
-        c._call('UnknownCommand')
+        client._call('UnknownCommand')
 
 
 def test_percent_to_db():
