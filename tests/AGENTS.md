@@ -33,12 +33,6 @@ import time and will not reflect a late patch.
 | `test_camilladsp.py` | Real CamillaDSP binary in a custom testcontainer (requires Docker) |
 | `test_plexamp.py` | `respx` HTTP mock intercepting `httpx` calls |
 
-The CamillaDSP test image must be built locally before running:
-
-```bash
-docker build -t camilladsp-test:latest tests/docker/camilladsp/
-```
-
 ## Fixtures
 
 Fixtures under `tests/fixtures/` are **captured from real running services** using the scripts in `tests/scripts/`. Never hand-write or invent fixture content — fabricated responses hide real API behaviour and cause tests to pass against data that the service never actually returns.

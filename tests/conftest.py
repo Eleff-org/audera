@@ -108,9 +108,12 @@ def _wait_for_websocket(container, internal_port: int, timeout: float = 60) -> N
 @pytest.fixture(scope='session')
 def camilladsp_container():
     from testcontainers.core.container import DockerContainer
+    from testcontainers.core.image import DockerImage
 
-    with DockerContainer('camilladsp-test:latest').with_exposed_ports(1234) as container:
-        _wait_for_websocket(container, 1234, timeout=60)
-        host = container.get_container_host_ip()
-        port = int(container.get_exposed_port(1234))
-        yield host, port
+    context = Path(__file__).parent / 'docker' / 'camilladsp'
+    with DockerImage(path=str(context), tag='camilladsp-test:latest') as image:
+        with DockerContainer(str(image)).with_exposed_ports(1234) as container:
+            _wait_for_websocket(container, 1234, timeout=60)
+            host = container.get_container_host_ip()
+            port = int(container.get_exposed_port(1234))
+            yield host, port

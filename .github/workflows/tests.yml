@@ -27,8 +27,5 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --frozen
 
-      - name: Build CamillaDSP test image
-        run: docker build -t camilladsp-test:latest tests/docker/camilladsp/
-
       - name: Run tests
         run: uv run pytest -v
