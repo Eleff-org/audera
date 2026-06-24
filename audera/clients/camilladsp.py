@@ -44,6 +44,9 @@ class CamillaDSPClient:
             ws.send(json.dumps(payload))
             response = json.loads(ws.recv())
         # CamillaDSP wraps responses as {"CommandName": {"result": "Ok/Error", ...}}
+        # Unknown commands return {"Invalid": {"error": "..."}} instead
+        if isinstance(response, dict) and 'Invalid' in response:
+            raise RuntimeError('CamillaDSP error [%s]: %s' % (command, response['Invalid']))
         inner = response.get(command, response) if isinstance(response, dict) else response
         if isinstance(inner, dict) and inner.get('result') == 'Error':
             raise RuntimeError('CamillaDSP error [%s]: %s' % (command, inner))

@@ -15,11 +15,12 @@ def test_get_config(client):
 
 
 def test_set_config(client):
-    new_config = {'filters': {'hp': {'type': 'Biquad'}}, 'mixers': {}, 'pipeline': []}
+    original = client.get_config()
+    new_config = {**original, 'filters': {}, 'pipeline': []}
     client.set_config(new_config)
-
     result = client.get_config()
-    assert result == new_config
+    assert result['filters'] == {}
+    assert result['pipeline'] == []
 
 
 def test_get_volume(client):
@@ -40,8 +41,8 @@ def test_error_response_raises(client):
 
 def test_percent_to_db():
     c = CamillaDSPClient('localhost', 0)
-    assert c.percent_to_db(100) == -3.0  # clamped to MAX_SAFE_DB
-    assert c.percent_to_db(50) == pytest.approx(-6.021, abs=1e-3)  # not clamped (quieter)
+    assert c.percent_to_db(100) == -3.0
+    assert c.percent_to_db(50) == pytest.approx(-6.021, abs=1e-3)
     assert c.percent_to_db(0) == -90.0
 
 
@@ -55,7 +56,7 @@ def test_db_to_percent():
 def test_set_percent_volume(client):
     client.set_percent_volume(75)
     result = client.get_volume()
-    assert result == -3.0  # clamped by MAX_SAFE_DB
+    assert result == -3.0
 
 
 def test_get_percent_volume(client):

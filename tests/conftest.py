@@ -88,10 +88,12 @@ def _wait_for_websocket(container, internal_port: int, timeout: float = 60) -> N
                 return
         except Exception:
             time.sleep(1)
-    stdout, stderr = container.get_logs()
-    raise TimeoutError(
-        f'WebSocket {url} not ready after {timeout}s.\nstdout: {stdout.decode()[-2000:]}\nstderr: {stderr.decode()[-2000:]}'
-    )
+    try:
+        stdout, stderr = container.get_logs()
+        log_text = f'\nstdout: {stdout.decode()[-2000:]}\nstderr: {stderr.decode()[-2000:]}'
+    except Exception:
+        log_text = ' (container logs unavailable)'
+    raise TimeoutError(f'WebSocket {url} not ready after {timeout}s.{log_text}')
 
 
 @pytest.fixture(scope='session')

@@ -2,11 +2,15 @@ devices:
   samplerate: 48000
   chunksize: 1024
   capture:
-    type: Dummy
+    type: SignalGenerator
     channels: 2
-    format: S32LE
+    signal:
+      type: Sine
+      freq: 1000
+      level: -60
   playback:
-    type: Dummy
+    type: File
+    filename: /dev/null
     channels: 2
     format: S32LE
 filters: {}
