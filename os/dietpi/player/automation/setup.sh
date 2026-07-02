@@ -18,6 +18,10 @@ else
     GIT_BRANCH="main"
 fi
 
+# Fetch and load shared config-injection helpers
+curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
+source /tmp/audera_config_lib.sh
+
 # Variables
 GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
 CAMILLADSP_VERSION="3.0.1"
@@ -83,17 +87,14 @@ echo -e "[  ${GREEN}OK${RESET}  ] ALSA loopback module enabled"
 # Configure HDMI firmware settings for audio stability
 echo
 echo ">>> Configuring HDMI"
-cat >> /boot/firmware/config.txt <<'EOF'
-
-# Audera: HDMI audio stability
-hdmi_force_hotplug=1
-hdmi_drive=2
-hdmi_force_edid_audio=1
-hdmi_group=1
-hdmi_mode=16
-dtoverlay=vc4-fkms-v3d
-dtparam=audio=on
-EOF
+set_config_line /boot/firmware/config.txt 'hdmi_force_hotplug' 'hdmi_force_hotplug=1'
+set_config_line /boot/firmware/config.txt 'hdmi_drive' 'hdmi_drive=2'
+set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
+set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
+set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
+set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-kms-v3d'
+set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
+set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
 echo -e "[  ${GREEN}OK${RESET}  ] HDMI configured"
 
 # Install CamillaDSP
