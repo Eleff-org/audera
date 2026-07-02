@@ -42,10 +42,10 @@ echo
 echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/streamer/automation/setup.sh}."
 
 # Ensure the script is running as root
-echo
 require_root
 
 # Install build packages
+echo
 echo ">>> Installing build packages"
 apt-get update && \
 apt-get install -y \
@@ -346,6 +346,7 @@ chmod 644 "$ASOUND_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
 
 # Write boot banner
+echo
 echo ">>> Writing boot banner"
 write_boot_banner
 echo -e "[  ${GREEN}OK${RESET}  ] Boot banner written"
@@ -355,6 +356,7 @@ echo
 echo -e "[  ${GREEN}OK${RESET}  ] The Audera streamer setup & installation completed successfully"
 
 # Restart
+echo
 echo ">>> Restarting the Audera streamer in 5 [sec.] ..."
 sleep 5
 reboot

@@ -39,10 +39,10 @@ echo
 echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/player/automation/setup.sh}."
 
 # Ensure the script is running as root
-echo
 require_root
 
 # Install build packages
+echo
 echo ">>> Installing build packages"
 apt-get update && \
 apt-get install -y \
@@ -178,6 +178,7 @@ systemctl disable dnsmasq
 echo -e "[  ${GREEN}OK${RESET}  ] dnsmasq setup successfully"
 
 # Write boot banner
+echo
 echo ">>> Writing boot banner"
 write_boot_banner
 echo -e "[  ${GREEN}OK${RESET}  ] Boot banner written"
@@ -187,6 +188,7 @@ echo
 echo -e "[  ${GREEN}OK${RESET}  ] The Audera player setup & installation completed successfully"
 
 # Restart
+echo
 echo ">>> Restarting the Audera player in 5 [sec.] ..."
 sleep 5
 reboot
