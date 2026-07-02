@@ -3,11 +3,6 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# Setup color formatting
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-RESET='\033[0m'
-
 # Parse arguments
 if [ -n "$1" ]; then
     GIT_BRANCH="$1"
@@ -21,6 +16,10 @@ AUDIO_DEVICE="$2"
 curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
 source /tmp/audera_config_lib.sh
 
+# Fetch and load shared install/setup helpers
+curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/common.sh" -o /tmp/audera_common_lib.sh
+source /tmp/audera_common_lib.sh
+
 # Variables
 GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
 CAMILLADSP_VERSION="3.0.1"
@@ -33,16 +32,7 @@ CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 
 # Start console logging
 
-# The logo must be wrapped in single quotes ' ' to avoid escaping characters
-#   due to the nature of having double backslashes, like '\\' in the logo
-
-echo ' ________  ___  ___  ________  _______  ________  ________      '
-echo '|\   __  \|\  \|\  \|\   ___ \|\   ___\|\   __  \|\   __  \     '
-echo '\ \  \|\  \ \  \\\  \ \  \_|\ \ \  \__|\ \  \|\  \ \  \|\  \    '
-echo ' \ \   __  \ \  \\\  \ \  \ \\ \ \   __\\ \      /\ \   __  \   '
-echo '  \ \  \ \  \ \  \\\  \ \  \_\\ \ \  \_|_\ \  \  \ \ \  \ \  \  '
-echo '   \ \__\ \__\ \______/\ \______/\ \______\ \__\\ _\\ \__\ \__\ '
-echo '    \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__| '
+print_logo
 echo
 echo ">>> Running the Audera player setup & installation..."
 echo
@@ -50,10 +40,7 @@ echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GI
 
 # Ensure the script is running as root
 echo
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}*** CRITICAL: The setup-script must be run as {sudo}.${RESET}"
-    exit 1
-fi
+require_root
 
 # Install build packages
 echo ">>> Installing build packages"
@@ -78,71 +65,29 @@ echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 # index=7 keeps the loopback off hw:0 so physical card indices are stable
 echo
 echo ">>> Enabling ALSA loopback module"
-echo "options snd-aloop index=7" > /etc/modprobe.d/snd-aloop.conf
-echo "snd-aloop" > /etc/modules-load.d/snd-aloop.conf
-modprobe snd-aloop
+setup_alsa_loopback
 echo -e "[  ${GREEN}OK${RESET}  ] ALSA loopback module enabled"
 
 # Configure audio device dtoverlay (opt-in; leaves existing dtoverlay untouched if unset)
 echo
-if [ -z "$AUDIO_DEVICE" ]; then
-    echo ">>> No --audio-device specified; leaving existing dtoverlay untouched"
-else
-    echo ">>> Configuring audio device: $AUDIO_DEVICE"
-    case "$AUDIO_DEVICE" in
-        hdmi)
-            set_config_line /boot/firmware/config.txt 'hdmi_force_hotplug' 'hdmi_force_hotplug=1'
-            set_config_line /boot/firmware/config.txt 'hdmi_drive' 'hdmi_drive=2'
-            set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
-            set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
-            set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
-            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-kms-v3d'
-            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
-            set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
-            ;;
-        digiamp-plus)
-            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=rpi-digiampplus'
-            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
-            ;;
-        dac-plus)
-            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=rpi-dacplus'
-            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
-            ;;
-        hifiberry-dac-plus)
-            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=hifiberry-dacplus'
-            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
-            ;;
-        *)
-            echo -e "${RED}*** CRITICAL: Unknown --audio-device '${AUDIO_DEVICE}'. Valid values: hdmi, digiamp-plus, dac-plus, hifiberry-dac-plus.${RESET}"
-            exit 1
-            ;;
-    esac
-    echo -e "[  ${GREEN}OK${RESET}  ] Audio device configured successfully"
-fi
+configure_audio_device "$AUDIO_DEVICE"
 
 # Install CamillaDSP
 echo
 echo ">>> Installing CamillaDSP v${CAMILLADSP_VERSION}"
-wget -q "$CAMILLADSP_URL" -O "/tmp/${CAMILLADSP_ARCHIVE}"
-tar -xzf "/tmp/${CAMILLADSP_ARCHIVE}" -C /usr/local/bin/
-chmod +x /usr/local/bin/camilladsp
-rm "/tmp/${CAMILLADSP_ARCHIVE}"
-mkdir -p "$CAMILLADSP_CONFIG_DIR"
+install_camilladsp "$CAMILLADSP_VERSION"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP installed successfully"
 
 # Install uv
 echo
 echo ">>> Installing uv"
-if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
-fi
+install_uv
 echo -e "[  ${GREEN}OK${RESET}  ] uv installed successfully"
 
 # Install audera CLI
 echo
 echo ">>> Installing audera"
-UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall "git+${GIT_REPO_URL}@${GIT_BRANCH}"
-export PATH="/usr/local/bin:$PATH"
+install_audera_cli "$GIT_REPO_URL" "$GIT_BRANCH"
 echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 
 # Write CamillaDSP configuration
@@ -172,20 +117,7 @@ WantedBy=multi-user.target
 EOF
 
 # camilladsp service — captures from ALSA loopback, plays to physical DAC (hw:0)
-cat > /etc/systemd/system/camilladsp.service <<EOF
-[Unit]
-Description=CamillaDSP
-After=sound.target snapclient.service
-StartLimitIntervalSec=0
-
-[Service]
-ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG --statefile $CAMILLADSP_STATEFILE -p 1234 --address 0.0.0.0
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
+write_camilladsp_service "$CAMILLADSP_CONFIG" "$CAMILLADSP_STATEFILE"
 
 # audera-player service — one-shot that starts audera player on boot
 cat > /etc/systemd/system/audera-player.service <<'EOF'
@@ -216,24 +148,13 @@ echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 echo
 echo ">>> Purging ifupdown"
-
-if systemctl is-active --quiet ifupdown; then
-    systemctl stop ifupdown
-    systemctl disable ifupdown
-fi
-
-apt-get purge -y ifupdown
-sed -i '/^[[:space:]]*[^#[:space:]]/s/^/# /' /etc/network/interfaces
+purge_ifupdown
 echo -e "[  ${GREEN}OK${RESET}  ] ifupdown purged successfully"
 
 # Derive hostname from MAC address
 echo
 echo ">>> Configuring hostname from MAC address"
-MAC=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address)
-SHORT=$(echo "$MAC" | tr -d ':' | tail -c 7)
-NEW_HOSTNAME="audera-${SHORT}"
-hostnamectl set-hostname "$NEW_HOSTNAME"
-echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
+NEW_HOSTNAME=$(derive_hostname_from_mac)
 echo -e "[  ${GREEN}OK${RESET}  ] Hostname configured as {${NEW_HOSTNAME}}"
 
 # Setup network-manager
@@ -243,18 +164,11 @@ echo -e "[  ${GREEN}OK${RESET}  ] Hostname configured as {${NEW_HOSTNAME}}"
 
 echo
 echo ">>> Setting up network-manager"
-sed -i '/^\[ifupdown\]/,/^\[/s/managed=false/managed=true/' /etc/NetworkManager/NetworkManager.conf
-systemctl enable NetworkManager
-systemctl start NetworkManager
-nmcli networking on
+setup_network_manager
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
 # Disable WiFi power save globally
-mkdir -p /etc/NetworkManager/conf.d
-cat > /etc/NetworkManager/conf.d/wifi-powersave.conf <<'EOF'
-[connection]
-wifi.powersave = 2
-EOF
+disable_wifi_powersave
 echo -e "[  ${GREEN}OK${RESET}  ] WiFi power save disabled globally"
 
 # Setup dnsmasq
@@ -265,25 +179,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] dnsmasq setup successfully"
 
 # Write boot banner
 echo ">>> Writing boot banner"
-cat > /etc/profile.d/50-audera-banner.sh <<'EOF'
-#!/bin/sh
-printf '\033[36m'
-cat << 'LOGO'
- ________  ___  ___  ________  _______  ________  ________
-|\   __  \|\  \|\  \|\   ___ \|\   ___\|\   __  \|\   __  \
-\ \  \|\  \ \  \\\  \ \  \_|\ \ \  \__|\ \  \|\  \ \  \|\  \
- \ \   __  \ \  \\\  \ \  \ \\ \ \   __\\ \      /\ \   __  \
-  \ \  \ \  \ \  \\\  \ \  \_\\ \ \  \_|_\ \  \  \ \ \  \ \  \
-   \ \__\ \__\ \______/\ \______/\ \______\ \__\\ _\\ \__\ \__\
-    \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__|
-LOGO
-printf '\033[0m\n'
-printf '  \033[1maudera\033[0m — composable audio for your hardware\n\n'
-printf '  \033[33m!\033[0m Do not use \033[1mdietpi-config\033[0m to manage WiFi or audio hardware.\n'
-printf '    WiFi:   nmcli device wifi connect <SSID> password <PASS>\n'
-printf '    Audio:  aplay -l  |  nano /boot/firmware/config.txt\n\n'
-EOF
-chmod +x /etc/profile.d/50-audera-banner.sh
+write_boot_banner
 echo -e "[  ${GREEN}OK${RESET}  ] Boot banner written"
 
 # Log

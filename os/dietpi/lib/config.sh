@@ -30,3 +30,43 @@ set_cmdline_param() {
         sed -i "s/\$/ ${param}/" "$file"
     fi
 }
+
+# Configures /boot/firmware/config.txt (and cmdline.txt, for hdmi) for the given
+#   audio device; a no-op (with a message) when $1 is empty
+configure_audio_device() {
+    local audio_device="$1"
+    if [ -z "$audio_device" ]; then
+        echo ">>> No --audio-device specified; leaving existing dtoverlay untouched"
+        return
+    fi
+    echo ">>> Configuring audio device: $audio_device"
+    case "$audio_device" in
+        hdmi)
+            set_config_line /boot/firmware/config.txt 'hdmi_force_hotplug' 'hdmi_force_hotplug=1'
+            set_config_line /boot/firmware/config.txt 'hdmi_drive' 'hdmi_drive=2'
+            set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
+            set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
+            set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-kms-v3d'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
+            set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
+            ;;
+        digiamp-plus)
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=rpi-digiampplus'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
+            ;;
+        dac-plus)
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=rpi-dacplus'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
+            ;;
+        hifiberry-dac-plus)
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=hifiberry-dacplus'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
+            ;;
+        *)
+            echo -e "${RED}*** CRITICAL: Unknown --audio-device '${audio_device}'. Valid values: hdmi, digiamp-plus, dac-plus, hifiberry-dac-plus.${RESET}"
+            exit 1
+            ;;
+    esac
+    echo -e "[  ${GREEN}OK${RESET}  ] Audio device configured successfully"
+}
