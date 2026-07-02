@@ -18,6 +18,8 @@ else
     GIT_BRANCH="main"
 fi
 
+AUDIO_DEVICE="$2"
+
 # Fetch and load shared config-injection helpers
 curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
 source /tmp/audera_config_lib.sh
@@ -92,18 +94,42 @@ echo "snd-aloop" > /etc/modules-load.d/snd-aloop.conf
 modprobe snd-aloop
 echo -e "[  ${GREEN}OK${RESET}  ] ALSA loopback module enabled"
 
-# Configure HDMI firmware settings for audio stability
+# Configure audio device dtoverlay (opt-in; leaves existing dtoverlay untouched if unset)
 echo
-echo ">>> Configuring HDMI"
-set_config_line /boot/firmware/config.txt 'hdmi_force_hotplug' 'hdmi_force_hotplug=1'
-set_config_line /boot/firmware/config.txt 'hdmi_drive' 'hdmi_drive=2'
-set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
-set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
-set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
-set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-kms-v3d'
-set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
-set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
-echo -e "[  ${GREEN}OK${RESET}  ] HDMI configured"
+if [ -z "$AUDIO_DEVICE" ]; then
+    echo ">>> No --audio-device specified; leaving existing dtoverlay untouched"
+else
+    echo ">>> Configuring audio device: $AUDIO_DEVICE"
+    case "$AUDIO_DEVICE" in
+        hdmi)
+            set_config_line /boot/firmware/config.txt 'hdmi_force_hotplug' 'hdmi_force_hotplug=1'
+            set_config_line /boot/firmware/config.txt 'hdmi_drive' 'hdmi_drive=2'
+            set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
+            set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
+            set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-kms-v3d'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
+            set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
+            ;;
+        digiamp-plus)
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=rpi-digiampplus'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
+            ;;
+        dac-plus)
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=rpi-dacplus'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
+            ;;
+        hifiberry-dac-plus)
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=hifiberry-dacplus'
+            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=off'
+            ;;
+        *)
+            echo -e "${RED}*** CRITICAL: Unknown --audio-device '${AUDIO_DEVICE}'. Valid values: hdmi, digiamp-plus, dac-plus, hifiberry-dac-plus.${RESET}"
+            exit 1
+            ;;
+    esac
+    echo -e "[  ${GREEN}OK${RESET}  ] Audio device configured successfully"
+fi
 
 # Install CamillaDSP
 echo

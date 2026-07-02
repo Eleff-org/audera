@@ -14,6 +14,7 @@ CHECK=0
 CHECK_TIMEOUT=120
 LOG=''
 DRY_RUN=0
+AUDIO_DEVICE=''
 
 usage() {
     cat <<EOF
@@ -28,6 +29,9 @@ Options:
   -u, --user <user>                SSH user (default: root)
   -p, --port <port>                SSH port (default: 22)
   -i, --identity <file>            SSH private key file
+  -a, --audio-device <value>       Configure dtoverlay for the attached audio device:
+                                    hdmi, digiamp-plus, dac-plus, hifiberry-dac-plus
+                                    (default: unset, leaves existing dtoverlay untouched)
       --no-reboot                  Skip final reboot; leaves device running for inspection
       --wipe-networks              Delete all NM connections before reboot (triggers WiFi wizard on next boot)
       --check                      After reboot, poll until device is reachable then verify systemd services
@@ -48,6 +52,7 @@ while [[ $# -gt 0 ]]; do
         -u|--user)           USER="$2"; shift 2 ;;
         -p|--port)           PORT="$2"; shift 2 ;;
         -i|--identity)       IDENTITY="$2"; shift 2 ;;
+        -a|--audio-device)   AUDIO_DEVICE="$2"; shift 2 ;;
         --no-reboot)         NO_REBOOT=1; shift ;;
         --wipe-networks)     WIPE_NETWORKS=1; shift ;;
         --check)             CHECK=1; shift ;;
@@ -63,6 +68,12 @@ done
 [[ -n "$HOST" ]]   || die "--host is required"
 [[ "$DEVICE" == 'streamer' || "$DEVICE" == 'player' ]] || die "--device must be 'streamer' or 'player'"
 [[ "$WIPE_NETWORKS" -eq 1 && "$CHECK" -eq 1 ]] && die "--wipe-networks and --check are incompatible (device won't have WiFi after wipe)"
+if [[ -n "$AUDIO_DEVICE" ]]; then
+    case "$AUDIO_DEVICE" in
+        hdmi|digiamp-plus|dac-plus|hifiberry-dac-plus) ;;
+        *) die "--audio-device must be one of: hdmi, digiamp-plus, dac-plus, hifiberry-dac-plus" ;;
+    esac
+fi
 
 BRANCH_URL="${BRANCH//#/%23}"
 
@@ -73,9 +84,9 @@ SED_STRIP="sed -i '/^echo.*Restarting/d; /^sleep 5\$/d; /^[[:space:]]*reboot[[:s
 FETCH_CMD="curl -fsSL '${SETUP_URL}' -o /tmp/audera_setup.sh"
 
 if [[ "$WIPE_NETWORKS" -eq 1 || "$NO_REBOOT" -eq 1 ]]; then
-    SETUP_CMD="${FETCH_CMD} && ${SED_STRIP} && bash /tmp/audera_setup.sh '${BRANCH}'"
+    SETUP_CMD="${FETCH_CMD} && ${SED_STRIP} && bash /tmp/audera_setup.sh '${BRANCH}' '${AUDIO_DEVICE}'"
 else
-    SETUP_CMD="${FETCH_CMD} && bash /tmp/audera_setup.sh '${BRANCH}'"
+    SETUP_CMD="${FETCH_CMD} && bash /tmp/audera_setup.sh '${BRANCH}' '${AUDIO_DEVICE}'"
 fi
 
 WIPE_CMD="nohup bash -c '
@@ -108,10 +119,11 @@ fi
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
     _log "=== DRY RUN ==="
-    _log "SSH target : ${USER}@${HOST}:${PORT}"
-    _log "Device     : ${DEVICE}"
-    _log "Branch     : ${BRANCH}"
-    _log "Setup URL  : ${SETUP_URL}"
+    _log "SSH target   : ${USER}@${HOST}:${PORT}"
+    _log "Device       : ${DEVICE}"
+    _log "Branch       : ${BRANCH}"
+    _log "Audio device : ${AUDIO_DEVICE:-<unset, leaves existing dtoverlay untouched>}"
+    _log "Setup URL    : ${SETUP_URL}"
     _log ""
     _log "--- Step 1: setup command ---"
     _log "$SETUP_CMD"
