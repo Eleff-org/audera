@@ -153,24 +153,12 @@ cat > /etc/systemd/system/camilladsp.service <<EOF
 [Unit]
 Description=CamillaDSP
 After=sound.target snapclient.service
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG --statefile $CAMILLADSP_STATEFILE -p 1234 --address 0.0.0.0
 Restart=always
 RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# camilladsp-hdmi-wait.path — delays CamillaDSP start until the HDMI ALSA device appears
-cat > /etc/systemd/system/camilladsp-hdmi-wait.path <<'EOF'
-[Unit]
-Description=Wait for HDMI ALSA device before starting CamillaDSP
-
-[Path]
-PathExists=/dev/snd/pcmC0D0p
-Unit=camilladsp.service
 
 [Install]
 WantedBy=multi-user.target
@@ -193,8 +181,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable snapclient camilladsp-hdmi-wait.path audera-player
-systemctl start snapclient camilladsp-hdmi-wait.path audera-player
+systemctl enable snapclient camilladsp audera-player
+systemctl start snapclient camilladsp audera-player
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Configure os
