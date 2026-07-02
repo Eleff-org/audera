@@ -3,9 +3,6 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# Import DietPi global functions
-# source "/boot/dietpi/func/dietpi-globals"
-
 # Setup color formatting
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -313,14 +310,6 @@ systemctl enable snapserver snapclient camilladsp plexamp plexamp-mdns audera-st
 systemctl start snapserver snapclient camilladsp plexamp plexamp-mdns audera-streamer
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
-# Configure os
-# echo
-# echo ">>> Configuring the operating-system"
-# echo ">>> Ensuring wifi availability without hdmi-output"
-# G_CONFIG_INJECT 'hdmi_force_hotplug=' 'hdmi_force_hotplug=1' /boot/config.txt
-# G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
-# echo -e "[  ${GREEN}OK${RESET}  ] os configured successfully"
-
 # Purge ifupdown
 
 # ifupdown will conflict with Network-Manager if
@@ -353,8 +342,6 @@ nmcli networking on
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
 # Disable WiFi power save globally
-echo
-echo ">>> Disabling WiFi power save"
 mkdir -p /etc/NetworkManager/conf.d
 cat > /etc/NetworkManager/conf.d/wifi-powersave.conf <<'EOF'
 [connection]
