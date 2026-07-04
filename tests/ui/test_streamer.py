@@ -12,7 +12,7 @@ from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import settings as settings_dal
 from audera.models.player import Player
-from audera.ui import components
+from audera.ui import components, features
 from audera.ui.streamer.pages import Page
 
 
@@ -128,24 +128,42 @@ async def test_services_tab_shows_claimed(audera_home, mock_snapserver_empty, mo
     await user.should_see('available')
 
 
-async def test_settings_tab_shows_host_inputs(audera_home, mock_snapserver_empty, user: User):
+async def test_settings_tab_shows_feature_groups(audera_home, mock_snapserver_empty, user: User):
     Page().load()
     await user.open('/')
     user.find('Settings').click()
-    await user.should_see('PlexAmp Host')
-    await user.should_see('Snapserver Host')
+    for feature in features.FEATURES:
+        await user.should_see(feature.label)
+        for option in feature.options:
+            await user.should_see(option.label)
+    await user.should_not_see('PlexAmp Host')
+    await user.should_not_see('Snapserver Host')
 
 
-async def test_settings_save_persists_hosts(audera_home, mock_snapserver_empty, user: User):
+async def test_settings_tab_selecting_option_persists_to_dal(audera_home, mock_snapserver_empty, user: User):
+    """ui.toggle renders as a single q-btn-toggle group; the test harness's generic
+    click() doesn't know how to target one button within it (unlike ui.radio/ui.select,
+    which it special-cases), so the option is selected the same way the harness selects
+    those: by assigning the element's `value` directly, which drives the same on_change
+    path a real button click would.
+    """
     Page().load()
     await user.open('/')
     user.find('Settings').click()
-    user.find('PlexAmp Host').clear().type('192.168.1.100')
-    user.find('Snapserver Host').clear().type('192.168.1.101')
-    user.find('Save').click()
-    settings = settings_dal.get()
-    assert settings.plexamp_host == '192.168.1.100'
-    assert settings.snapserver_host == '192.168.1.101'
+    with user:
+        user.find(kind=ui.toggle, content='Disabled toggle').elements.pop().value = 'disabled'
+    await asyncio.sleep(0.1)
+    assert settings_dal.get().features['player_selection'] == 'disabled'
+    with user:
+        user.find(kind=ui.toggle, content='Decibels').elements.pop().value = 'db'
+    await asyncio.sleep(0.1)
+    assert settings_dal.get().features['volume'] == 'db'
+
+
+async def test_settings_first_load_seeds_default_features(audera_home, mock_snapserver_empty, user: User):
+    Page().load()
+    await user.open('/')
+    assert settings_dal.get().features == features.default_selections()
 
 
 async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, user: User):

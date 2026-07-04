@@ -18,7 +18,7 @@ from audera.dal import dsp as dsp_dal
 from audera.dal import settings as settings_dal
 from audera.models.dsp import DSPConfig, apply_loudness, remove_loudness
 from audera.models.settings import Settings
-from audera.ui import components
+from audera.ui import components, features
 
 load_dotenv()
 
@@ -33,11 +33,12 @@ _PLEX_HEADERS = {
 
 
 def _load_settings() -> Settings:
-    if settings_dal.exists():
-        return settings_dal.get()
-    return Settings(
-        plexamp_host=os.getenv('AUDERA_PLEXAMP_HOST', 'localhost'),
-        snapserver_host=os.getenv('AUDERA_SNAPSERVER_HOST', 'localhost'),
+    return settings_dal.get_or_create(
+        Settings(
+            plexamp_host=os.getenv('AUDERA_PLEXAMP_HOST', 'localhost'),
+            snapserver_host=os.getenv('AUDERA_SNAPSERVER_HOST', 'localhost'),
+            features=features.default_selections(),
+        )
     )
 
 
@@ -423,15 +424,18 @@ class Page:
         slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
 
     def _build_settings_tab(self) -> None:
-        """Renders the Settings tab — configure service hosts and persist to ~/.audera/settings.json."""
-        plexamp_input = ui.input('PlexAmp Host', value=self.settings.plexamp_host).classes('w-64')
-        snapserver_input = ui.input('Snapserver Host', value=self.settings.snapserver_host).classes('w-64')
-        status_label = ui.label('').classes('text-sm text-gray-500')
+        """Renders the Settings tab — one single-select button group per registered UX feature."""
+        ui.label('Features').classes('text-lg font-medium mb-2')
+        for feature in features.FEATURES:
+            ui.label(feature.label).classes('text-sm text-gray-500')
+            ui.toggle(
+                {option.value: option.label for option in feature.options},
+                value=features.selected(self.settings, feature.key),
+                on_change=lambda e, key=feature.key: self._on_feature_change(key, e.value),
+            ).classes('mb-4')
 
-        def _save():
-            self.settings.plexamp_host = plexamp_input.value
-            self.settings.snapserver_host = snapserver_input.value
-            settings_dal.save(self.settings)
-            status_label.set_text('Settings saved.')
-
-        ui.button('Save', on_click=_save).props('flat dense')
+    def _on_feature_change(self, key: str, value: str) -> None:
+        """Persists a feature-flag selection and refreshes the Players tab to reflect it."""
+        self.settings.features[key] = value
+        settings_dal.save(self.settings)
+        self._build_players_tab.refresh()
