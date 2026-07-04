@@ -50,3 +50,11 @@ No implementation logic belongs in `__init__.py`.
 - Tailwind utility classes for layout; keep consistent with existing NiceGUI patterns in the codebase
 - No `ui.run()` calls outside of `__init__.py`
 - Module-level helpers (no instance state needed) stay as module-level private functions, not `@staticmethod`
+
+## UX optionality
+
+Features with more than one valid UX ("mute checkbox vs. disabled toggle") are
+registered in `audera/ui/features.py`'s `FEATURES` catalog, not hard-coded as a
+single rendering path. Every feature ships 2-3 `Option`s; the first is the default.
+Resolve a user's selection with `audera.ui.features.selected(settings, key)` or
+`flag_enabled(settings, key, option)` — never read `settings.features[...]` directly.
