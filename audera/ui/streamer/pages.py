@@ -30,6 +30,7 @@ _PLEX_HEADERS = {
     'X-Plex-Platform': 'Linux',
     'Accept': 'application/json',
 }
+_DB_MIN: float = -90.0
 
 
 def _load_settings() -> Settings:
@@ -425,20 +426,23 @@ class Page:
         client_host: str = '',
         show_mute: bool = True,
     ) -> None:
-        """Renders volume slider (routed through CamillaDSP) and, when `show_mute`, a mute checkbox (Snapcast).
+        """Renders a volume icon, slider, and live value label (routed through CamillaDSP),
+        and, when `show_mute`, a mute checkbox (Snapcast).
+
+        The slider is scaled in percent (0-100) or decibels (`_DB_MIN` to
+        `CamillaDSPClient.MAX_SAFE_DB`) depending on the 'volume' feature selection. Either
+        way, `DSPConfig.volume` (percent) remains the persisted, canonical value — the dB
+        handler converts back to percent via `db_to_percent` before persisting so seeding
+        and the mute-on-zero behavior stay identical across both modes.
 
         `show_mute=False` is used by the 'disabled' Player Selection experience, where the
         enable/disable switch in the card header already governs Snapcast mute state, so
         the redundant Mute checkbox — and its enabled/disabled binding — is omitted.
         """
+        camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
+        db_mode = features.flag_enabled(self.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
 
-        async def _on_volume(e):
-            percent = int(e.value)
-            camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
-            try:
-                await asyncio.to_thread(camilla.set_percent_volume, percent)
-            except Exception:
-                pass
+        async def _persist_and_sync(percent: int) -> None:
             dsp_dal.update(dsp_config.model_copy(update={'volume': percent}))
             await asyncio.to_thread(
                 _snapserver(self.settings).set_client_volume,
@@ -447,10 +451,41 @@ class Page:
                 muted=(percent == 0),
             )
 
+        async def _on_volume_percent(e):
+            percent = int(e.value)
+            try:
+                await asyncio.to_thread(camilla.set_percent_volume, percent)
+            except Exception:
+                pass
+            await _persist_and_sync(percent)
+
+        async def _on_volume_db(e):
+            db = float(e.value)
+            try:
+                await asyncio.to_thread(camilla.set_volume, db)
+            except Exception:
+                pass
+            await _persist_and_sync(camilla.db_to_percent(db))
+
         async def _on_mute(e):
             await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=e.value)
 
-        slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
+        ui.icon('volume_up').classes('text-gray-400')
+        if db_mode:
+            slider = ui.slider(
+                min=_DB_MIN,
+                max=CamillaDSPClient.MAX_SAFE_DB,
+                step=0.5,
+                value=camilla.percent_to_db(initial_volume),
+                on_change=_on_volume_db,
+            ).classes('w-48')
+            value_label = ui.label().classes('text-xs text-gray-500')
+            value_label.bind_text_from(slider, 'value', backward=lambda v: f'{v:.1f} dB')
+        else:
+            slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume_percent).classes('w-48')
+            value_label = ui.label().classes('text-xs text-gray-500')
+            value_label.bind_text_from(slider, 'value', backward=lambda v: f'{int(v)}%')
+
         if show_mute:
             mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
             slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)

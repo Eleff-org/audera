@@ -52,8 +52,12 @@ def mock_camilladsp(monkeypatch):
         calls['get_percent_volume'] = True
         return 80
 
+    def _set_volume(self, level: float) -> None:
+        calls['set_volume'] = level
+
     monkeypatch.setattr(CamillaDSPClient, 'set_percent_volume', _set_percent_volume)
     monkeypatch.setattr(CamillaDSPClient, 'get_percent_volume', _get_percent_volume)
+    monkeypatch.setattr(CamillaDSPClient, 'set_volume', _set_volume)
     return calls
 
 
@@ -272,6 +276,86 @@ async def test_volume_slider_seeded_from_dal(
     await user.open('/')
     # Volume is read from DAL (default 25) and pushed to CamillaDSP via set_percent_volume
     assert mock_camilladsp.get('set_percent_volume') == 25
+
+
+async def test_players_tab_volume_percent_mode_shows_icon_and_label(
+    audera_home, mock_snapserver_with_client, mock_camilladsp, user: User
+):
+    Page().load()
+    await user.open('/')
+    await user.should_see(kind=ui.icon, content='volume_up')
+    await user.should_see('25%')
+
+
+async def test_players_tab_volume_db_mode_shows_icon_and_label(
+    audera_home, mock_snapserver_with_client, mock_camilladsp, user: User
+):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    await user.should_see(kind=ui.icon, content='volume_up')
+    await user.should_see('-12.0 dB')  # percent_to_db(25) == -12.041...
+
+
+async def test_players_tab_volume_percent_slider_change_persists_and_updates_label(
+    audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, user: User
+):
+    Page().load()
+    await user.open('/')
+    with user:
+        user.find(kind=ui.slider).elements.pop().value = 60
+    await asyncio.sleep(0.1)
+    await user.should_see('60%')
+    assert mock_camilladsp.get('set_percent_volume') == 60
+    assert mock_camilladsp.get('set_volume') is None
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
+    assert dsp_dal.get('abc123').volume == 60
+
+
+async def test_players_tab_volume_db_slider_change_calls_set_volume_and_updates_label(
+    audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, user: User
+):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    with user:
+        user.find(kind=ui.slider).elements.pop().value = -6.0
+    await asyncio.sleep(0.1)
+    await user.should_see('-6.0 dB')
+    assert mock_camilladsp.get('set_volume') == -6.0
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)  # db_to_percent(-6.0) == 50
+    assert dsp_dal.get('abc123').volume == 50
+
+
+async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
+    audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, user: User
+):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    with user:
+        user.find(kind=ui.slider).elements.pop().value = -90.0
+    await asyncio.sleep(0.1)
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 0, True)
+    assert dsp_dal.get('abc123').volume == 0
 
 
 async def test_reset_snap_volume_calls_snapserver(
