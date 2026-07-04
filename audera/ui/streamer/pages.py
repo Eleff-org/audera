@@ -255,7 +255,7 @@ class Page:
 
     @ui.refreshable
     def _build_players_tab(self) -> None:
-        """Renders the Players tab — lists Snapcast clients with per-client volume and mute controls."""
+        """Renders the Players tab — lists Snapcast clients with per-client volume and mute/enable controls."""
         snap = _snapserver(self.settings)
         try:
             clients = snap.get_clients()
@@ -267,14 +267,23 @@ class Page:
             ui.label('No Snapcast clients found.').classes('text-gray-500')
             return
 
+        disabled_experience = features.flag_enabled(self.settings, features.PLAYER_SELECTION_KEY, features.FF_DISABLED_VS_MUTE)
+
         for client in connected_clients:
+            minimized = disabled_experience and client.muted
             with ui.card().classes('w-full mb-2'):
                 with ui.row().classes('items-center justify-between w-full'):
                     with ui.row().classes('items-center gap-2'):
+                        if disabled_experience:
+                            ui.switch(value=not client.muted, on_change=lambda e, c=client: self._on_enabled_change(c, e.value))
                         ui.label(client.name).classes('font-medium')
                     ui.button(on_click=lambda c=client: self._open_settings_dialog(c)).props(
                         'icon=edit_square flat dense round size=sm'
                     ).classes('text-gray-400').mark('player-settings')
+
+                if minimized:
+                    continue
+
                 with ui.row().classes('items-center gap-4 w-full'):
                     host = client.host
                     dsp_config = dsp_dal.get_or_create(DSPConfig(id=client.id, player_id=client.id))
@@ -283,7 +292,23 @@ class Page:
                         _camilladsp(host).set_percent_volume(init_vol)
                     except Exception:
                         pass
-                    self._build_volume_controls(client.id, dsp_config, init_vol, client.muted, client.host)
+                    self._build_volume_controls(
+                        client.id,
+                        dsp_config,
+                        init_vol,
+                        client.muted,
+                        client.host,
+                        show_mute=not disabled_experience,
+                    )
+
+    async def _on_enabled_change(self, client, enabled: bool) -> None:
+        """Handles the 'disabled' Player Selection experience's enable/disable switch.
+
+        Toggling off mutes the Snapcast client (the minimized-card state is derived from
+        `client.muted` on the next render); toggling on unmutes it.
+        """
+        await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client.id, 100, muted=not enabled)
+        self._build_players_tab.refresh()
 
     def _open_settings_dialog(self, client) -> None:
         """Opens a settings popup for renaming, latency, and Snapcast volume reset."""
@@ -398,8 +423,14 @@ class Page:
         initial_volume: int,
         initial_muted: bool,
         client_host: str = '',
+        show_mute: bool = True,
     ) -> None:
-        """Renders volume slider (now routed through CamillaDSP) and mute checkbox (Snapcast)."""
+        """Renders volume slider (routed through CamillaDSP) and, when `show_mute`, a mute checkbox (Snapcast).
+
+        `show_mute=False` is used by the 'disabled' Player Selection experience, where the
+        enable/disable switch in the card header already governs Snapcast mute state, so
+        the redundant Mute checkbox — and its enabled/disabled binding — is omitted.
+        """
 
         async def _on_volume(e):
             percent = int(e.value)
@@ -420,8 +451,9 @@ class Page:
             await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=e.value)
 
         slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
-        mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
-        slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
+        if show_mute:
+            mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
+            slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
 
     def _build_settings_tab(self) -> None:
         """Renders the Settings tab — one single-select button group per registered UX feature."""

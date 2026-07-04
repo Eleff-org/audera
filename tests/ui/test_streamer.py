@@ -12,6 +12,7 @@ from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import settings as settings_dal
 from audera.models.player import Player
+from audera.models.settings import Settings
 from audera.ui import components, features
 from audera.ui.streamer.pages import Page
 
@@ -27,6 +28,14 @@ def mock_snapserver_empty(monkeypatch):
 @pytest.fixture
 def mock_snapserver_with_client(monkeypatch):
     player = Player(id='abc123', host='192.168.1.50', port=1704, connected=True, volume=80, name='Living Room')
+
+    monkeypatch.setattr(SnapserverClient, 'get_clients', lambda self: [player])
+    return player
+
+
+@pytest.fixture
+def mock_snapserver_with_muted_client(monkeypatch):
+    player = Player(id='abc123', host='192.168.1.50', port=1704, connected=True, volume=80, muted=True, name='Living Room')
 
     monkeypatch.setattr(SnapserverClient, 'get_clients', lambda self: [player])
     return player
@@ -93,6 +102,8 @@ async def test_players_tab_shows_connected_client(audera_home, mock_snapserver_w
     Page().load()
     await user.open('/')
     await user.should_see('Living Room')
+    await user.should_see('Mute')
+    await user.should_not_see(kind=ui.switch)
 
 
 async def test_players_tab_shows_latency_control(audera_home, mock_snapserver_with_client, user: User):
@@ -100,6 +111,71 @@ async def test_players_tab_shows_latency_control(audera_home, mock_snapserver_wi
     await user.open('/')
     user.find(marker='player-settings').click()
     await user.should_see('Latency (ms)')
+
+
+async def test_players_tab_disabled_experience_shows_switch_and_hides_mute(audera_home, mock_snapserver_with_client, user: User):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.PLAYER_SELECTION_KEY: features.FF_DISABLED_VS_MUTE},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    await user.should_see(kind=ui.switch)
+    await user.should_not_see(kind=ui.checkbox)
+
+
+async def test_players_tab_disabled_experience_minimizes_muted_client(
+    audera_home, mock_snapserver_with_muted_client, user: User
+):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.PLAYER_SELECTION_KEY: features.FF_DISABLED_VS_MUTE},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    await user.should_see(kind=ui.switch)
+    await user.should_see(marker='player-settings')
+    await user.should_not_see(kind=ui.slider)
+
+
+async def test_players_tab_disabled_experience_toggle_off_mutes_client(
+    audera_home, mock_snapserver_with_client, mock_snapserver_volume, user: User
+):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.PLAYER_SELECTION_KEY: features.FF_DISABLED_VS_MUTE},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    user.find(kind=ui.switch).click()
+    await asyncio.sleep(0.1)
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, True)
+
+
+async def test_players_tab_disabled_experience_toggle_on_unmutes_client(
+    audera_home, mock_snapserver_with_muted_client, mock_snapserver_volume, user: User
+):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.PLAYER_SELECTION_KEY: features.FF_DISABLED_VS_MUTE},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    user.find(kind=ui.switch).click()
+    await asyncio.sleep(0.1)
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
 
 
 async def test_services_tab_shows_inactive(audera_home, mock_snapserver_empty, monkeypatch, user: User):
