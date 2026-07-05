@@ -93,7 +93,8 @@ echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 # Write CamillaDSP configuration
 echo
 echo ">>> Creating the CamillaDSP configuration"
-audera player conf camilladsp.yml > "$CAMILLADSP_CONFIG"
+audera player conf camilladsp.yml \
+    --playback-format "$(camilladsp_playback_format "$AUDIO_DEVICE")" > "$CAMILLADSP_CONFIG"
 chmod 644 "$CAMILLADSP_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
 

@@ -21,7 +21,7 @@ Both `dietpi.txt` files set `CONFIG_SOUNDCARD=rpi-digiampplus`. This configures 
 
 Using a different DAC requires:
 - Updating `CONFIG_SOUNDCARD` in `dietpi.txt`
-- Updating the CamillaDSP `playback.device` in `audera/conf/*/camilladsp.yml`
+- Updating the CamillaDSP `playback.device` in `audera/cli/conf.py` (`render_camilladsp`)
 - Verifying the ALSA card index does not shift when `snd-aloop` is loaded at `index=7`
 
 ### OS: DietPi (Debian Bookworm, Raspberry Pi image)

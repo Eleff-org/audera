@@ -53,9 +53,18 @@ The pipeline is currently empty (`filters: {}`, `pipeline: []`). When filters ar
 
 Both player and streamer configs use `device: "hw:0"`. ADR 001 noted `hw:0,0` for the player historically; this has been unified to `hw:0` for consistency with the streamer. The `,0` sub-device specifier is redundant for the DigiAMP+ and ALSA resolves both forms to the same device node.
 
+### 6. HDMI playback uses `S16LE`
+
+The `playback.format` defaults to `S32LE`, but HDMI sinks (TVs, AVRs) frequently reject 32-bit PCM and respond with silence or dropouts. When the attached audio device is HDMI, `playback.format` is set to `S16LE` instead.
+
+This loses no quality: the pipeline's effective ceiling is already 16-bit/48 kHz (ADR 002), so the 32-bit playback path is lossless zero-padding — narrowing it to `S16LE` discards only that padding. The **capture** format stays `S32LE` regardless, to match Snapclient's 32-bit loopback output.
+
+The format is chosen at provisioning time rather than at runtime: `audera {player,streamer} conf camilladsp.yml --playback-format {S16LE,S32LE}` renders the config, and each `os/dietpi/{player,streamer}/automation/setup.sh` passes `S16LE` when `--audio-device hdmi` is set (via the `camilladsp_playback_format` helper in `os/dietpi/lib/config.sh`) and `S32LE` otherwise.
+
 ## Consequences
 
 - Multi-room sync does not require any Snapcast offset to compensate for the ~43 ms CamillaDSP blind latency — it is equal on all nodes and cancels out. A per-client latency offset is only required when nodes use different DAC hardware with different output latencies; the offset value equals the acoustic latency difference between nodes, measured empirically.
 - Adding FIR filters to the pipeline requires a CPU budget calculation before deployment on the RPi Zero 2 W.
-- If the stream format is changed (see ADR 002), `devices.samplerate` in both `audera/conf/player/camilladsp.yml` and `audera/conf/streamer/camilladsp.yml` must be updated in the same change.
+- If the stream format is changed (see ADR 002), `devices.samplerate` in `audera/cli/conf.py` (`render_camilladsp`) must be updated in the same change.
+- HDMI sinks require `playback.format: S16LE` (see decision 6); provisioning selects this automatically for `--audio-device hdmi`.
 - Runtime health can be monitored via the CamillaDSP WebSocket status interface: a capture ratio oscillating tightly around `1.000000` indicates a healthy clock sync. Persistent deviation indicates CPU saturation, thermal throttling, or hardware clock failure.

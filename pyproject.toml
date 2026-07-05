@@ -55,6 +55,11 @@ line-length = 129
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 
+[tool.ruff.lint.per-file-ignores]
+# audera/cli/conf.py embeds bundled config files verbatim and may not
+#   respect line length requirements.
+"audera/cli/conf.py" = ["E501", "W291", "W293"]
+
 [tool.ruff.format]
 quote-style = "single"
 indent-style = "space"
