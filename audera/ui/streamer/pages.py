@@ -290,7 +290,7 @@ class Page:
                 if minimized:
                     continue
 
-                with ui.row().classes('items-center gap-4 w-full'):
+                with ui.row(wrap=False).classes('items-center gap-4 w-full'):
                     host = client.host
                     dsp_config = dsp_dal.get_or_create(DSPConfig(id=client.id, player_id=client.id))
                     init_vol = dsp_config.volume
@@ -429,16 +429,21 @@ class Page:
         self,
         client_id: str,
         dsp_config: DSPConfig,
-        initial_volume: int,
+        initial_volume: float,
         client_host: str = '',
     ) -> ui.slider:
         """Renders a volume icon, slider, and live value label (routed through CamillaDSP).
 
         The slider is scaled in percent (0-100) or decibels (`CamillaDSPClient.MIN_DB` to
         `CamillaDSPClient.MAX_DB`) depending on the 'volume' feature selection. Either
-        way, `DSPConfig.volume` (percent) remains the persisted, canonical value — the dB
-        handler converts back to percent via `db_to_percent` before persisting so seeding
-        and the mute-on-zero behavior stay identical across both modes.
+        way, `DSPConfig.volume` (a `float` percent) remains the persisted, canonical value
+        — the dB handler converts back to percent via `db_to_percent`, which now returns a
+        precise float so dB edits round-trip without drift and re-seed at the same spot.
+
+        Mute is anchored at the slider floor (`db <= MIN_DB` in dB mode / `percent <= 0` in
+        percent mode), never on lossy zero-rounding, so a normal mid-range dB edit no longer
+        silently mutes the client on the next refresh. Both seeds are step-aligned so the
+        periodic refresh does not fire a phantom `update:model-value`.
 
         Returns the `ui.slider` element so the caller can bind its enabled state to the
         Mute checkbox built alongside it in the card header.
@@ -446,13 +451,14 @@ class Page:
         camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
         db_mode = features.flag_enabled(self.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
 
-        async def _persist_and_sync(percent: int) -> None:
+        async def _persist_and_sync(percent: float) -> None:
             dsp_dal.update(dsp_config.model_copy(update={'volume': percent}))
+            muted = percent <= 0
             await asyncio.to_thread(
                 _snapserver(self.settings).set_client_volume,
                 client_id,
-                0 if percent == 0 else 100,
-                muted=(percent == 0),
+                0 if muted else 100,
+                muted=muted,
             )
 
         async def _on_volume_percent(e):
@@ -473,18 +479,20 @@ class Page:
 
         ui.icon('volume_up').classes('text-gray-400')
         if db_mode:
+            db_step = 0.5
+            seed_db = round(camilla.percent_to_db(initial_volume) / db_step) * db_step
             slider = ui.slider(
                 min=CamillaDSPClient.MIN_DB,
                 max=CamillaDSPClient.MAX_DB,
-                step=0.5,
-                value=camilla.percent_to_db(initial_volume),
+                step=db_step,
+                value=seed_db,
                 on_change=_on_volume_db,
             ).classes('grow')
-            value_label = ui.label().classes('text-xs text-gray-500')
+            value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap')
             value_label.bind_text_from(slider, 'value', backward=lambda v: f'{v:.1f} dB')
         else:
-            slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume_percent).classes('grow')
-            value_label = ui.label().classes('text-xs text-gray-500')
+            slider = ui.slider(min=0, max=100, value=int(round(initial_volume)), on_change=_on_volume_percent).classes('grow')
+            value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap')
             value_label.bind_text_from(slider, 'value', backward=lambda v: f'{int(v)}%')
 
         return slider

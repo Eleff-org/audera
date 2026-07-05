@@ -34,7 +34,7 @@ class DSPConfig(BaseModel):
     enabled: bool = True
     loudness_enabled: bool = False
     loudness_reference_level: float = -25.0
-    volume: int = 25
+    volume: float = 25.0
 
     @field_validator('loudness_reference_level', mode='before')
     @classmethod

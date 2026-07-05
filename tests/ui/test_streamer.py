@@ -335,8 +335,8 @@ async def test_players_tab_volume_db_slider_change_calls_set_volume_and_updates_
     await asyncio.sleep(0.1)
     await user.should_see('-6.0 dB')
     assert mock_camilladsp.get('set_volume') == -6.0
-    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)  # db_to_percent(-6.0) == 50
-    assert dsp_dal.get('abc123').volume == 50
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)  # db_to_percent(-6.0) ≈ 50.12
+    assert dsp_dal.get('abc123').volume == pytest.approx(50.12, abs=1e-2)
 
 
 async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
@@ -352,7 +352,7 @@ async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
     Page().load()
     await user.open('/')
     with user:
-        user.find(kind=ui.slider).elements.pop().value = -80.0
+        user.find(kind=ui.slider).elements.pop().value = -50.0
     await asyncio.sleep(0.1)
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 0, True)
     assert dsp_dal.get('abc123').volume == 0
