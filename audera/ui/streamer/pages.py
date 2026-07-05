@@ -434,16 +434,17 @@ class Page:
     ) -> ui.slider:
         """Renders a volume icon, slider, and live value label (routed through CamillaDSP).
 
-        The slider is scaled in percent (0-100) or decibels (`CamillaDSPClient.MIN_DB` to
-        `CamillaDSPClient.MAX_DB`) depending on the 'volume' feature selection. Either
-        way, `DSPConfig.volume` (a `float` percent) remains the persisted, canonical value
-        — the dB handler converts back to percent via `db_to_percent`, which now returns a
-        precise float so dB edits round-trip without drift and re-seed at the same spot.
+        The slider is **always** a percent (0-100) control regardless of the 'volume'
+        feature selection, so the handle sits at the same physical spot when toggling
+        between modes. The selection only changes the value label: percent mode shows
+        `NN%`, dB mode shows `percent_to_db(value)` as `-N.N dB`. `DSPConfig.volume`
+        (percent) stays the single persisted, canonical value, and both modes drive
+        CamillaDSP through `set_percent_volume`.
 
-        Mute is anchored at the slider floor (`db <= MIN_DB` in dB mode / `percent <= 0` in
-        percent mode), never on lossy zero-rounding, so a normal mid-range dB edit no longer
-        silently mutes the client on the next refresh. Both seeds are step-aligned so the
-        periodic refresh does not fire a phantom `update:model-value`.
+        Mute is anchored at the slider floor (`percent <= 0`, displayed as `MIN_DB` in dB
+        mode), never on lossy zero-rounding, so a mid-range edit never silently mutes the
+        client on the next refresh. The seed is step-aligned to the integer percent slider
+        so the periodic refresh does not fire a phantom `update:model-value`.
 
         Returns the `ui.slider` element so the caller can bind its enabled state to the
         Mute checkbox built alongside it in the card header.
@@ -469,30 +470,14 @@ class Page:
                 pass
             await _persist_and_sync(percent)
 
-        async def _on_volume_db(e):
-            db = float(e.value)
-            try:
-                await asyncio.to_thread(camilla.set_volume, db)
-            except Exception:
-                pass
-            await _persist_and_sync(camilla.db_to_percent(db))
-
         ui.icon('volume_up').classes('text-gray-400')
+        slider = ui.slider(min=0, max=100, step=1, value=int(round(initial_volume)), on_change=_on_volume_percent).classes(
+            'grow'
+        )
+        value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap')
         if db_mode:
-            db_step = 0.5
-            seed_db = round(camilla.percent_to_db(initial_volume) / db_step) * db_step
-            slider = ui.slider(
-                min=CamillaDSPClient.MIN_DB,
-                max=CamillaDSPClient.MAX_DB,
-                step=db_step,
-                value=seed_db,
-                on_change=_on_volume_db,
-            ).classes('grow')
-            value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap')
-            value_label.bind_text_from(slider, 'value', backward=lambda v: f'{v:.1f} dB')
+            value_label.bind_text_from(slider, 'value', backward=lambda v: f'{camilla.percent_to_db(v):.1f} dB')
         else:
-            slider = ui.slider(min=0, max=100, value=int(round(initial_volume)), on_change=_on_volume_percent).classes('grow')
-            value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap')
             value_label.bind_text_from(slider, 'value', backward=lambda v: f'{int(v)}%')
 
         return slider

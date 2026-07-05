@@ -318,7 +318,7 @@ async def test_players_tab_volume_percent_slider_change_persists_and_updates_lab
     assert dsp_dal.get('abc123').volume == 60
 
 
-async def test_players_tab_volume_db_slider_change_calls_set_volume_and_updates_label(
+async def test_players_tab_volume_db_slider_change_persists_percent_and_shows_db(
     audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, user: User
 ):
     settings_dal.create(
@@ -330,13 +330,15 @@ async def test_players_tab_volume_db_slider_change_calls_set_volume_and_updates_
     )
     Page().load()
     await user.open('/')
+    # dB mode uses the same percent (0-100) slider; only the label shows dB.
     with user:
-        user.find(kind=ui.slider).elements.pop().value = -6.0
+        user.find(kind=ui.slider).elements.pop().value = 50
     await asyncio.sleep(0.1)
-    await user.should_see('-6.0 dB')
-    assert mock_camilladsp.get('set_volume') == -6.0
-    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)  # db_to_percent(-6.0) ≈ 50.12
-    assert dsp_dal.get('abc123').volume == pytest.approx(50.12, abs=1e-2)
+    await user.should_see('-6.0 dB')  # percent_to_db(50) == -6.020...
+    assert mock_camilladsp.get('set_percent_volume') == 50
+    assert mock_camilladsp.get('set_volume') is None
+    assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
+    assert dsp_dal.get('abc123').volume == 50
 
 
 async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
@@ -351,14 +353,17 @@ async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
     )
     Page().load()
     await user.open('/')
+    # Floor is 0% (displayed as MIN_DB in dB mode); dragging there mutes via Snapcast.
     with user:
-        user.find(kind=ui.slider).elements.pop().value = -50.0
+        user.find(kind=ui.slider).elements.pop().value = 0
     await asyncio.sleep(0.1)
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 0, True)
     assert dsp_dal.get('abc123').volume == 0
 
 
-async def test_players_tab_volume_db_slider_bounds(audera_home, mock_snapserver_with_client, mock_camilladsp, user: User):
+async def test_players_tab_volume_db_slider_is_percent_scaled(
+    audera_home, mock_snapserver_with_client, mock_camilladsp, user: User
+):
     settings_dal.create(
         Settings(
             plexamp_host='localhost',
@@ -368,9 +373,10 @@ async def test_players_tab_volume_db_slider_bounds(audera_home, mock_snapserver_
     )
     Page().load()
     await user.open('/')
+    # dB mode keeps the percent (0-100) scale so the handle position matches percent mode.
     slider = user.find(kind=ui.slider).elements.pop()
-    assert slider._props['min'] == CamillaDSPClient.MIN_DB
-    assert slider._props['max'] == CamillaDSPClient.MAX_DB
+    assert slider._props['min'] == 0
+    assert slider._props['max'] == 100
 
 
 async def test_reset_snap_volume_calls_snapserver(
