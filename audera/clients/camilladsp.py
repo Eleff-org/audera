@@ -27,7 +27,8 @@ class CamillaDSPClient:
         self.port = port
         self._url = 'ws://%s:%d' % (host, port)
 
-    MAX_SAFE_DB: float = -3.0
+    MIN_DB: float = -80.0
+    MAX_DB: float = 0.0
 
     def _call(self, command: str, value=None) -> dict:
         """Sends a command to CamillaDSP and returns the response.
@@ -94,21 +95,21 @@ class CamillaDSPClient:
         self._call('SetVolume', level)
 
     def percent_to_db(self, percent: int) -> float:
-        """Converts volume percent (0-100) to dB, clamped to MAX_SAFE_DB.
+        """Converts volume percent (0-100) to dB (MIN_DB to MAX_DB).
 
-        At 0% returns -90.0 rather than -inf to avoid undefined dB behaviour.
+        Volume is attenuation-only: 0% maps to MIN_DB (-80.0) and 100% maps to MAX_DB
+        (0.0, unity gain) — there is no path to a gain above 0 dB.
         """
         if percent <= 0:
-            return -90.0
+            return self.MIN_DB
         db = 20.0 * math.log10(percent / 100.0)
-        # dB is a negative scale: louder = less negative, so min() clamps at MAX_SAFE_DB.
-        return min(db, self.MAX_SAFE_DB)
+        return max(self.MIN_DB, min(self.MAX_DB, db))
 
     def db_to_percent(self, db: float) -> int:
         """Converts dB back to percent (0-100) for UI display."""
         if not isinstance(db, (int, float)):
             db = 0.0
-        if db <= -90.0:
+        if db <= self.MIN_DB:
             return 0
         percent = int(100.0 * (10.0 ** (db / 20.0)))
         return max(0, min(100, percent))

@@ -30,7 +30,6 @@ _PLEX_HEADERS = {
     'X-Plex-Platform': 'Linux',
     'Accept': 'application/json',
 }
-_DB_MIN: float = -90.0
 
 
 def _load_settings() -> Settings:
@@ -273,14 +272,20 @@ class Page:
         for client in connected_clients:
             minimized = disabled_experience and client.muted
             with ui.card().classes('w-full mb-2'):
+                mute_cb = None
                 with ui.row().classes('items-center justify-between w-full'):
                     with ui.row().classes('items-center gap-2'):
                         if disabled_experience:
                             ui.switch(value=not client.muted, on_change=lambda e, c=client: self._on_enabled_change(c, e.value))
                         ui.label(client.name).classes('font-medium')
-                    ui.button(on_click=lambda c=client: self._open_settings_dialog(c)).props(
-                        'icon=edit_square flat dense round size=sm'
-                    ).classes('text-gray-400').mark('player-settings')
+                    with ui.row().classes('items-center gap-2'):
+                        if not disabled_experience:
+                            mute_cb = ui.checkbox(
+                                'Mute', value=client.muted, on_change=lambda e, c=client: self._on_mute_change(c.id, e.value)
+                            )
+                        ui.button(on_click=lambda c=client: self._open_settings_dialog(c)).props(
+                            'icon=edit_square flat dense round size=sm'
+                        ).classes('text-gray-400').mark('player-settings')
 
                 if minimized:
                     continue
@@ -293,14 +298,17 @@ class Page:
                         _camilladsp(host).set_percent_volume(init_vol)
                     except Exception:
                         pass
-                    self._build_volume_controls(
-                        client.id,
-                        dsp_config,
-                        init_vol,
-                        client.muted,
-                        client.host,
-                        show_mute=not disabled_experience,
-                    )
+                    slider = self._build_volume_controls(client.id, dsp_config, init_vol, client.host)
+                    if mute_cb is not None:
+                        slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
+
+    async def _on_mute_change(self, client_id: str, muted: bool) -> None:
+        """Handles the Mute checkbox in the card header for the default Player Selection experience.
+
+        Does not refresh the Players tab afterward, so the volume slider keeps its live
+        drag state — see `_reset_snap_volume` for the same rationale.
+        """
+        await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=muted)
 
     async def _on_enabled_change(self, client, enabled: bool) -> None:
         """Handles the 'disabled' Player Selection experience's enable/disable switch.
@@ -422,22 +430,18 @@ class Page:
         client_id: str,
         dsp_config: DSPConfig,
         initial_volume: int,
-        initial_muted: bool,
         client_host: str = '',
-        show_mute: bool = True,
-    ) -> None:
-        """Renders a volume icon, slider, and live value label (routed through CamillaDSP),
-        and, when `show_mute`, a mute checkbox (Snapcast).
+    ) -> ui.slider:
+        """Renders a volume icon, slider, and live value label (routed through CamillaDSP).
 
-        The slider is scaled in percent (0-100) or decibels (`_DB_MIN` to
-        `CamillaDSPClient.MAX_SAFE_DB`) depending on the 'volume' feature selection. Either
+        The slider is scaled in percent (0-100) or decibels (`CamillaDSPClient.MIN_DB` to
+        `CamillaDSPClient.MAX_DB`) depending on the 'volume' feature selection. Either
         way, `DSPConfig.volume` (percent) remains the persisted, canonical value — the dB
         handler converts back to percent via `db_to_percent` before persisting so seeding
         and the mute-on-zero behavior stay identical across both modes.
 
-        `show_mute=False` is used by the 'disabled' Player Selection experience, where the
-        enable/disable switch in the card header already governs Snapcast mute state, so
-        the redundant Mute checkbox — and its enabled/disabled binding — is omitted.
+        Returns the `ui.slider` element so the caller can bind its enabled state to the
+        Mute checkbox built alongside it in the card header.
         """
         camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
         db_mode = features.flag_enabled(self.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
@@ -467,28 +471,23 @@ class Page:
                 pass
             await _persist_and_sync(camilla.db_to_percent(db))
 
-        async def _on_mute(e):
-            await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=e.value)
-
         ui.icon('volume_up').classes('text-gray-400')
         if db_mode:
             slider = ui.slider(
-                min=_DB_MIN,
-                max=CamillaDSPClient.MAX_SAFE_DB,
+                min=CamillaDSPClient.MIN_DB,
+                max=CamillaDSPClient.MAX_DB,
                 step=0.5,
                 value=camilla.percent_to_db(initial_volume),
                 on_change=_on_volume_db,
-            ).classes('w-48')
+            ).classes('grow')
             value_label = ui.label().classes('text-xs text-gray-500')
             value_label.bind_text_from(slider, 'value', backward=lambda v: f'{v:.1f} dB')
         else:
-            slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume_percent).classes('w-48')
+            slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume_percent).classes('grow')
             value_label = ui.label().classes('text-xs text-gray-500')
             value_label.bind_text_from(slider, 'value', backward=lambda v: f'{int(v)}%')
 
-        if show_mute:
-            mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
-            slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
+        return slider
 
     def _build_settings_tab(self) -> None:
         """Renders the Settings tab — one single-select button group per registered UX feature."""

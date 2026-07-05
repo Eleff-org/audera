@@ -352,10 +352,25 @@ async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
     Page().load()
     await user.open('/')
     with user:
-        user.find(kind=ui.slider).elements.pop().value = -90.0
+        user.find(kind=ui.slider).elements.pop().value = -80.0
     await asyncio.sleep(0.1)
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 0, True)
     assert dsp_dal.get('abc123').volume == 0
+
+
+async def test_players_tab_volume_db_slider_bounds(audera_home, mock_snapserver_with_client, mock_camilladsp, user: User):
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
+        )
+    )
+    Page().load()
+    await user.open('/')
+    slider = user.find(kind=ui.slider).elements.pop()
+    assert slider._props['min'] == CamillaDSPClient.MIN_DB
+    assert slider._props['max'] == CamillaDSPClient.MAX_DB
 
 
 async def test_reset_snap_volume_calls_snapserver(
