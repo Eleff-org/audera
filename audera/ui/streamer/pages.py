@@ -267,25 +267,35 @@ class Page:
             ui.label('No Snapcast clients found.').classes('text-gray-500')
             return
 
-        disabled_experience = features.flag_enabled(self.settings, features.PLAYER_SELECTION_KEY, features.FF_DISABLED_VS_MUTE)
+        # Named after the feature-flag constant so flag-gated UI is obvious to the reader.
+        FF_DISABLED_VS_MUTE = features.flag_enabled(self.settings, features.PLAYER_SELECTION_KEY, features.FF_DISABLED_VS_MUTE)
 
         for client in connected_clients:
-            minimized = disabled_experience and client.muted
+            minimized = FF_DISABLED_VS_MUTE and client.muted
             with ui.card().classes('w-full mb-2'):
                 mute_cb = None
                 with ui.row().classes('items-center justify-between w-full'):
                     with ui.row().classes('items-center gap-2'):
-                        if disabled_experience:
+                        if FF_DISABLED_VS_MUTE:
                             ui.switch(value=not client.muted, on_change=lambda e, c=client: self._on_enabled_change(c, e.value))
-                        ui.label(client.name).classes('font-medium')
+                        # A disabled player is grayed out to reinforce the "disabled" state.
+                        name_label = ui.label(client.name).classes('font-medium')
+                        if minimized:
+                            name_label.classes('text-gray-400')
                     with ui.row().classes('items-center gap-2'):
-                        if not disabled_experience:
+                        if not FF_DISABLED_VS_MUTE:
                             mute_cb = ui.checkbox(
                                 'Mute', value=client.muted, on_change=lambda e, c=client: self._on_mute_change(c.id, e.value)
                             )
-                        ui.button(on_click=lambda c=client: self._open_settings_dialog(c)).props(
-                            'icon=edit_square flat dense round size=sm'
-                        ).classes('text-gray-400').mark('player-settings')
+                        settings_btn = (
+                            ui.button(on_click=lambda c=client: self._open_settings_dialog(c))
+                            .props('icon=edit_square flat dense round size=sm')
+                            .classes('text-gray-400')
+                            .mark('player-settings')
+                        )
+                        # Disable the settings icon for a disabled player, matching the intent of "disable".
+                        if minimized:
+                            settings_btn.set_enabled(False)
 
                 if minimized:
                     continue
@@ -450,7 +460,8 @@ class Page:
         Mute checkbox built alongside it in the card header.
         """
         camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
-        db_mode = features.flag_enabled(self.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
+        # Named after the feature-flag constant so flag-gated UI is obvious to the reader.
+        FF_VOLUME_PERC_OR_DB = features.flag_enabled(self.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
 
         async def _persist_and_sync(percent: float) -> None:
             dsp_dal.update(dsp_config.model_copy(update={'volume': percent}))
@@ -474,8 +485,10 @@ class Page:
         slider = ui.slider(min=0, max=100, step=1, value=int(round(initial_volume)), on_change=_on_volume_percent).classes(
             'grow'
         )
-        value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap')
-        if db_mode:
+        # Fixed width + right-align keeps the slider length constant as the label text
+        # changes digit count (e.g. -9.0 dB -> -10.0 dB), so the handle doesn't shift.
+        value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap text-right w-16')
+        if FF_VOLUME_PERC_OR_DB:
             value_label.bind_text_from(slider, 'value', backward=lambda v: f'{camilla.percent_to_db(v):.1f} dB')
         else:
             value_label.bind_text_from(slider, 'value', backward=lambda v: f'{int(v)}%')
