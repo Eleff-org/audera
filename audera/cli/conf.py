@@ -1,4 +1,91 @@
+"""Bundled service configuration files, rendered from code.
 
+This module is the single source of truth for the configuration files that
+``audera {streamer,player} conf <filename>`` emits. Keeping them in code (rather
+than as data files) lets the CamillaDSP playback format be parameterized while
+the remaining files stay byte-for-byte stable.
+"""
+
+from typing import Literal
+
+
+def render_camilladsp(playback_format: Literal['S16LE', 'S32LE'] = 'S32LE') -> str:
+    """Renders the CamillaDSP configuration file.
+
+    Parameters
+    ----------
+    playback_format : `Literal['S16LE', 'S32LE']`
+        The playback device sample format. Defaults to ``'S32LE'``. HDMI sinks
+        reject ``'S32LE'`` and must use ``'S16LE'`` (see ADR 003); the pipeline's
+        effective ceiling is 16-bit/48 kHz (ADR 002), so ``'S16LE'`` loses no
+        quality. The capture device stays ``'S32LE'`` to match Snapclient's
+        32-bit loopback output.
+
+    Returns
+    -------
+    `str`
+        The rendered CamillaDSP configuration.
+    """
+    return f"""---
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  
+  # DRIFT: Enables monitoring the buffer level to sync Capture and Playback clocks.
+  enable_rate_adjust: true
+  
+  # LATENCY STABILITY: Desired number of samples in the playback buffer. 
+  # Set to equal chunksize for a balance of stability and low "blind" latency.
+  target_level: 1024
+  
+  # REACTION SPEED: How often (in seconds) to calculate the correction ratio.
+  # 5s is responsive enough for network streams without causing audible pitch "wobble."
+  adjust_period: 5
+
+  # RESAMPLER SETTINGS: Omit 'resampler' entirely to disable resampling and let ALSA's
+  # internal clock handle adjustment — saves significant CPU power on the RPi Zero 2 W.
+  # Uncomment and set a type if clicks/pops occur:
+  #
+  # resampler:
+  #   type: FastAsync    # Pi Zero choice: least CPU, good for near-1:1 rate adjustment
+  #   # type: BalancedAsync  # Higher quality; may spike CPU on Pi Zero 2 W
+  #   # type: AccurateAsync  # Best quality; intended for Pi 4 or desktop PCs
+  #   # capture_samplerate: 44100  # Uncomment if source is 44.1k and DAC is 48k
+
+  # HDMI STABILITY: Keep the ALSA device open at all times to prevent HDMI audio dropout.
+  # Closing the device after silence causes the HDMI sink to de-clock and drop the connection.
+  silence_threshold: null   # keep ALSA device open, prevent HDMI dropout
+  silence_timeout: null
+  stop_on_rate_change: false
+
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:Loopback,1"
+    format: S32LE
+
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:0" # Must match the DAC soundcard index
+    format: {playback_format}
+
+# Essential even if empty for the config to be valid
+filters: {{}}
+
+pipeline: []
+"""
+
+
+def render_snapserver() -> str:
+    """Renders the Snapserver configuration file.
+
+    Returns
+    -------
+    `str`
+        The rendered Snapserver configuration.
+    """
+    return r"""
 
 ###############################################################################
 #     ______                                                                  #
@@ -248,3 +335,42 @@ source = pipe:///tmp/snapfifo?name=PlexAmp&sampleformat=48000:16:2&mode=create
 #filter = *:info
 #
 ###############################################################################
+"""
+
+
+def render_asound() -> str:
+    """Renders the ALSA (asound) configuration file.
+
+    Returns
+    -------
+    `str`
+        The rendered ALSA configuration.
+    """
+    return r"""
+pcm.snapcast_format {
+    type plug
+    slave {
+        pcm "snapcast_raw"
+        format "S16_LE"
+        rate 48000
+        channels 2
+    }
+}
+
+pcm.snapcast_raw {
+    type file
+    slave.pcm "null"
+    file "/tmp/snapfifo"
+    format "raw"
+}
+
+pcm.plexamp_output {
+    type plug
+    slave.pcm "snapcast_format"
+    hint {
+        show on
+        description "Snapcast"
+    }
+}
+
+"""

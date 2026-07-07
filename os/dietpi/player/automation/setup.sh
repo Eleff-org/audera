@@ -3,20 +3,22 @@
 # Exit immediately if a command exits with a non-zero status
 set -e
 
-# Import DietPi global functions
-# source "/boot/dietpi/func/dietpi-globals"
-
-# Setup color formatting
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-RESET='\033[0m'
-
 # Parse arguments
 if [ -n "$1" ]; then
     GIT_BRANCH="$1"
 else
     GIT_BRANCH="main"
 fi
+
+AUDIO_DEVICE="$2"
+
+# Fetch and load shared config-injection helpers
+curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
+source /tmp/audera_config_lib.sh
+
+# Fetch and load shared install/setup helpers
+curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/common.sh" -o /tmp/audera_common_lib.sh
+source /tmp/audera_common_lib.sh
 
 # Variables
 GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
@@ -27,34 +29,20 @@ CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
 CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
 CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 
-AUTOSTART_DIRECTORY="/var/lib/dietpi/dietpi-autostart"
-AUTOSTART_SCRIPT="$AUTOSTART_DIRECTORY/custom.sh"
 
 # Start console logging
 
-# The logo must be wrapped in single quotes ' ' to avoid escaping characters
-#   due to the nature of having double backslashes, like '\\' in the logo
-
-echo ' ________  ___  ___  ________  _______  ________  ________      '
-echo '|\   __  \|\  \|\  \|\   ___ \|\   ___\|\   __  \|\   __  \     '
-echo '\ \  \|\  \ \  \\\  \ \  \_|\ \ \  \__|\ \  \|\  \ \  \|\  \    '
-echo ' \ \   __  \ \  \\\  \ \  \ \\ \ \   __\\ \      /\ \   __  \   '
-echo '  \ \  \ \  \ \  \\\  \ \  \_\\ \ \  \_|_\ \  \  \ \ \  \ \  \  '
-echo '   \ \__\ \__\ \______/\ \______/\ \______\ \__\\ _\\ \__\ \__\ '
-echo '    \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__| '
+print_logo
 echo
 echo ">>> Running the Audera player setup & installation..."
 echo
 echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/player/automation/setup.sh}."
 
 # Ensure the script is running as root
-echo
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}*** CRITICAL: The setup-script must be run as {sudo}.${RESET}"
-    exit 1
-fi
+require_root
 
 # Install build packages
+echo
 echo ">>> Installing build packages"
 apt-get update && \
 apt-get install -y \
@@ -77,40 +65,36 @@ echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 # index=7 keeps the loopback off hw:0 so physical card indices are stable
 echo
 echo ">>> Enabling ALSA loopback module"
-echo "options snd-aloop index=7" > /etc/modprobe.d/snd-aloop.conf
-echo "snd-aloop" > /etc/modules-load.d/snd-aloop.conf
-modprobe snd-aloop
+setup_alsa_loopback
 echo -e "[  ${GREEN}OK${RESET}  ] ALSA loopback module enabled"
+
+# Configure audio device dtoverlay (opt-in; leaves existing dtoverlay untouched if unset)
+echo
+configure_audio_device "$AUDIO_DEVICE"
 
 # Install CamillaDSP
 echo
 echo ">>> Installing CamillaDSP v${CAMILLADSP_VERSION}"
-wget -q "$CAMILLADSP_URL" -O "/tmp/${CAMILLADSP_ARCHIVE}"
-tar -xzf "/tmp/${CAMILLADSP_ARCHIVE}" -C /usr/local/bin/
-chmod +x /usr/local/bin/camilladsp
-rm "/tmp/${CAMILLADSP_ARCHIVE}"
-mkdir -p "$CAMILLADSP_CONFIG_DIR"
+install_camilladsp "$CAMILLADSP_VERSION"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP installed successfully"
 
 # Install uv
 echo
 echo ">>> Installing uv"
-if ! command -v uv &> /dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
-fi
+install_uv
 echo -e "[  ${GREEN}OK${RESET}  ] uv installed successfully"
 
 # Install audera CLI
 echo
 echo ">>> Installing audera"
-UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall "git+${GIT_REPO_URL}@${GIT_BRANCH}"
-export PATH="/usr/local/bin:$PATH"
+install_audera_cli "$GIT_REPO_URL" "$GIT_BRANCH"
 echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 
 # Write CamillaDSP configuration
 echo
 echo ">>> Creating the CamillaDSP configuration"
-audera player conf camilladsp.yml > "$CAMILLADSP_CONFIG"
+audera player conf camilladsp.yml \
+    --playback-format "$(camilladsp_playback_format "$AUDIO_DEVICE")" > "$CAMILLADSP_CONFIG"
 chmod 644 "$CAMILLADSP_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
 
@@ -134,32 +118,28 @@ WantedBy=multi-user.target
 EOF
 
 # camilladsp service — captures from ALSA loopback, plays to physical DAC (hw:0)
-cat > /etc/systemd/system/camilladsp.service <<EOF
+write_camilladsp_service "$CAMILLADSP_CONFIG" "$CAMILLADSP_STATEFILE"
+
+# audera-player service — one-shot that starts audera player on boot
+cat > /etc/systemd/system/audera-player.service <<'EOF'
 [Unit]
-Description=CamillaDSP
-After=sound.target snapclient.service
+Description=Audera player
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/camilladsp $CAMILLADSP_CONFIG --statefile $CAMILLADSP_STATEFILE -p 1234 --address 0.0.0.0
-Restart=always
-RestartSec=5
+Type=oneshot
+ExecStart=/usr/local/bin/audera player start
+RemainAfterExit=no
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable snapclient camilladsp
-systemctl start snapclient camilladsp
+systemctl enable snapclient camilladsp audera-player
+systemctl start snapclient camilladsp audera-player
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
-
-# Configure os
-# echo
-# echo ">>> Configuring the operating-system"
-# echo ">>> Ensuring wifi availability without hdmi-output"
-# G_CONFIG_INJECT 'hdmi_force_hotplug=' 'hdmi_force_hotplug=1' /boot/config.txt
-# G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
-# echo -e "[  ${GREEN}OK${RESET}  ] os configured successfully"
 
 # Purge ifupdown
 
@@ -169,24 +149,13 @@ echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 echo
 echo ">>> Purging ifupdown"
-
-if systemctl is-active --quiet ifupdown; then
-    systemctl stop ifupdown
-    systemctl disable ifupdown
-fi
-
-apt-get purge -y ifupdown
-sed -i '/^[[:space:]]*[^#[:space:]]/s/^/# /' /etc/network/interfaces
+purge_ifupdown
 echo -e "[  ${GREEN}OK${RESET}  ] ifupdown purged successfully"
 
 # Derive hostname from MAC address
 echo
 echo ">>> Configuring hostname from MAC address"
-MAC=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address)
-SHORT=$(echo "$MAC" | tr -d ':' | tail -c 7)
-NEW_HOSTNAME="audera-${SHORT}"
-hostnamectl set-hostname "$NEW_HOSTNAME"
-echo "127.0.1.1   $NEW_HOSTNAME" >> /etc/hosts
+NEW_HOSTNAME=$(derive_hostname_from_mac)
 echo -e "[  ${GREEN}OK${RESET}  ] Hostname configured as {${NEW_HOSTNAME}}"
 
 # Setup network-manager
@@ -196,11 +165,12 @@ echo -e "[  ${GREEN}OK${RESET}  ] Hostname configured as {${NEW_HOSTNAME}}"
 
 echo
 echo ">>> Setting up network-manager"
-sed -i '/^\[ifupdown\]/,/^\[/s/managed=false/managed=true/' /etc/NetworkManager/NetworkManager.conf
-systemctl enable NetworkManager
-systemctl start NetworkManager
-nmcli networking on
+setup_network_manager
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
+
+# Disable WiFi power save globally
+disable_wifi_powersave
+echo -e "[  ${GREEN}OK${RESET}  ] WiFi power save disabled globally"
 
 # Setup dnsmasq
 echo
@@ -208,35 +178,18 @@ echo ">>> Setting up dnsmasq"
 systemctl disable dnsmasq
 echo -e "[  ${GREEN}OK${RESET}  ] dnsmasq setup successfully"
 
-# Configure alsa
+# Write boot banner
 echo
-echo ">>> Configuring alsa"
-SOUNDCARD=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-echo ">>> Assigning {$SOUNDCARD} as the default soundcard"
-/boot/dietpi/func/dietpi-set_hardware soundcard $SOUNDCARD
-echo -e "[  ${GREEN}OK${RESET}  ] alsa configured successfully"
-
-# Set up the autostart script
-echo
-echo ">>> Creating the custom autostart script"
-mkdir -p "$AUTOSTART_DIRECTORY"
-cat > "$AUTOSTART_SCRIPT" <<'EOF'
-#!/bin/bash
-# DietPi-AutoStart custom script
-# Location: /var/lib/dietpi/dietpi-autostart/custom.sh
-
-set -e
-
-exec audera player start
-EOF
-chmod +x "$AUTOSTART_SCRIPT"
-echo -e "[  ${GREEN}OK${RESET}  ] Custom autostart script created successfully"
+echo ">>> Writing boot banner"
+write_boot_banner
+echo -e "[  ${GREEN}OK${RESET}  ] Boot banner written"
 
 # Log
 echo
 echo -e "[  ${GREEN}OK${RESET}  ] The Audera player setup & installation completed successfully"
 
 # Restart
+echo
 echo ">>> Restarting the Audera player in 5 [sec.] ..."
 sleep 5
 reboot

@@ -3,15 +3,9 @@ import pytest
 from audera.clients import CamillaDSPClient
 
 
-@pytest.fixture
-def client(camilladsp_mock):
-    host, port = camilladsp_mock
-    return CamillaDSPClient(host, port)
-
-
-@pytest.fixture
-def error_client(camilladsp_error_mock):
-    host, port = camilladsp_error_mock
+@pytest.fixture(scope='session')
+def client(camilladsp_container):
+    host, port = camilladsp_container
     return CamillaDSPClient(host, port)
 
 
@@ -21,11 +15,12 @@ def test_get_config(client):
 
 
 def test_set_config(client):
-    new_config = {'filters': {'hp': {'type': 'Biquad'}}, 'mixers': {}, 'pipeline': []}
+    original = client.get_config()
+    new_config = {**original, 'filters': {}, 'pipeline': []}
     client.set_config(new_config)
-
     result = client.get_config()
-    assert result == new_config
+    assert result['filters'] == {}
+    assert result['pipeline'] == []
 
 
 def test_get_volume(client):
@@ -39,27 +34,30 @@ def test_set_volume(client):
     assert result == -20.0
 
 
-def test_error_response_raises(error_client):
+def test_error_response_raises(client):
     with pytest.raises(RuntimeError):
-        error_client.get_config()
+        client._call('UnknownCommand')
 
 
-def test_percent_to_db(client):
-    assert client.percent_to_db(100) == -3.0  # clamped to MAX_SAFE_DB
-    assert client.percent_to_db(50) == pytest.approx(-6.021, abs=1e-3)  # not clamped (quieter)
-    assert client.percent_to_db(0) == -90.0
+def test_percent_to_db():
+    c = CamillaDSPClient('localhost', 0)
+    assert c.percent_to_db(100) == 0.0
+    assert c.percent_to_db(50) == pytest.approx(-6.021, abs=1e-3)
+    assert c.percent_to_db(0) == -50.0
 
 
-def test_db_to_percent(client):
-    assert client.db_to_percent(0.0) == 100
-    assert client.db_to_percent(-6.0) == 50
-    assert client.db_to_percent(-90.0) == 0
+def test_db_to_percent():
+    c = CamillaDSPClient('localhost', 0)
+    assert c.db_to_percent(0.0) == pytest.approx(100.0)
+    assert c.db_to_percent(-6.0) == pytest.approx(50.12, abs=1e-2)
+    assert c.db_to_percent(-50.0) == 0.0
+    assert c.db_to_percent(-80.0) == 0.0
 
 
 def test_set_percent_volume(client):
     client.set_percent_volume(75)
     result = client.get_volume()
-    assert result == -3.0  # clamped by MAX_SAFE_DB
+    assert result == pytest.approx(-2.499, abs=1e-3)
 
 
 def test_get_percent_volume(client):

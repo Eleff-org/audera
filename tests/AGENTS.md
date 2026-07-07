@@ -30,7 +30,7 @@ import time and will not reflect a late patch.
 | File | Strategy |
 |---|---|
 | `test_snapserver.py` | Real snapserver in a Debian Bookworm testcontainer (requires Docker) |
-| `test_camilladsp.py` | In-process `websockets.sync.server` mock in a daemon thread |
+| `test_camilladsp.py` | Real CamillaDSP binary in a custom testcontainer (requires Docker) |
 | `test_plexamp.py` | `respx` HTTP mock intercepting `httpx` calls |
 
 ## Fixtures

@@ -1,0 +1,17 @@
+devices:
+  samplerate: 48000
+  chunksize: 1024
+  capture:
+    type: SignalGenerator
+    channels: 2
+    signal:
+      type: Sine
+      freq: 1000
+      level: -60
+  playback:
+    type: File
+    filename: /dev/null
+    channels: 2
+    format: S32LE
+filters: {}
+pipeline: []
