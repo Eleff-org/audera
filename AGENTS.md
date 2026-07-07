@@ -25,6 +25,10 @@ uv tool install git+https://github.com/Eleff-org/audera.git
 
 List @audera/ for the Python package layout.
 
+## Architecture decisions
+
+Significant technical and UX decisions are recorded in `docs/adrs/`. Consult the relevant ADR before changing behavior it covers, and add or update one when you make a decision of similar weight. List @docs/adrs/ for the catalog.
+
 ## Clients
 
 - **SnapserverClient** (`clients/snapserver.py`): JSON-RPC 2.0 over WebSocket at `ws://host:1780/jsonrpc` (HTTP server port). Opens a new connection per call. Methods: `get_status`, `get_clients`, `get_groups`, `set_client_volume`, `set_group_stream`, `set_group_mute`.

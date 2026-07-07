@@ -38,10 +38,10 @@ The downstream expansion from 16-bit to 32-bit (Snapclient `--sampleformat 48000
 
 ### What must change to raise the ceiling
 
-1. **`audera/conf/streamer/asound.conf`** — Change the `snapcast_format` plug's `format` from `S16_LE` to `S32_LE` (or remove the conversion entirely and let Snapserver handle resampling).
-2. **`audera/conf/streamer/snapserver.conf`** — Change `source = pipe:///tmp/snapfifo?name=PlexAmp&sampleformat=48000:16:2&mode=create` to `sampleformat=48000:32:2` (or higher, e.g. `96000:32:2`).
+1. **`audera/cli/conf.py` (`render_asound`)** — Change the `snapcast_format` plug's `format` from `S16_LE` to `S32_LE` (or remove the conversion entirely and let Snapserver handle resampling).
+2. **`audera/cli/conf.py` (`render_snapserver`)** — Change `source = pipe:///tmp/snapfifo?name=PlexAmp&sampleformat=48000:16:2&mode=create` to `sampleformat=48000:32:2` (or higher, e.g. `96000:32:2`).
 3. **Both `setup.sh` files** — The Snapclient `--sampleformat` flag must match the new Snapserver format.
-4. **Both `audera/conf/*/camilladsp.yml`** — If the sample rate changes, `devices.samplerate` must be updated to match.
+4. **`audera/cli/conf.py` (`render_camilladsp`)** — If the sample rate changes, `devices.samplerate` must be updated to match.
 
 These four locations must always be kept in sync. There is currently no runtime validation that they agree.
 

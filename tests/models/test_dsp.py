@@ -4,6 +4,8 @@ from audera.models.dsp import (
     _LOUDNESS_FILTER_KEY,
     _LOUDNESS_HIGH_BOOST,
     _LOUDNESS_LOW_BOOST,
+    _PREAMP_ATTENUATION_DB,
+    _PREAMP_FILTER_KEY,
     DSPConfig,
     apply_loudness,
     remove_loudness,
@@ -55,10 +57,36 @@ def test_apply_loudness_adds_pipeline_steps(applied_pipeline):
     assert len(loudness_steps) == 2
 
 
+def test_apply_loudness_inserts_preamp_filter(applied_pipeline):
+    assert _PREAMP_FILTER_KEY in applied_pipeline['filters']
+
+
+def test_apply_loudness_preamp_gain_value(applied_pipeline):
+    params = applied_pipeline['filters'][_PREAMP_FILTER_KEY]['parameters']
+    assert params['gain'] == _PREAMP_ATTENUATION_DB
+    assert params['gain'] == -_LOUDNESS_LOW_BOOST
+
+
+def test_apply_loudness_adds_preamp_pipeline_steps(applied_pipeline):
+    preamp_steps = [s for s in applied_pipeline['pipeline'] if _PREAMP_FILTER_KEY in s.get('names', [])]
+    assert len(preamp_steps) == 2
+
+
+def test_apply_loudness_orders_preamp_before_loudness(applied_pipeline):
+    names_in_order = [step['names'][0] for step in applied_pipeline['pipeline']]
+    assert names_in_order.index(_PREAMP_FILTER_KEY) < names_in_order.index(_LOUDNESS_FILTER_KEY)
+
+
 def test_remove_loudness_cleans_filter_and_steps(applied_pipeline):
     result = remove_loudness(applied_pipeline)
     assert _LOUDNESS_FILTER_KEY not in result['filters']
     assert all(_LOUDNESS_FILTER_KEY not in s.get('names', []) for s in result['pipeline'])
+
+
+def test_remove_loudness_cleans_preamp_filter_and_steps(applied_pipeline):
+    result = remove_loudness(applied_pipeline)
+    assert _PREAMP_FILTER_KEY not in result['filters']
+    assert all(_PREAMP_FILTER_KEY not in s.get('names', []) for s in result['pipeline'])
 
 
 def test_apply_then_remove_is_idempotent(empty_pipeline):
@@ -80,6 +108,13 @@ def test_apply_loudness_idempotent_steps(empty_pipeline):
     twice = apply_loudness(once)
     loudness_steps = [s for s in twice['pipeline'] if _LOUDNESS_FILTER_KEY in s.get('names', [])]
     assert len(loudness_steps) == 2
+
+
+def test_apply_loudness_idempotent_preamp_steps(empty_pipeline):
+    once = apply_loudness(empty_pipeline)
+    twice = apply_loudness(once)
+    preamp_steps = [s for s in twice['pipeline'] if _PREAMP_FILTER_KEY in s.get('names', [])]
+    assert len(preamp_steps) == 2
 
 
 def test_dsp_config_loudness_defaults():

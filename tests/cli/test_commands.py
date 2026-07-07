@@ -2,31 +2,45 @@
 
 from unittest.mock import MagicMock, patch
 
-from audera.cli import commands
+import pytest
+
+from audera.cli import commands, conf
 
 
-def test_streamer_conf_writes_to_stdout(capsys):
-    mock_ref = MagicMock()
-    mock_ref.read_text.return_value = 'streamer-config-content'
-
-    with patch('importlib.resources.files') as mock_files:
-        mock_files.return_value.joinpath.return_value.joinpath.return_value.joinpath.return_value = mock_ref
-        commands.streamer_conf(filename='snapserver.conf')
-
-    captured = capsys.readouterr()
-    assert captured.out == 'streamer-config-content'
+def test_streamer_conf_writes_rendered_snapserver(capsys):
+    commands.streamer_conf(filename='snapserver.conf')
+    assert capsys.readouterr().out == conf.render_snapserver()
 
 
-def test_player_conf_writes_to_stdout(capsys):
-    mock_ref = MagicMock()
-    mock_ref.read_text.return_value = 'player-config-content'
+def test_player_conf_writes_rendered_camilladsp(capsys):
+    commands.player_conf(filename='camilladsp.yml')
+    assert capsys.readouterr().out == conf.render_camilladsp()
 
-    with patch('importlib.resources.files') as mock_files:
-        mock_files.return_value.joinpath.return_value.joinpath.return_value.joinpath.return_value = mock_ref
-        commands.player_conf(filename='snapclient.conf')
 
-    captured = capsys.readouterr()
-    assert captured.out == 'player-config-content'
+def test_conf_unknown_filename_raises(capsys):
+    with pytest.raises(SystemExit):
+        commands.streamer_conf(filename='does-not-exist.conf')
+
+
+@pytest.mark.parametrize('emit', [commands.streamer_conf, commands.player_conf])
+def test_conf_camilladsp_default_format_is_s32le(emit, capsys):
+    emit(filename='camilladsp.yml')
+    out = capsys.readouterr().out
+    # Default leaves both capture and playback at S32LE.
+    assert out.count('format: S32LE') == 2
+    assert 'format: S16LE' not in out
+
+
+@pytest.mark.parametrize('emit', [commands.streamer_conf, commands.player_conf])
+def test_conf_camilladsp_s16le_only_changes_playback(emit, capsys):
+    emit(filename='camilladsp.yml', playback_format='S16LE')
+    out = capsys.readouterr().out
+    # Playback becomes S16LE; capture stays S32LE to match Snapclient's loopback.
+    assert '    format: S16LE\n' in out
+    assert out.count('format: S16LE') == 1
+    assert out.count('format: S32LE') == 1
+    # Comments are preserved end-to-end (scope + render fidelity).
+    assert 'HDMI STABILITY' in out
 
 
 def test_streamer_start_calls_app_run():

@@ -64,6 +64,12 @@ def main():
         epilog='Execute `audera streamer conf --help` for help.',
     )
     _STREAMER_CONF_PARSER.add_argument('filename', help='The config file name.', type=str)
+    _STREAMER_CONF_PARSER.add_argument(
+        '--playback-format',
+        choices=['S16LE', 'S32LE'],
+        default='S32LE',
+        help='CamillaDSP playback device format (camilladsp.yml only).',
+    )
     _STREAMER_CONF_PARSER.set_defaults(func=commands.streamer_conf)
 
     # player subject
@@ -93,6 +99,12 @@ def main():
         epilog='Execute `audera player conf --help` for help.',
     )
     _PLAYER_CONF_PARSER.add_argument('filename', help='The config file name.', type=str)
+    _PLAYER_CONF_PARSER.add_argument(
+        '--playback-format',
+        choices=['S16LE', 'S32LE'],
+        default='S32LE',
+        help='CamillaDSP playback device format (camilladsp.yml only).',
+    )
     _PLAYER_CONF_PARSER.set_defaults(func=commands.player_conf)
 
     _ARGS = _ARG_PARSER.parse_args()

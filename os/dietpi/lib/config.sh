@@ -47,7 +47,7 @@ configure_audio_device() {
             set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
             set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
             set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
-            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-kms-v3d'
+            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-fkms-v3d'
             set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
             set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
             ;;
@@ -69,4 +69,10 @@ configure_audio_device() {
             ;;
     esac
     echo -e "[  ${GREEN}OK${RESET}  ] Audio device configured successfully"
+}
+
+# Echoes the CamillaDSP playback format for the given audio device: S16LE for hdmi sinks
+#   (which reject S32LE), S32LE otherwise
+camilladsp_playback_format() {
+    if [ "$1" = 'hdmi' ]; then echo 'S16LE'; else echo 'S32LE'; fi
 }

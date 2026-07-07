@@ -56,16 +56,19 @@ def audera_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(scope='session')
-def snapserver_container():
+def snapserver_container(tmp_path_factory):
     from testcontainers.core.container import DockerContainer
     from testcontainers.core.image import DockerImage
 
-    conf_path = Path(__file__).parent.parent / 'audera/conf/streamer/snapserver.conf'
+    from audera.cli import conf
+
+    conf_file = tmp_path_factory.mktemp('conf') / 'snapserver.conf'
+    conf_file.write_text(conf.render_snapserver(), encoding='utf-8')
     context = Path(__file__).parent / 'docker' / 'snapserver'
     with DockerImage(path=str(context), tag='snapserver-test:latest') as image:
         with (
             DockerContainer(str(image))
-            .with_volume_mapping(str(conf_path), '/etc/snapserver.conf', 'ro')
+            .with_volume_mapping(str(conf_file), '/etc/snapserver.conf', 'ro')
             .with_exposed_ports(1780)
         ) as container:
             _wait_for_http(container, 1780, timeout=180)

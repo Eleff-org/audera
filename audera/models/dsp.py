@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field, field_validator
 _LOUDNESS_LOW_BOOST: float = 10.0
 _LOUDNESS_HIGH_BOOST: float = 6.0
 _LOUDNESS_FILTER_KEY: str = 'audera_loudness'
+_PREAMP_FILTER_KEY: str = 'audera_preamp_attenuation'
+_PREAMP_ATTENUATION_DB: float = -_LOUDNESS_LOW_BOOST
 
 
 class DSPConfig(BaseModel):
@@ -32,7 +34,7 @@ class DSPConfig(BaseModel):
     enabled: bool = True
     loudness_enabled: bool = False
     loudness_reference_level: float = -25.0
-    volume: int = 25
+    volume: float = 25.0
 
     @field_validator('loudness_reference_level', mode='before')
     @classmethod
@@ -62,10 +64,22 @@ class DSPConfig(BaseModel):
 
 
 def apply_loudness(pipeline: dict, reference_level_db: float = -25.0) -> dict:
-    """Insert the audera_loudness Loudness filter into pipeline."""
+    """Insert the audera_loudness Loudness filter into pipeline, preceded by a preamp
+    attenuation Gain filter that offsets the Loudness filter's worst-case low_boost so
+    the two together never exceed 0 dB of headroom.
+    """
     pipeline = dict(pipeline)
     filters = dict(pipeline.get('filters', {}))
     steps = list(pipeline.get('pipeline', []))
+    existing_names = {name for step in steps for name in step.get('names', [])}
+
+    filters[_PREAMP_FILTER_KEY] = {
+        'type': 'Gain',
+        'parameters': {'gain': _PREAMP_ATTENUATION_DB},
+    }
+    if _PREAMP_FILTER_KEY not in existing_names:
+        for channel in range(2):
+            steps.append({'type': 'Filter', 'channels': [channel], 'names': [_PREAMP_FILTER_KEY]})
 
     filters[_LOUDNESS_FILTER_KEY] = {
         'type': 'Loudness',
@@ -76,8 +90,6 @@ def apply_loudness(pipeline: dict, reference_level_db: float = -25.0) -> dict:
             'fader': 'Main',
         },
     }
-
-    existing_names = {name for step in steps for name in step.get('names', [])}
     if _LOUDNESS_FILTER_KEY not in existing_names:
         for channel in range(2):
             steps.append({'type': 'Filter', 'channels': [channel], 'names': [_LOUDNESS_FILTER_KEY]})
@@ -88,8 +100,14 @@ def apply_loudness(pipeline: dict, reference_level_db: float = -25.0) -> dict:
 
 
 def remove_loudness(pipeline: dict) -> dict:
-    """Remove the audera_loudness filter and its pipeline steps."""
+    """Remove the audera_loudness filter, its preamp attenuation Gain filter, and their pipeline steps."""
     pipeline = dict(pipeline)
-    pipeline['filters'] = {k: v for k, v in pipeline.get('filters', {}).items() if k != _LOUDNESS_FILTER_KEY}
-    pipeline['pipeline'] = [step for step in pipeline.get('pipeline', []) if _LOUDNESS_FILTER_KEY not in step.get('names', [])]
+    pipeline['filters'] = {
+        k: v for k, v in pipeline.get('filters', {}).items() if k not in (_LOUDNESS_FILTER_KEY, _PREAMP_FILTER_KEY)
+    }
+    pipeline['pipeline'] = [
+        step
+        for step in pipeline.get('pipeline', [])
+        if _LOUDNESS_FILTER_KEY not in step.get('names', []) and _PREAMP_FILTER_KEY not in step.get('names', [])
+    ]
     return pipeline

@@ -1,8 +1,9 @@
 """Audera commands"""
 
-import importlib.resources
 import sys
+from typing import Literal
 
+from audera.cli import conf
 from audera.services import netifaces
 
 
@@ -58,17 +59,39 @@ def player_start(**_) -> None:
         setup.run(role='player')
 
 
-def streamer_conf(filename: str, **_) -> None:
+def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE']) -> None:
+    """Writes a bundled config file, rendered from `audera.cli.conf`, to stdout.
+
+    Parameters
+    ----------
+    filename : `str`
+        The config file name to render.
+    playback_format : `Literal['S16LE', 'S32LE']`
+        The CamillaDSP playback device format (only applies to `camilladsp.yml`).
+    """
+    if filename == 'camilladsp.yml':
+        sys.stdout.write(conf.render_camilladsp(playback_format))
+    elif filename == 'snapserver.conf':
+        sys.stdout.write(conf.render_snapserver())
+    elif filename == 'asound.conf':
+        sys.stdout.write(conf.render_asound())
+    else:
+        raise SystemExit(f'Unknown config file: {filename!r}')
+
+
+def streamer_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', **_) -> None:
     """Prints a bundled streamer config file to stdout.
 
     Parameters
     ----------
     filename : `str`
-        The config file name within the streamer directory.
+        The config file name.
+    playback_format : `Literal['S16LE', 'S32LE']`
+        The CamillaDSP playback device format (only applies to `camilladsp.yml`).
 
     Help
     ----
-    usage: audera streamer conf <filename>
+    usage: audera streamer conf <filename> [--playback-format {S16LE,S32LE}]
 
     Execute `audera streamer --help` for help.
 
@@ -79,30 +102,30 @@ def streamer_conf(filename: str, **_) -> None:
     ```
 
     """
-    ref = importlib.resources.files('audera').joinpath('conf').joinpath('streamer').joinpath(filename)
-    sys.stdout.write(ref.read_text(encoding='utf-8'))
+    _emit_conf(filename, playback_format)
 
 
-def player_conf(filename: str, **_) -> None:
+def player_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', **_) -> None:
     """Prints a bundled player config file to stdout.
 
     Parameters
     ----------
     filename : `str`
-        The config file name within the player directory.
+        The config file name.
+    playback_format : `Literal['S16LE', 'S32LE']`
+        The CamillaDSP playback device format (only applies to `camilladsp.yml`).
 
     Help
     ----
-    usage: audera player conf <filename>
+    usage: audera player conf <filename> [--playback-format {S16LE,S32LE}]
 
     Execute `audera player --help` for help.
 
     Examples
     --------
     ``` console
-    audera player conf snapclient.conf > /etc/snapclient/snapclient.conf
+    audera player conf camilladsp.yml > /etc/camilladsp/config.yml
     ```
 
     """
-    ref = importlib.resources.files('audera').joinpath('conf').joinpath('player').joinpath(filename)
-    sys.stdout.write(ref.read_text(encoding='utf-8'))
+    _emit_conf(filename, playback_format)

@@ -41,22 +41,23 @@ def test_error_response_raises(client):
 
 def test_percent_to_db():
     c = CamillaDSPClient('localhost', 0)
-    assert c.percent_to_db(100) == -3.0
+    assert c.percent_to_db(100) == 0.0
     assert c.percent_to_db(50) == pytest.approx(-6.021, abs=1e-3)
-    assert c.percent_to_db(0) == -90.0
+    assert c.percent_to_db(0) == -50.0
 
 
 def test_db_to_percent():
     c = CamillaDSPClient('localhost', 0)
-    assert c.db_to_percent(0.0) == 100
-    assert c.db_to_percent(-6.0) == 50
-    assert c.db_to_percent(-90.0) == 0
+    assert c.db_to_percent(0.0) == pytest.approx(100.0)
+    assert c.db_to_percent(-6.0) == pytest.approx(50.12, abs=1e-2)
+    assert c.db_to_percent(-50.0) == 0.0
+    assert c.db_to_percent(-80.0) == 0.0
 
 
 def test_set_percent_volume(client):
     client.set_percent_volume(75)
     result = client.get_volume()
-    assert result == -3.0
+    assert result == pytest.approx(-2.499, abs=1e-3)
 
 
 def test_get_percent_volume(client):

@@ -18,7 +18,7 @@ from audera.dal import dsp as dsp_dal
 from audera.dal import settings as settings_dal
 from audera.models.dsp import DSPConfig, apply_loudness, remove_loudness
 from audera.models.settings import Settings
-from audera.ui import components
+from audera.ui import components, features
 
 load_dotenv()
 
@@ -33,11 +33,12 @@ _PLEX_HEADERS = {
 
 
 def _load_settings() -> Settings:
-    if settings_dal.exists():
-        return settings_dal.get()
-    return Settings(
-        plexamp_host=os.getenv('AUDERA_PLEXAMP_HOST', 'localhost'),
-        snapserver_host=os.getenv('AUDERA_SNAPSERVER_HOST', 'localhost'),
+    return settings_dal.get_or_create(
+        Settings(
+            plexamp_host=os.getenv('AUDERA_PLEXAMP_HOST', 'localhost'),
+            snapserver_host=os.getenv('AUDERA_SNAPSERVER_HOST', 'localhost'),
+            features=features.default_selections(),
+        )
     )
 
 
@@ -254,7 +255,7 @@ class Page:
 
     @ui.refreshable
     def _build_players_tab(self) -> None:
-        """Renders the Players tab — lists Snapcast clients with per-client volume and mute controls."""
+        """Renders the Players tab — lists Snapcast clients with per-client volume and mute/enable controls."""
         snap = _snapserver(self.settings)
         try:
             clients = snap.get_clients()
@@ -266,15 +267,40 @@ class Page:
             ui.label('No Snapcast clients found.').classes('text-gray-500')
             return
 
+        # Named after the feature-flag constant so flag-gated UI is obvious to the reader.
+        FF_DISABLED_VS_MUTE = features.flag_enabled(self.settings, features.PLAYER_SELECTION_KEY, features.FF_DISABLED_VS_MUTE)
+
         for client in connected_clients:
+            minimized = FF_DISABLED_VS_MUTE and client.muted
             with ui.card().classes('w-full mb-2'):
+                mute_cb = None
                 with ui.row().classes('items-center justify-between w-full'):
                     with ui.row().classes('items-center gap-2'):
-                        ui.label(client.name).classes('font-medium')
-                    ui.button(on_click=lambda c=client: self._open_settings_dialog(c)).props(
-                        'icon=edit_square flat dense round size=sm'
-                    ).classes('text-gray-400').mark('player-settings')
-                with ui.row().classes('items-center gap-4 w-full'):
+                        if FF_DISABLED_VS_MUTE:
+                            ui.switch(value=not client.muted, on_change=lambda e, c=client: self._on_enabled_change(c, e.value))
+                        # A disabled player is grayed out to reinforce the "disabled" state.
+                        name_label = ui.label(client.name).classes('font-medium')
+                        if minimized:
+                            name_label.classes('text-gray-400')
+                    with ui.row().classes('items-center gap-2'):
+                        if not FF_DISABLED_VS_MUTE:
+                            mute_cb = ui.checkbox(
+                                'Mute', value=client.muted, on_change=lambda e, c=client: self._on_mute_change(c.id, e.value)
+                            )
+                        settings_btn = (
+                            ui.button(on_click=lambda c=client: self._open_settings_dialog(c))
+                            .props('icon=edit_square flat dense round size=sm')
+                            .classes('text-gray-400')
+                            .mark('player-settings')
+                        )
+                        # Disable the settings icon for a disabled player, matching the intent of "disable".
+                        if minimized:
+                            settings_btn.set_enabled(False)
+
+                if minimized:
+                    continue
+
+                with ui.row(wrap=False).classes('items-center gap-4 w-full'):
                     host = client.host
                     dsp_config = dsp_dal.get_or_create(DSPConfig(id=client.id, player_id=client.id))
                     init_vol = dsp_config.volume
@@ -282,7 +308,26 @@ class Page:
                         _camilladsp(host).set_percent_volume(init_vol)
                     except Exception:
                         pass
-                    self._build_volume_controls(client.id, dsp_config, init_vol, client.muted, client.host)
+                    slider = self._build_volume_controls(client.id, dsp_config, init_vol, client.host)
+                    if mute_cb is not None:
+                        slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
+
+    async def _on_mute_change(self, client_id: str, muted: bool) -> None:
+        """Handles the Mute checkbox in the card header for the default Player Selection experience.
+
+        Does not refresh the Players tab afterward, so the volume slider keeps its live
+        drag state — see `_reset_snap_volume` for the same rationale.
+        """
+        await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=muted)
+
+    async def _on_enabled_change(self, client, enabled: bool) -> None:
+        """Handles the 'disabled' Player Selection experience's enable/disable switch.
+
+        Toggling off mutes the Snapcast client (the minimized-card state is derived from
+        `client.muted` on the next render); toggling on unmutes it.
+        """
+        await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client.id, 100, muted=not enabled)
+        self._build_players_tab.refresh()
 
     def _open_settings_dialog(self, client) -> None:
         """Opens a settings popup for renaming, latency, and Snapcast volume reset."""
@@ -394,44 +439,75 @@ class Page:
         self,
         client_id: str,
         dsp_config: DSPConfig,
-        initial_volume: int,
-        initial_muted: bool,
+        initial_volume: float,
         client_host: str = '',
-    ) -> None:
-        """Renders volume slider (now routed through CamillaDSP) and mute checkbox (Snapcast)."""
+    ) -> ui.slider:
+        """Renders a volume icon, slider, and live value label (routed through CamillaDSP).
 
-        async def _on_volume(e):
+        The slider is **always** a percent (0-100) control regardless of the 'volume'
+        feature selection, so the handle sits at the same physical spot when toggling
+        between modes. The selection only changes the value label: percent mode shows
+        `NN%`, dB mode shows `percent_to_db(value)` as `-N.N dB`. `DSPConfig.volume`
+        (percent) stays the single persisted, canonical value, and both modes drive
+        CamillaDSP through `set_percent_volume`.
+
+        Mute is anchored at the slider floor (`percent <= 0`, displayed as `MIN_DB` in dB
+        mode), never on lossy zero-rounding, so a mid-range edit never silently mutes the
+        client on the next refresh. The seed is step-aligned to the integer percent slider
+        so the periodic refresh does not fire a phantom `update:model-value`.
+
+        Returns the `ui.slider` element so the caller can bind its enabled state to the
+        Mute checkbox built alongside it in the card header.
+        """
+        camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
+        # Named after the feature-flag constant so flag-gated UI is obvious to the reader.
+        FF_VOLUME_PERC_OR_DB = features.flag_enabled(self.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
+
+        async def _persist_and_sync(percent: float) -> None:
+            dsp_dal.update(dsp_config.model_copy(update={'volume': percent}))
+            muted = percent <= 0
+            await asyncio.to_thread(
+                _snapserver(self.settings).set_client_volume,
+                client_id,
+                0 if muted else 100,
+                muted=muted,
+            )
+
+        async def _on_volume_percent(e):
             percent = int(e.value)
-            camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
             try:
                 await asyncio.to_thread(camilla.set_percent_volume, percent)
             except Exception:
                 pass
-            dsp_dal.update(dsp_config.model_copy(update={'volume': percent}))
-            await asyncio.to_thread(
-                _snapserver(self.settings).set_client_volume,
-                client_id,
-                0 if percent == 0 else 100,
-                muted=(percent == 0),
-            )
+            await _persist_and_sync(percent)
 
-        async def _on_mute(e):
-            await asyncio.to_thread(_snapserver(self.settings).set_client_volume, client_id, 100, muted=e.value)
+        ui.icon('volume_up').classes('text-gray-400')
+        slider = ui.slider(min=0, max=100, step=1, value=int(round(initial_volume)), on_change=_on_volume_percent).classes(
+            'grow'
+        )
+        # Fixed width + right-align keeps the slider length constant as the label text
+        # changes digit count (e.g. -9.0 dB -> -10.0 dB), so the handle doesn't shift.
+        value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap text-right w-16')
+        if FF_VOLUME_PERC_OR_DB:
+            value_label.bind_text_from(slider, 'value', backward=lambda v: f'{camilla.percent_to_db(v):.1f} dB')
+        else:
+            value_label.bind_text_from(slider, 'value', backward=lambda v: f'{int(v)}%')
 
-        slider = ui.slider(min=0, max=100, value=initial_volume, on_change=_on_volume).classes('w-48')
-        mute_cb = ui.checkbox('Mute', value=initial_muted, on_change=_on_mute)
-        slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
+        return slider
 
     def _build_settings_tab(self) -> None:
-        """Renders the Settings tab — configure service hosts and persist to ~/.audera/settings.json."""
-        plexamp_input = ui.input('PlexAmp Host', value=self.settings.plexamp_host).classes('w-64')
-        snapserver_input = ui.input('Snapserver Host', value=self.settings.snapserver_host).classes('w-64')
-        status_label = ui.label('').classes('text-sm text-gray-500')
+        """Renders the Settings tab — one single-select button group per registered UX feature."""
+        ui.label('Features').classes('text-lg font-medium mb-2')
+        for feature in features.FEATURES:
+            ui.label(feature.label).classes('text-sm text-gray-500')
+            ui.toggle(
+                {option.value: option.label for option in feature.options},
+                value=features.selected(self.settings, feature.key),
+                on_change=lambda e, key=feature.key: self._on_feature_change(key, e.value),
+            ).classes('mb-4')
 
-        def _save():
-            self.settings.plexamp_host = plexamp_input.value
-            self.settings.snapserver_host = snapserver_input.value
-            settings_dal.save(self.settings)
-            status_label.set_text('Settings saved.')
-
-        ui.button('Save', on_click=_save).props('flat dense')
+    def _on_feature_change(self, key: str, value: str) -> None:
+        """Persists a feature-flag selection and refreshes the Players tab to reflect it."""
+        self.settings.features[key] = value
+        settings_dal.save(self.settings)
+        self._build_players_tab.refresh()
