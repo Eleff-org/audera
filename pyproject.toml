@@ -23,6 +23,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "httpx>=0.28.1",
     "websockets>=16.0",
+    "camilladsp-plot @ git+https://github.com/HEnquist/pycamilladsp-plot@v3.0.2",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,9 @@ Releases = "https://github.com/Eleff-org/audera/releases"
 
 [project.scripts]
 audera = "audera.cli.audera:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["audera"]
