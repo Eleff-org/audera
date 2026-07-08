@@ -9,7 +9,6 @@ from nicegui.testing import User
 
 import audera.ui.streamer.pages as streamer_pages
 from audera.clients import CamillaDSPClient, SnapserverClient
-from audera.dal import dsp as dsp_dal
 from audera.dal import settings as settings_dal
 from audera.models.player import Player
 from audera.models.settings import Settings
@@ -43,14 +42,19 @@ def mock_snapserver_with_muted_client(monkeypatch):
 
 @pytest.fixture
 def mock_camilladsp(monkeypatch):
+    # Stateful, like the real daemon: get returns the last-set percent, seeded at 80.
+    # The players tab reseeds the slider from get_percent_volume on every (re-)render,
+    # so a static mock would revert a drag the moment the refresh timer fires.
     calls = {}
+    state = {'volume': 80}
 
     def _set_percent_volume(self, percent: int) -> None:
         calls['set_percent_volume'] = percent
+        state['volume'] = percent
 
     def _get_percent_volume(self) -> int:
         calls['get_percent_volume'] = True
-        return 80
+        return state['volume']
 
     def _set_volume(self, level: float) -> None:
         calls['set_volume'] = level
@@ -58,21 +62,6 @@ def mock_camilladsp(monkeypatch):
     monkeypatch.setattr(CamillaDSPClient, 'set_percent_volume', _set_percent_volume)
     monkeypatch.setattr(CamillaDSPClient, 'get_percent_volume', _get_percent_volume)
     monkeypatch.setattr(CamillaDSPClient, 'set_volume', _set_volume)
-    return calls
-
-
-@pytest.fixture
-def mock_camilladsp_config(monkeypatch):
-    calls = {}
-
-    def _get_config(self):
-        return {'filters': {}, 'pipeline': []}
-
-    def _set_config(self, config):
-        calls['set_config'] = config
-
-    monkeypatch.setattr(CamillaDSPClient, 'get_config', _get_config)
-    monkeypatch.setattr(CamillaDSPClient, 'set_config', _set_config)
     return calls
 
 
@@ -85,6 +74,18 @@ def mock_snapserver_volume(monkeypatch):
 
     monkeypatch.setattr(SnapserverClient, 'set_client_volume', _set_client_volume)
     return calls
+
+
+@pytest.fixture
+def db_volume_mode(audera_home):
+    """Seeds settings so the volume control renders in dB mode (rather than percent)."""
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
+        )
+    )
 
 
 async def test_index_renders_tabs(audera_home, mock_snapserver_empty, monkeypatch, user: User):
@@ -264,18 +265,18 @@ async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, u
     )
 
 
-async def test_volume_slider_seeded_from_dal(
+async def test_volume_slider_seeded_from_daemon(
     audera_home,
     mock_snapserver_with_client,
     mock_camilladsp,
-    monkeypatch,
     user: User,
 ):
-    monkeypatch.setattr(streamer_pages, '_camilladsp', lambda h: CamillaDSPClient(h))
     Page().load()
     await user.open('/')
-    # Volume is read from DAL (default 25) and pushed to CamillaDSP via set_percent_volume
-    assert mock_camilladsp.get('set_percent_volume') == 25
+    # Volume seeds from the daemon via get_percent_volume — no app-side replica, no
+    # push-on-render.
+    assert mock_camilladsp.get('get_percent_volume') is True
+    assert mock_camilladsp.get('set_percent_volume') is None
 
 
 async def test_players_tab_volume_percent_mode_shows_icon_and_label(
@@ -284,23 +285,16 @@ async def test_players_tab_volume_percent_mode_shows_icon_and_label(
     Page().load()
     await user.open('/')
     await user.should_see(kind=ui.icon, content='volume_up')
-    await user.should_see('25%')
+    await user.should_see('80%')  # seeded from the daemon's get_percent_volume
 
 
 async def test_players_tab_volume_db_mode_shows_icon_and_label(
-    audera_home, mock_snapserver_with_client, mock_camilladsp, user: User
+    audera_home, mock_snapserver_with_client, mock_camilladsp, db_volume_mode, user: User
 ):
-    settings_dal.create(
-        Settings(
-            plexamp_host='localhost',
-            snapserver_host='localhost',
-            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
-        )
-    )
     Page().load()
     await user.open('/')
     await user.should_see(kind=ui.icon, content='volume_up')
-    await user.should_see('-12.0 dB')  # percent_to_db(25) == -12.041...
+    await user.should_see('-1.9 dB')  # percent_to_db(80) == -1.938...
 
 
 async def test_players_tab_volume_percent_slider_change_persists_and_updates_label(
@@ -315,19 +309,11 @@ async def test_players_tab_volume_percent_slider_change_persists_and_updates_lab
     assert mock_camilladsp.get('set_percent_volume') == 60
     assert mock_camilladsp.get('set_volume') is None
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
-    assert dsp_dal.get('abc123').volume == 60
 
 
 async def test_players_tab_volume_db_slider_change_persists_percent_and_shows_db(
-    audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, user: User
+    audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, db_volume_mode, user: User
 ):
-    settings_dal.create(
-        Settings(
-            plexamp_host='localhost',
-            snapserver_host='localhost',
-            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
-        )
-    )
     Page().load()
     await user.open('/')
     # dB mode uses the same percent (0-100) slider; only the label shows dB.
@@ -338,19 +324,11 @@ async def test_players_tab_volume_db_slider_change_persists_percent_and_shows_db
     assert mock_camilladsp.get('set_percent_volume') == 50
     assert mock_camilladsp.get('set_volume') is None
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
-    assert dsp_dal.get('abc123').volume == 50
 
 
 async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
-    audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, user: User
+    audera_home, mock_snapserver_with_client, mock_camilladsp, mock_snapserver_volume, db_volume_mode, user: User
 ):
-    settings_dal.create(
-        Settings(
-            plexamp_host='localhost',
-            snapserver_host='localhost',
-            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
-        )
-    )
     Page().load()
     await user.open('/')
     # Floor is 0% (displayed as MIN_DB in dB mode); dragging there mutes via Snapcast.
@@ -358,19 +336,11 @@ async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
         user.find(kind=ui.slider).elements.pop().value = 0
     await asyncio.sleep(0.1)
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 0, True)
-    assert dsp_dal.get('abc123').volume == 0
 
 
 async def test_players_tab_volume_db_slider_is_percent_scaled(
-    audera_home, mock_snapserver_with_client, mock_camilladsp, user: User
+    audera_home, mock_snapserver_with_client, mock_camilladsp, db_volume_mode, user: User
 ):
-    settings_dal.create(
-        Settings(
-            plexamp_host='localhost',
-            snapserver_host='localhost',
-            features={features.VOLUME_KEY: features.FF_VOLUME_PERC_OR_DB},
-        )
-    )
     Page().load()
     await user.open('/')
     # dB mode keeps the percent (0-100) scale so the handle position matches percent mode.
@@ -401,47 +371,10 @@ async def test_reset_snap_volume_button(audera_home, mock_snapserver_with_client
     await user.should_see('Snapcast Volume')
 
 
-async def test_settings_dialog_shows_loudness_controls(audera_home, mock_snapserver_with_client, user: User):
+async def test_settings_dialog_no_longer_shows_loudness(audera_home, mock_snapserver_with_client, user: User):
     Page().load()
     await user.open('/')
     user.find(marker='player-settings').click()
-    await user.should_see('Loudness')
-    await user.should_see('Reference level (dB)')
-
-
-async def test_loudness_toggle_enables_and_persists(
-    audera_home,
-    mock_snapserver_with_client,
-    mock_camilladsp_config,
-    user: User,
-):
-    Page().load()
-    await user.open('/')
-    user.find(marker='player-settings').click()
-    user.find(kind=ui.switch).click()
-    await asyncio.sleep(0.1)
-    assert mock_camilladsp_config.get('set_config') is None
-    user.find('Save').click()
-    await asyncio.sleep(0.1)
-    assert mock_camilladsp_config.get('set_config') is not None
-    assert dsp_dal.get(mock_snapserver_with_client.id).loudness_enabled is True
-
-
-async def test_loudness_toggle_passes_reference_level_to_config(
-    audera_home,
-    mock_snapserver_with_client,
-    mock_camilladsp_config,
-    user: User,
-):
-    Page().load()
-    await user.open('/')
-    user.find(marker='player-settings').click()
-    user.find(kind=ui.switch).click()
-    await asyncio.sleep(0.1)
-    assert mock_camilladsp_config.get('set_config') is None
-    user.find('Save').click()
-    await asyncio.sleep(0.1)
-    config = mock_camilladsp_config.get('set_config')
-    assert config is not None
-    params = config['filters']['audera_loudness']['parameters']
-    assert params['reference_level'] == -25.0
+    await user.should_see('Snapcast Volume')
+    await user.should_not_see('Loudness')
+    await user.should_not_see('Reference level (dB)')

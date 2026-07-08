@@ -46,6 +46,16 @@ def test_percent_to_db():
     assert c.percent_to_db(0) == -50.0
 
 
+def test_default_percent_volume_matches_shell_gain_literal():
+    """Guards the Python constant against the hard-coded `--gain -12.04` shell literal.
+
+    `os/dietpi/lib/common.sh:write_camilladsp_service` seeds a fresh statefile with
+    `--gain -12.04` (= percent_to_db(25)); the two must never silently drift.
+    """
+    c = CamillaDSPClient('localhost', 0)
+    assert round(c.percent_to_db(CamillaDSPClient.DEFAULT_PERCENT_VOLUME), 2) == -12.04
+
+
 def test_db_to_percent():
     c = CamillaDSPClient('localhost', 0)
     assert c.db_to_percent(0.0) == pytest.approx(100.0)

@@ -29,6 +29,7 @@ class CamillaDSPClient:
 
     MIN_DB: float = -50.0
     MAX_DB: float = 0.0
+    DEFAULT_PERCENT_VOLUME: int = 25
 
     def _call(self, command: str, value=None) -> dict:
         """Sends a command to CamillaDSP and returns the response.

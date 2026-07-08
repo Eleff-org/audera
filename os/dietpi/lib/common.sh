@@ -61,7 +61,7 @@ After=sound.target snapclient.service
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/camilladsp $config_path --statefile $statefile_path -p 1234 --address 0.0.0.0
+ExecStart=/usr/local/bin/camilladsp $config_path --statefile $statefile_path --gain -12.04 -p 1234 --address 0.0.0.0
 Restart=always
 RestartSec=5
 

@@ -1,5 +1,15 @@
+import json
+import os
+
 import audera.dal.players as players
 from audera.models.player import Player
+
+
+def _write_player_file(id: str, data: dict) -> None:
+    """Writes a hand-crafted player config file directly to the players DAL path."""
+    os.makedirs(players.PATH, exist_ok=True)
+    with open(os.path.join(players.PATH, f'{id}.json'), 'w') as f:
+        json.dump({'player': data}, f)
 
 
 def _make_player(id='abc123', host='192.168.1.50', connected=True) -> Player:
@@ -95,3 +105,42 @@ def test_get_all_connected_players(audera_home):
     result = players.get_all_connected_players()
     assert len(result) == 1
     assert result[0].id == 'on'
+
+
+def test_get_all_players_unions_mixed_old_and_new_files(audera_home):
+    """Guards the DuckDB read_json_auto schema-union path across mixed old/new files.
+
+    An old player file predates the `dsp_id` column; a new one carries it. Reading both
+    back must not raise, and the old row's `dsp_id` must surface as '' (coerced from the
+    NULL DuckDB fills in for the missing column).
+    """
+    _write_player_file(
+        'old',
+        {
+            'id': 'old',
+            'host': '192.168.1.1',
+            'port': 1704,
+            'connected': True,
+            'volume': 80,
+            'muted': False,
+            'group_id': '',
+        },
+    )
+    _write_player_file(
+        'new',
+        {
+            'id': 'new',
+            'host': '192.168.1.2',
+            'port': 1704,
+            'connected': True,
+            'volume': 80,
+            'muted': False,
+            'group_id': '',
+            'dsp_id': 'dsp-1',
+        },
+    )
+
+    result = {p.id: p for p in players.get_all_players()}
+    assert set(result) == {'old', 'new'}
+    assert result['old'].dsp_id == ''
+    assert result['new'].dsp_id == 'dsp-1'
