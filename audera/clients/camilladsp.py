@@ -9,6 +9,9 @@ import audera
 
 _CMD_GET_CONFIG_JSON = 'GetConfigJson'
 _CMD_SET_CONFIG_JSON = 'SetConfigJson'
+_CMD_VALIDATE_CONFIG = 'ValidateConfig'
+_CMD_GET_CLIPPED_SAMPLES = 'GetClippedSamples'
+_CMD_RESET_CLIPPED_SAMPLES = 'ResetClippedSamples'
 
 
 class CamillaDSPClient:
@@ -72,6 +75,42 @@ class CamillaDSPClient:
         """
         # SetConfigJson expects the config as a JSON string, not a dict
         self._call(_CMD_SET_CONFIG_JSON, json.dumps(config))
+
+    def validate_config(self, config: dict) -> None:
+        """Validates a CamillaDSP pipeline configuration without applying it.
+
+        Gates every Save: the compiled pipeline is checked by the daemon before it is
+        pushed via `set_config`, so an invalid config never reaches the running graph.
+        Raises `RuntimeError` when the daemon reports any non-`Ok` result.
+
+        Parameters
+        ----------
+        config: `dict`
+            The CamillaDSP pipeline configuration.
+        """
+        # ValidateConfig expects a config string; JSON is a subset of YAML, so a JSON
+        # dict validates directly (ValidateConfigJson is v4+ and unavailable in v3.0.1).
+        response = self._call(_CMD_VALIDATE_CONFIG, json.dumps(config))
+        inner = response.get(_CMD_VALIDATE_CONFIG, response) if isinstance(response, dict) else response
+        # `_call` only raises on a literal `result == 'Error'`, but any non-`Ok` result
+        # (e.g. a validation message / ConfigValidationError) means the config is invalid.
+        if isinstance(inner, dict) and inner.get('result') != 'Ok':
+            raise RuntimeError('CamillaDSP validation failed [%s]: %s' % (_CMD_VALIDATE_CONFIG, inner))
+
+    def get_clipped_samples(self) -> int:
+        """Returns the number of clipped samples since the last reset."""
+        response = self._call(_CMD_GET_CLIPPED_SAMPLES)
+        if isinstance(response, dict):
+            val = response.get(_CMD_GET_CLIPPED_SAMPLES)
+            if isinstance(val, dict):
+                val = val.get('value', 0)
+            if isinstance(val, (int, float)):
+                return int(val)
+        return 0
+
+    def reset_clipped_samples(self) -> None:
+        """Zeroes the daemon's clipped-samples counter."""
+        self._call(_CMD_RESET_CLIPPED_SAMPLES)
 
     def get_volume(self) -> float:
         """Returns the current CamillaDSP volume level in dB."""
