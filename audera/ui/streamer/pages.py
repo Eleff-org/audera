@@ -6,7 +6,7 @@ import socket
 import subprocess
 import uuid
 from importlib.metadata import version as _pkg_version
-from typing import Literal, Optional
+from typing import Literal, Optional, get_args
 
 import httpx
 from dotenv import load_dotenv
@@ -14,11 +14,20 @@ from nicegui import ui
 
 import audera
 from audera.clients import CamillaDSPClient, SnapserverClient
+from audera.dal import dsp as dsp_dal
+from audera.dal import players as players_dal
 from audera.dal import settings as settings_dal
+from audera.domains.dsp import compile_pipeline, loudness_preset, response_peak_db
+from audera.models.dsp import Band
 from audera.models.settings import Settings
 from audera.ui import components, features
 
 load_dotenv()
+
+# Derived from the model literal so the editor's type choices can never drift from
+# `audera.models.dsp.Band`. Pass filters carry no gain, so their gain field is disabled.
+_BAND_TYPES = list(get_args(Band.model_fields['type'].annotation))
+_PASS_TYPES = {'Lowpass', 'Highpass'}
 
 _PLEX_CLIENT_ID = str(uuid.uuid4())
 _PLEX_HEADERS = {
@@ -129,6 +138,7 @@ class Page:
     def load(self) -> None:
         """Registers page routes."""
         ui.page('/')(self.index)
+        ui.page('/player/{player_id}/dsp')(self.dsp)
 
     def index(self) -> None:
         """Renders the main dashboard page."""
@@ -152,6 +162,224 @@ class Page:
                 self._build_players_tab.refresh()
 
         ui.timer(10.0, _maybe_refresh)
+
+    def dsp(self, player_id: str) -> None:
+        """Renders the full-page parametric-EQ editor for a single player.
+
+        Bands are the source of truth; they are compiled to a live CamillaDSP pipeline
+        on Save. Per-page edit state lives in closures (not on `self`, which is shared
+        across every connected client): `state['saved']` mirrors the persisted config and
+        `state['staged']` is the working copy that is compiled, validated, and pushed on
+        Save. Scalar field edits mutate a band in place and only recompute the dirty
+        indicator + headroom; structural changes (add/delete/type/preset/reset) refresh
+        the band table.
+        """
+        components.header.render(audera.NAME, 'Streamer')
+
+        snap = _snapserver(self.settings)
+        try:
+            clients = snap.get_clients()
+        except Exception:
+            clients = []
+        live = next((client for client in clients if client.id == player_id), None)
+
+        if live is None:
+            with ui.column().classes('w-full gap-2 p-4'):
+                ui.link('‹ Players', '/')
+                ui.label('Player not found or unreachable.').classes('text-gray-500')
+            return
+
+        # `SnapserverClient.get_clients` always reports `dsp_id=''` (it has no view of the
+        # persisted FK), so recover the link from the players DAL before resolving —
+        # otherwise `resolve_for_player` would re-mint an orphan config on every open.
+        persisted = players_dal.get(player_id) if players_dal.exists(player_id) else live
+        saved = dsp_dal.resolve_for_player(persisted)
+        state = {'saved': saved, 'staged': saved.model_copy(deep=True)}
+
+        def _dirty() -> bool:
+            return state['staged'] != state['saved']
+
+        def _mark_changed() -> None:
+            """Recomputes the dirty indicator, headroom read-out, and band count."""
+            dirty_label.set_visibility(_dirty())
+            peak = response_peak_db(state['staged'])
+            if peak <= 0:
+                headroom_label.set_text(f'headroom ok · {abs(peak):.1f} dB to spare')
+                headroom_label.classes(replace='text-xs text-green-500')
+                protect_btn.set_visibility(False)
+            else:
+                headroom_label.set_text(f'clipping risk · {peak:.1f} dB over 0 dBFS')
+                headroom_label.classes(replace='text-xs text-amber-500')
+                protect_btn.set_visibility(True)
+            count_label.set_text(f'Bands ({len(state["staged"].bands)})')
+
+        def _on_preamp(e) -> None:
+            if e.value is not None:
+                state['staged'].preamp_db = float(e.value)
+            _mark_changed()
+
+        def _on_enabled(band: Band, value: bool) -> None:
+            band.enabled = bool(value)
+            _mark_changed()
+
+        def _on_type(band: Band, value: str) -> None:
+            # `value` is constrained to `_BAND_TYPES` by the select; the assignment is
+            # unvalidated (Band sets no `validate_assignment`), so the literal narrows fine.
+            band.type = value  # type: ignore
+            _band_table.refresh()  # the gain field's enabled state depends on the type
+            _mark_changed()
+
+        def _on_freq(band: Band, value) -> None:
+            if value is not None:
+                band.freq = float(value)
+            _mark_changed()
+
+        def _on_gain(band: Band, value) -> None:
+            if value is not None:
+                band.gain = float(value)
+            _mark_changed()
+
+        def _on_q(band: Band, value) -> None:
+            if value is not None:
+                band.q = float(value)
+            _mark_changed()
+
+        def _add_band() -> None:
+            state['staged'].bands.append(Band(id=uuid.uuid4().hex, type='Peaking', freq=1000.0, gain=0.0, q=0.707))
+            _band_table.refresh()
+            _mark_changed()
+
+        def _remove_band(band: Band) -> None:
+            state['staged'].bands = [b for b in state['staged'].bands if b.id != band.id]
+            _band_table.refresh()
+            _mark_changed()
+
+        def _apply_preset(kind: Literal['loudness', 'flat']) -> None:
+            if kind == 'loudness':
+                state['staged'].bands.extend(loudness_preset())
+            else:
+                state['staged'].bands = []
+            _band_table.refresh()
+            _mark_changed()
+
+        def _on_reset() -> None:
+            state['staged'] = state['saved'].model_copy(deep=True)
+            preamp_field.value = state['staged'].preamp_db
+            _band_table.refresh()
+            _mark_changed()
+
+        def _on_protect() -> None:
+            # Attenuate the pre-amp by the combined peak, driving the response to ~0 dBFS.
+            state['staged'].preamp_db -= response_peak_db(state['staged'])
+            preamp_field.value = state['staged'].preamp_db
+            _mark_changed()
+
+        async def _on_save() -> None:
+            """Compiles → validates → pushes the live pipeline, then persists the config.
+
+            Pattern B (live apply, no restart): the daemon owns volume and `SetConfigJson`
+            leaves the fader untouched, so no volume snapshot/restore is needed. The
+            `dsp_id` FK was already persisted by `resolve_for_player` at page load, so Save
+            only updates the config file.
+            """
+            camilla = _camilladsp(live.host)
+            try:
+                current = await asyncio.to_thread(camilla.get_config)
+                compiled = compile_pipeline(current, state['staged'])
+                await asyncio.to_thread(camilla.validate_config, compiled)  # gate; raises on invalid
+                await asyncio.to_thread(camilla.set_config, compiled)
+            except Exception as exc:
+                ui.notify(f'Save failed: {exc}', type='negative', position='top-right')
+                return
+            await asyncio.to_thread(dsp_dal.update, state['staged'])
+            try:
+                await asyncio.to_thread(camilla.reset_clipped_samples)  # start the clip watch fresh
+            except Exception:
+                pass
+            state['saved'] = state['staged'].model_copy(deep=True)
+            _mark_changed()
+            ui.notify('Saved', type='positive', position='top-right')
+
+        async def _poll_clips() -> None:
+            try:
+                count = await asyncio.to_thread(_camilladsp(live.host).get_clipped_samples)
+            except Exception:
+                return
+            if count:
+                clip_label.set_text(f'⚠ {count} clipped samples')
+                clip_label.set_visibility(True)
+            else:
+                clip_label.set_visibility(False)
+
+        @ui.refreshable
+        def _band_table() -> None:
+            with ui.row(wrap=False).classes('items-center gap-2 w-full text-xs text-gray-500'):
+                ui.label('On').classes('w-10 text-center')
+                ui.label('Type').classes('w-32')
+                ui.label('Freq (Hz)').classes('w-24')
+                ui.label('Gain (dB)').classes('w-24')
+                ui.label('Q').classes('w-20')
+                ui.label('').classes('w-10')
+            for band in state['staged'].bands:
+                with ui.row(wrap=False).classes('items-center gap-2 w-full'):
+                    ui.checkbox(value=band.enabled, on_change=lambda e, b=band: _on_enabled(b, e.value)).classes('w-10')
+                    ui.select(_BAND_TYPES, value=band.type, on_change=lambda e, b=band: _on_type(b, e.value)).props(
+                        'dense outlined'
+                    ).classes('w-32')
+                    ui.number(value=band.freq, step=1, format='%.0f', on_change=lambda e, b=band: _on_freq(b, e.value)).props(
+                        'dense outlined'
+                    ).classes('w-24')
+                    gain_field = (
+                        ui.number(value=band.gain, step=0.1, format='%.1f', on_change=lambda e, b=band: _on_gain(b, e.value))
+                        .props('dense outlined')
+                        .classes('w-24')
+                    )
+                    gain_field.set_enabled(band.type not in _PASS_TYPES)
+                    ui.number(value=band.q, step=0.001, format='%.3f', on_change=lambda e, b=band: _on_q(b, e.value)).props(
+                        'dense outlined'
+                    ).classes('w-20')
+                    ui.button(icon='delete', on_click=lambda b=band: _remove_band(b)).props('flat dense round size=sm').classes(
+                        'text-gray-400'
+                    )
+            ui.button('+ Add band', on_click=_add_band).props('flat dense').classes('mt-2')
+
+        with ui.row().classes('items-center justify-between w-full'):
+            ui.label(f'{live.name} · Advanced DSP').classes('text-lg font-medium')
+            ui.link('‹ Players', '/')
+
+        with ui.column().classes('w-full gap-3'):
+            with ui.row().classes('items-center gap-4 w-full'):
+                preamp_field = (
+                    ui.number('Pre-amp (dB)', value=state['staged'].preamp_db, step=0.1, format='%.1f', on_change=_on_preamp)
+                    .props('dense outlined')
+                    .classes('w-40')
+                )
+                with ui.button('Presets', icon='tune').props('flat dense'):
+                    with ui.menu():
+                        ui.menu_item('Loudness (seed bands)', on_click=lambda: _apply_preset('loudness')).mark('preset-loudness')
+                        ui.menu_item('Flat / clear all bands', on_click=lambda: _apply_preset('flat')).mark('preset-flat')
+                ui.space()
+                protect_btn = (
+                    ui.button('protect headroom', icon='shield', on_click=_on_protect)
+                    .props('flat dense')
+                    .classes('text-amber-600')
+                )
+                ui.button('Reset', on_click=_on_reset).props('flat dense')
+                ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
+
+            headroom_label = ui.label().classes('text-xs')
+
+            _band_table()
+
+            with ui.row().classes('items-center gap-4 w-full mt-2 text-xs text-gray-500'):
+                count_label = ui.label()
+                ui.label('IIR biquads · ~0% CPU')
+                dirty_label = ui.label('Unsaved changes ●').classes('text-amber-500')
+                clip_label = ui.label('').classes('text-red-500')
+                clip_label.set_visibility(False)  # hidden until the clip poll reports a nonzero count
+
+        _mark_changed()
+        ui.timer(3.0, _poll_clips)
 
     @ui.refreshable
     def _build_services_tab(self) -> None:
@@ -294,6 +522,15 @@ class Page:
                         # Disable the settings icon for a disabled player, matching the intent of "disable".
                         if minimized:
                             settings_btn.set_enabled(False)
+                        dsp_btn = (
+                            ui.button(on_click=lambda c=client: ui.navigate.to(f'/player/{c.id}/dsp'))
+                            .props('icon=equalizer flat dense round size=sm')
+                            .classes('text-gray-400')
+                            .mark('player-dsp')
+                        )
+                        # A disabled player has no live pipeline to edit, so gray out its EQ icon too.
+                        if minimized:
+                            dsp_btn.set_enabled(False)
 
                 if minimized:
                     continue

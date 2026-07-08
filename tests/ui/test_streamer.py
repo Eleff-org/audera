@@ -9,6 +9,8 @@ from nicegui.testing import User
 
 import audera.ui.streamer.pages as streamer_pages
 from audera.clients import CamillaDSPClient, SnapserverClient
+from audera.dal import dsp as dsp_dal
+from audera.dal import players as players_dal
 from audera.dal import settings as settings_dal
 from audera.models.player import Player
 from audera.models.settings import Settings
@@ -62,6 +64,42 @@ def mock_camilladsp(monkeypatch):
     monkeypatch.setattr(CamillaDSPClient, 'set_percent_volume', _set_percent_volume)
     monkeypatch.setattr(CamillaDSPClient, 'get_percent_volume', _get_percent_volume)
     monkeypatch.setattr(CamillaDSPClient, 'set_volume', _set_volume)
+    return calls
+
+
+@pytest.fixture
+def mock_camilladsp_dsp(monkeypatch):
+    """Mocks the CamillaDSP client for the Advanced DSP editor page.
+
+    Records the Save choreography (get/validate/set config, reset clipped samples) and
+    keeps the last-set config so a re-open would see the compiled pipeline. Keeps the
+    tests daemon-free while `response_peak_db` still runs the real `camilladsp_plot`.
+    """
+    calls = {}
+    state = {'config': {'devices': {'samplerate': 48000}, 'filters': {}, 'pipeline': []}}
+
+    def _get_config(self) -> dict:
+        calls['get_config'] = True
+        return state['config']
+
+    def _validate_config(self, config: dict) -> None:
+        calls['validate_config'] = config
+
+    def _set_config(self, config: dict) -> None:
+        calls['set_config'] = config
+        state['config'] = config
+
+    def _get_clipped_samples(self) -> int:
+        return 0
+
+    def _reset_clipped_samples(self) -> None:
+        calls['reset_clipped_samples'] = True
+
+    monkeypatch.setattr(CamillaDSPClient, 'get_config', _get_config)
+    monkeypatch.setattr(CamillaDSPClient, 'validate_config', _validate_config)
+    monkeypatch.setattr(CamillaDSPClient, 'set_config', _set_config)
+    monkeypatch.setattr(CamillaDSPClient, 'get_clipped_samples', _get_clipped_samples)
+    monkeypatch.setattr(CamillaDSPClient, 'reset_clipped_samples', _reset_clipped_samples)
     return calls
 
 
@@ -378,3 +416,86 @@ async def test_settings_dialog_no_longer_shows_loudness(audera_home, mock_snapse
     await user.should_see('Snapcast Volume')
     await user.should_not_see('Loudness')
     await user.should_not_see('Reference level (dB)')
+
+
+# --- Advanced DSP editor (WS-4 / WS-5) ---------------------------------------------------
+
+
+async def test_players_tab_shows_dsp_icon(audera_home, mock_snapserver_with_client, mock_camilladsp, user: User):
+    Page().load()
+    await user.open('/')
+    await user.should_see(marker='player-dsp')
+
+
+async def test_dsp_page_renders(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see('Advanced DSP')
+    await user.should_see('Pre-amp (dB)')
+    await user.should_see('Presets')
+    await user.should_see('Save')
+    await user.should_see('Reset')
+    await user.should_see('Bands (0)')
+
+
+async def test_dsp_page_unknown_player_shows_message(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/nope/dsp')
+    await user.should_see('Player not found or unreachable.')
+
+
+@pytest.mark.parametrize(
+    'steps',
+    [
+        # Each step is (find-kwargs, expected footer label), applied in order. The
+        # intermediate `Bands (2)` on the flat/reset cases is load-bearing: their end state
+        # (0 bands) equals the initial state, so without it a silently no-op loudness click
+        # would let the test pass vacuously.
+        pytest.param([({'marker': 'preset-loudness'}, 'Bands (2)')], id='loudness-seeds-two'),
+        pytest.param(
+            [({'marker': 'preset-loudness'}, 'Bands (2)'), ({'marker': 'preset-flat'}, 'Bands (0)')],
+            id='flat-clears',
+        ),
+        pytest.param([({'content': '+ Add band'}, 'Bands (1)')], id='add-appends-one'),
+        pytest.param(
+            [({'marker': 'preset-loudness'}, 'Bands (2)'), ({'content': 'Reset'}, 'Bands (0)')],
+            id='reset-discards',
+        ),
+    ],
+)
+async def test_dsp_band_count_reflects_actions(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User, steps):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    for find_kwargs, expected in steps:
+        user.find(**find_kwargs).click()
+        await user.should_see(expected)
+
+
+async def test_dsp_headroom_guard_protects_clipping(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='preset-loudness').click()
+    await user.should_see('clipping risk')
+    await user.should_see('protect headroom')
+    user.find('protect headroom').click()
+    await user.should_see('headroom ok')
+
+
+async def test_dsp_save_applies_and_persists(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='preset-loudness').click()
+    await user.should_see('Bands (2)')
+    user.find('Save').click()
+    await user.should_see('Saved')
+
+    # The compiled pipeline is both validated and pushed, and carries `audera_peq_*` filters.
+    assert 'validate_config' in mock_camilladsp_dsp
+    compiled = mock_camilladsp_dsp['set_config']
+    assert any(name.startswith('audera_peq_') for name in compiled['filters'])
+    assert 'reset_clipped_samples' in mock_camilladsp_dsp
+
+    # The config is persisted with the two bands and the player is linked to it.
+    config_id = players_dal.get('abc123').dsp_id
+    assert config_id
+    assert len(dsp_dal.get(config_id).bands) == 2
