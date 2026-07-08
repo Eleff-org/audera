@@ -12,6 +12,7 @@ from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import players as players_dal
 from audera.dal import settings as settings_dal
+from audera.models.dsp import Band, DSPConfig
 from audera.models.player import Player
 from audera.models.settings import Settings
 from audera.ui import components, features
@@ -471,14 +472,76 @@ async def test_dsp_band_count_reflects_actions(audera_home, mock_snapserver_with
         await user.should_see(expected)
 
 
-async def test_dsp_headroom_guard_protects_clipping(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+def _seed_linked_dsp(config: DSPConfig) -> None:
+    """Persists a DSP config and links player 'abc123' to it (the page's load path).
+
+    The editor recovers the config via `players_dal` → `resolve_for_player`, so a linked
+    player record is required for the seeded config to open instead of a fresh empty one.
+    """
+    dsp_dal.create(config)
+    players_dal.create(Player(id='abc123', host='192.168.1.50', port=1704, connected=True, dsp_id=config.id))
+
+
+async def test_dsp_bandless_shows_chart_message_and_hides_chart(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see('Add a band')
+    await user.should_not_see(kind=ui.echart)
+
+
+async def test_dsp_adding_band_reveals_chart(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_not_see(kind=ui.echart)
+    user.find(content='+ Add band').click()
+    await user.should_see(kind=ui.echart)
+
+
+async def test_dsp_preamp_clamp_keeps_below_ceiling_value(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    # A +6 dB boost sets the ceiling at ~-6 dB; -10 is below it, so the clamp leaves it.
+    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    with user:
+        user.find(kind=ui.number, content='auto-protected').elements.pop().value = -10.0
+    await asyncio.sleep(0.1)
+    assert user.find(kind=ui.number, content='auto-protected').elements.pop().value == pytest.approx(-10.0)
+
+
+async def test_dsp_preamp_clamp_pulls_above_ceiling_value_down(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    # Raising the pre-amp to -2 dB over a +6 dB boost would clip, so the clamp snaps it back
+    # down to the ~-6 dB clip-safe ceiling.
+    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    with user:
+        user.find(kind=ui.number, content='auto-protected').elements.pop().value = -2.0
+    await asyncio.sleep(0.1)
+    assert user.find(kind=ui.number, content='auto-protected').elements.pop().value == pytest.approx(-6.0, abs=0.2)
+
+
+async def test_dsp_over_hot_saved_config_opens_clean(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    # Saved with a hot 0 dB pre-amp above the +6 dB boost ceiling; the load-time baseline
+    # clamp pulls it down so the editor opens without a false "Unsaved changes" flag.
+    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=0.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see(kind=ui.echart)
+    await user.should_not_see('Unsaved changes')
+
+
+async def test_dsp_protect_button_removed(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(marker='preset-loudness').click()
-    await user.should_see('clipping risk')
-    await user.should_see('protect headroom')
-    user.find('protect headroom').click()
-    await user.should_see('headroom ok')
+    await user.should_see('Bands (2)')
+    await user.should_not_see('protect headroom')
 
 
 async def test_dsp_save_applies_and_persists(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):

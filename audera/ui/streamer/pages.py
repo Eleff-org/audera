@@ -17,7 +17,7 @@ from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import players as players_dal
 from audera.dal import settings as settings_dal
-from audera.domains.dsp import compile_pipeline, loudness_preset, response_peak_db
+from audera.domains.dsp import auto_preamp_db, compile_pipeline, loudness_preset
 from audera.models.dsp import Band
 from audera.models.settings import Settings
 from audera.ui import components, features
@@ -171,8 +171,8 @@ class Page:
         across every connected client): `state['saved']` mirrors the persisted config and
         `state['staged']` is the working copy that is compiled, validated, and pushed on
         Save. Scalar field edits mutate a band in place and only recompute the dirty
-        indicator + headroom; structural changes (add/delete/type/preset/reset) refresh
-        the band table.
+        indicator, clip-safe pre-amp clamp, and live response chart; structural changes
+        (add/delete/type/preset/reset) refresh the band table.
         """
         components.header.render(audera.NAME, 'Streamer')
 
@@ -194,23 +194,29 @@ class Page:
         # otherwise `resolve_for_player` would re-mint an orphan config on every open.
         persisted = players_dal.get(player_id) if players_dal.exists(player_id) else live
         saved = dsp_dal.resolve_for_player(persisted)
+        # Clamp the baseline once so an over-hot legacy config opens clean, not falsely dirty.
+        saved.preamp_db = min(saved.preamp_db, auto_preamp_db(saved.bands))
         state = {'saved': saved, 'staged': saved.model_copy(deep=True)}
 
         def _dirty() -> bool:
             return state['staged'] != state['saved']
 
         def _mark_changed() -> None:
-            """Recomputes the dirty indicator, headroom read-out, and band count."""
+            """Clamps pre-amp to the clip-safe ceiling, then refreshes dirty state, chart, count."""
+            clamped = min(state['staged'].preamp_db, auto_preamp_db(state['staged'].bands))
+            if clamped != state['staged'].preamp_db:  # min is a fixpoint — converges in one pass
+                state['staged'].preamp_db = clamped
+                preamp_field.value = clamped
             dirty_label.set_visibility(_dirty())
-            peak = response_peak_db(state['staged'])
-            if peak <= 0:
-                headroom_label.set_text(f'headroom ok · {abs(peak):.1f} dB to spare')
-                headroom_label.classes(replace='text-xs text-green-500')
-                protect_btn.set_visibility(False)
-            else:
-                headroom_label.set_text(f'clipping risk · {peak:.1f} dB over 0 dBFS')
-                headroom_label.classes(replace='text-xs text-amber-500')
-                protect_btn.set_visibility(True)
+            has_bands = bool(state['staged'].bands)  # chart only once a band exists
+            chart.set_visibility(has_bands)
+            chart_message.set_visibility(not has_bands)
+            if has_bands:
+                # `EChart.options` is a read-only view onto the live props dict; swap its
+                # contents in place (the documented "change the options" push) and redraw.
+                chart.options.clear()
+                chart.options.update(components.response_plot.options(state['staged']))
+                chart.update()
             count_label.set_text(f'Bands ({len(state["staged"].bands)})')
 
         def _on_preamp(e) -> None:
@@ -268,12 +274,6 @@ class Page:
             _band_table.refresh()
             _mark_changed()
 
-        def _on_protect() -> None:
-            # Attenuate the pre-amp by the combined peak, driving the response to ~0 dBFS.
-            state['staged'].preamp_db -= response_peak_db(state['staged'])
-            preamp_field.value = state['staged'].preamp_db
-            _mark_changed()
-
         async def _on_save() -> None:
             """Compiles → validates → pushes the live pipeline, then persists the config.
 
@@ -327,16 +327,16 @@ class Page:
                         'dense outlined'
                     ).classes('w-32')
                     ui.number(value=band.freq, step=1, format='%.0f', on_change=lambda e, b=band: _on_freq(b, e.value)).props(
-                        'dense outlined'
+                        'dense outlined debounce=200'
                     ).classes('w-24')
                     gain_field = (
                         ui.number(value=band.gain, step=0.1, format='%.1f', on_change=lambda e, b=band: _on_gain(b, e.value))
-                        .props('dense outlined')
+                        .props('dense outlined debounce=200')
                         .classes('w-24')
                     )
                     gain_field.set_enabled(band.type not in _PASS_TYPES)
                     ui.number(value=band.q, step=0.001, format='%.3f', on_change=lambda e, b=band: _on_q(b, e.value)).props(
-                        'dense outlined'
+                        'dense outlined debounce=200'
                     ).classes('w-20')
                     ui.button(icon='delete', on_click=lambda b=band: _remove_band(b)).props('flat dense round size=sm').classes(
                         'text-gray-400'
@@ -350,7 +350,13 @@ class Page:
         with ui.column().classes('w-full gap-3'):
             with ui.row().classes('items-center gap-4 w-full'):
                 preamp_field = (
-                    ui.number('Pre-amp (dB)', value=state['staged'].preamp_db, step=0.1, format='%.1f', on_change=_on_preamp)
+                    ui.number(
+                        'Pre-amp (dB) · auto-protected',
+                        value=state['staged'].preamp_db,
+                        step=0.1,
+                        format='%.1f',
+                        on_change=_on_preamp,
+                    )
                     .props('dense outlined')
                     .classes('w-40')
                 )
@@ -359,15 +365,15 @@ class Page:
                         ui.menu_item('Loudness (seed bands)', on_click=lambda: _apply_preset('loudness')).mark('preset-loudness')
                         ui.menu_item('Flat / clear all bands', on_click=lambda: _apply_preset('flat')).mark('preset-flat')
                 ui.space()
-                protect_btn = (
-                    ui.button('protect headroom', icon='shield', on_click=_on_protect)
-                    .props('flat dense')
-                    .classes('text-amber-600')
-                )
                 ui.button('Reset', on_click=_on_reset).props('flat dense')
                 ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
 
-            headroom_label = ui.label().classes('text-xs')
+            # Persistent handle + empty-state message, both toggled by the forward-closure
+            # `_mark_changed`: the chart shows only once a band exists, the message otherwise.
+            chart = components.response_plot.render(state['staged'])
+            chart_message = ui.label(
+                'Add a band to see the live frequency-response curve — start from Presets ▾, or + Add band below.'
+            ).classes('text-sm text-gray-500 p-4')
 
             _band_table()
 
