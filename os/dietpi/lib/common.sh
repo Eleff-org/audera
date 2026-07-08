@@ -50,7 +50,8 @@ install_camilladsp() {
 }
 
 # Writes the camilladsp systemd service unit, captures from ALSA loopback, plays to
-#   physical DAC (hw:0)
+#   physical DAC (hw:0). Volume is persisted by the daemon via --statefile, so no --gain
+#   seed is passed; the fader is restored from the statefile across restarts.
 write_camilladsp_service() {
     local config_path="$1"
     local statefile_path="$2"
@@ -61,7 +62,7 @@ After=sound.target snapclient.service
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/local/bin/camilladsp $config_path --statefile $statefile_path --gain -12.04 -p 1234 --address 0.0.0.0
+ExecStart=/usr/local/bin/camilladsp $config_path --statefile $statefile_path -p 1234 --address 0.0.0.0
 Restart=always
 RestartSec=5
 
