@@ -5,20 +5,20 @@ import os
 from typing import Union
 
 from audera.dal import path
-from audera.models import dsp, player
+from audera.models import dsp
 
 PATH: Union[str, os.PathLike] = os.path.join(path.HOME, 'dsp')
 
 
-def exists(id: str) -> bool:
+def exists(player_id: str) -> bool:
     """Returns `True` when the DSP configuration file exists.
 
     Parameters
     ----------
-    id: `str`
-        The DSP configuration identifier.
+    player_id: `str`
+        The player identifier.
     """
-    return os.path.isfile(os.path.abspath(os.path.join(PATH, '.'.join([id, 'json']))))
+    return os.path.isfile(os.path.abspath(os.path.join(PATH, '.'.join([player_id, 'json']))))
 
 
 def create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
@@ -32,15 +32,15 @@ def create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
     return save(dsp_config)
 
 
-def get(id: str) -> dsp.DSPConfig:
+def get(player_id: str) -> dsp.DSPConfig:
     """Returns the DSP configuration as an `audera.models.dsp.DSPConfig` object.
 
     Parameters
     ----------
-    id: `str`
-        The DSP configuration identifier.
+    player_id: `str`
+        The player identifier.
     """
-    file_path = os.path.join(PATH, '.'.join([id, 'json']))
+    file_path = os.path.join(PATH, '.'.join([player_id, 'json']))
     with open(file_path, 'r') as f:
         data = json.load(f)
     return dsp.DSPConfig.from_dict(data['dsp'])
@@ -54,29 +54,14 @@ def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
     dsp_config: `audera.models.dsp.DSPConfig`
         An instance of an `audera.models.dsp.DSPConfig` object.
     """
-    if exists(dsp_config.id):
-        return get(dsp_config.id)
+    if exists(dsp_config.player_id):
+        return get(dsp_config.player_id)
     else:
         return create(dsp_config)
 
 
-def resolve_for_player(player_: player.Player) -> dsp.DSPConfig:
-    """Returns the player's editable `DSPConfig`, keyed by the player's own Snapcast id.
-
-    The config file *is* the link: it lives at `dsp/{player_.id}.json`, so no FK or player
-    shadow file is needed. A fresh empty config is created on first open and re-read on
-    every open thereafter.
-
-    Parameters
-    ----------
-    player_: `audera.models.player.Player`
-        An instance of an `audera.models.player.Player` object.
-    """
-    return get_or_create(dsp.DSPConfig(id=player_.id))
-
-
 def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
-    """Saves the DSP configuration to `~/.audera/dsp/{id}.json`.
+    """Saves the DSP configuration to `~/.audera/dsp/{player_id}.json`.
 
     Parameters
     ----------
@@ -85,14 +70,14 @@ def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    file_path = os.path.join(PATH, '.'.join([dsp_config.id, 'json']))
+    file_path = os.path.join(PATH, '.'.join([dsp_config.player_id, 'json']))
     with open(file_path, 'w') as f:
         json.dump({'dsp': dsp_config.to_dict()}, f, indent=2)
     return dsp_config
 
 
 def update(new: dsp.DSPConfig) -> dsp.DSPConfig:
-    """Updates the DSP configuration file `~/.audera/dsp/{id}.json`.
+    """Updates the DSP configuration file `~/.audera/dsp/{player_id}.json`.
 
     Parameters
     ----------
@@ -106,13 +91,13 @@ def update(new: dsp.DSPConfig) -> dsp.DSPConfig:
         return existing
 
 
-def delete(id: str):
-    """Deletes the DSP configuration file.
+def delete(player_id: str):
+    """Deletes the DSP configuration file for a player.
 
     Parameters
     ----------
-    id: `str`
-        The DSP configuration identifier.
+    player_id: `str`
+        The player identifier.
     """
-    if exists(id):
-        os.remove(os.path.join(PATH, '.'.join([id, 'json'])))
+    if exists(player_id):
+        os.remove(os.path.join(PATH, '.'.join([player_id, 'json'])))

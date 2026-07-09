@@ -3,7 +3,7 @@ revision = 3
 requires-python = "==3.13.*"
 
 [options]
-exclude-newer = "2026-07-01T01:50:51.1229439Z"
+exclude-newer = "2026-07-02T19:14:54.2422552Z"
 exclude-newer-span = "P1W"
 
 [[package]]
@@ -121,6 +121,7 @@ dependencies = [
     { name = "nicegui" },
     { name = "pydantic" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "websockets" },
 ]
 
@@ -147,6 +148,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.23.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.10" },
     { name = "testcontainers", marker = "extra == 'dev'", specifier = ">=4.14.2" },

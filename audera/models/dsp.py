@@ -7,6 +7,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Butterworth Q ≈ 1/√2 — the maximally-flat response with no resonant peak; the standard
+# default when a filter specifies no Q.
+DEFAULT_Q = 0.707
+
+# Pass filters (`Lowpass`/`Highpass`) carry no gain; every other band type does. Centralized
+# here so the compiler, REW interop, and the editor share one type taxonomy.
+PASS_TYPES = frozenset({'Lowpass', 'Highpass'})
+
 
 class Band(BaseModel):
     """A `class` that represents a single parametric-EQ band.
@@ -15,8 +23,8 @@ class Band(BaseModel):
     ----------
     id: `str`
         The band identifier (stable key for UI rows).
-    type: `Literal['Peaking', 'LowShelf', 'HighShelf', 'Lowpass', 'Highpass']`
-        The biquad filter type.
+    type: `Literal['Peaking', 'Lowshelf', 'Highshelf', 'Lowpass', 'Highpass']`
+        The biquad filter type, cased to match CamillaDSP's own parameter names.
     freq: `float`
         The center/corner frequency in Hz.
     gain: `float`
@@ -28,10 +36,10 @@ class Band(BaseModel):
     """
 
     id: str
-    type: Literal['Peaking', 'LowShelf', 'HighShelf', 'Lowpass', 'Highpass'] = 'Peaking'
+    type: Literal['Peaking', 'Lowshelf', 'Highshelf', 'Lowpass', 'Highpass'] = 'Peaking'
     freq: float
     gain: float = 0.0
-    q: float = 0.707
+    q: float = DEFAULT_Q
     enabled: bool = True
 
     @classmethod
@@ -63,8 +71,9 @@ class DSPConfig(BaseModel):
 
     Attributes
     ----------
-    id: `str`
-        The DSP configuration identifier and file key.
+    player_id: `str`
+        The player identifier and file key (the config lives at `dsp/{player_id}.json`,
+        so the filename is the link — no separate FK is needed).
     preamp_db: `float`
         The pre-amp Gain filter attenuation in dB.
     bands: `list[Band]`
@@ -73,7 +82,7 @@ class DSPConfig(BaseModel):
         Whether the DSP configuration is active.
     """
 
-    id: str
+    player_id: str
     preamp_db: float = 0.0
     bands: list[Band] = Field(default_factory=list)
     enabled: bool = True
@@ -86,7 +95,7 @@ class DSPConfig(BaseModel):
     def to_dict(self) -> dict:
         """Returns a `DSPConfig` object as a `dict`."""
         return {
-            'id': self.id,
+            'player_id': self.player_id,
             'preamp_db': self.preamp_db,
             'bands': [band.to_dict() for band in self.bands],
             'enabled': self.enabled,
@@ -103,7 +112,8 @@ class Preset(BaseModel):
     A preset is its own entity (not a flavored `DSPConfig`): a display name plus a
     list of bands that can be cloned and appended onto any player's configuration.
     Unlike `Band`/`DSPConfig`, it serializes via pydantic directly
-    (`model_dump()`/`model_validate`) — there is no legacy on-disk shape to preserve.
+    (`model_dump()`/`model_validate`) — a brand-new type with no hand-written on-disk
+    shape to preserve.
 
     Attributes
     ----------

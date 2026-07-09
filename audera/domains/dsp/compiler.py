@@ -9,23 +9,11 @@ with stable ordering makes it idempotent by construction.
 
 import copy
 
-from audera.models.dsp import Band, DSPConfig
+from audera.models.dsp import PASS_TYPES, Band, DSPConfig
 
 _MANAGED_PREFIX = 'audera_'
 _PREAMP_KEY = 'audera_preamp'
 _PEQ_PREFIX = 'audera_peq_'
-
-# Model literals use camel-cased shelf names; CamillaDSP expects lower-cased.
-_TYPE_MAP = {
-    'Peaking': 'Peaking',
-    'LowShelf': 'Lowshelf',
-    'HighShelf': 'Highshelf',
-    'Lowpass': 'Lowpass',
-    'Highpass': 'Highpass',
-}
-
-# Band types that carry a gain; pass filters (`Lowpass`/`Highpass`) omit it.
-_GAIN_TYPES = frozenset({'Peaking', 'LowShelf', 'HighShelf'})
 
 
 def _band_to_biquad(band: Band) -> dict:
@@ -41,11 +29,11 @@ def _band_to_biquad(band: Band) -> dict:
         An instance of an `audera.models.dsp.Band` object.
     """
     parameters = {
-        'type': _TYPE_MAP[band.type],
+        'type': band.type,
         'freq': band.freq,
         'q': band.q,
     }
-    if band.type in _GAIN_TYPES:
+    if band.type not in PASS_TYPES:
         parameters['gain'] = band.gain
     return {'type': 'Biquad', 'parameters': parameters}
 

@@ -11,8 +11,8 @@ def _make_preset(id='p1', name='My preset') -> Preset:
         id=id,
         name=name,
         bands=[
-            Band(id='b1', type='LowShelf', freq=90.0, gain=10.0, q=0.7),
-            Band(id='b2', type='HighShelf', freq=8000.0, gain=6.0, q=0.7),
+            Band(id='b1', type='Lowshelf', freq=90.0, gain=10.0, q=0.7),
+            Band(id='b2', type='Highshelf', freq=8000.0, gain=6.0, q=0.7),
         ],
     )
 
@@ -23,7 +23,7 @@ def test_save_and_get_round_trip(audera_home):
 
     result = presets_dal.get_all_presets()
     assert result == [preset]
-    assert result[0].bands[0].type == 'LowShelf'
+    assert result[0].bands[0].type == 'Lowshelf'
 
 
 def test_delete_removes_preset(audera_home):
@@ -61,7 +61,7 @@ def test_malformed_preset_is_skipped(audera_home):
 def test_player_config_is_never_returned(audera_home):
     # A player config written to dsp/*.json lives one directory up from dsp/presets/,
     # so the preset namespace can never surface it.
-    dsp_dal.create(DSPConfig(id='cfg1', bands=[Band(id='b1', freq=1000.0)]))
+    dsp_dal.create(DSPConfig(player_id='cfg1', bands=[Band(id='b1', freq=1000.0)]))
     assert presets_dal.get_all_presets() == []
 
 

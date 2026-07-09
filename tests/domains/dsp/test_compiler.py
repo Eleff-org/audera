@@ -18,11 +18,11 @@ def _foreign_config() -> dict:
 
 def test_preamp_and_peq_filters_exist():
     config = DSPConfig(
-        id='x',
+        player_id='x',
         preamp_db=-6.0,
         bands=[
             Band(id='b1', type='Peaking', freq=1000.0, gain=3.0),
-            Band(id='b2', type='LowShelf', freq=90.0, gain=10.0),
+            Band(id='b2', type='Lowshelf', freq=90.0, gain=10.0),
         ],
     )
     compiled = compile_pipeline(_empty_config(), config)
@@ -34,7 +34,7 @@ def test_preamp_and_peq_filters_exist():
 
 def test_each_managed_filter_has_own_stereo_step():
     config = DSPConfig(
-        id='x',
+        player_id='x',
         bands=[
             Band(id='b1', type='Peaking', freq=1000.0, gain=3.0),
             Band(id='b2', type='Peaking', freq=2000.0, gain=3.0),
@@ -52,12 +52,13 @@ def test_each_managed_filter_has_own_stereo_step():
     assert steps[2]['names'] == [_PEQ_PREFIX + 'b2']
 
 
-def test_shelf_casing_is_lowercased():
+def test_shelf_type_passes_through_to_camilladsp():
+    # `Band.type` already carries CamillaDSP's own casing, so the compiler emits it verbatim.
     config = DSPConfig(
-        id='x',
+        player_id='x',
         bands=[
-            Band(id='low', type='LowShelf', freq=90.0, gain=10.0),
-            Band(id='high', type='HighShelf', freq=8000.0, gain=6.0),
+            Band(id='low', type='Lowshelf', freq=90.0, gain=10.0),
+            Band(id='high', type='Highshelf', freq=8000.0, gain=6.0),
         ],
     )
     compiled = compile_pipeline(_empty_config(), config)
@@ -67,7 +68,7 @@ def test_shelf_casing_is_lowercased():
 
 def test_disabled_band_step_is_bypassed():
     config = DSPConfig(
-        id='x',
+        player_id='x',
         bands=[
             Band(id='on', type='Peaking', freq=1000.0, gain=3.0, enabled=True),
             Band(id='off', type='Peaking', freq=2000.0, gain=3.0, enabled=False),
@@ -82,7 +83,7 @@ def test_disabled_band_step_is_bypassed():
 
 def test_pass_filters_omit_gain_shelves_include_it():
     config = DSPConfig(
-        id='x',
+        player_id='x',
         bands=[
             Band(id='lp', type='Lowpass', freq=12000.0, q=0.7),
             Band(id='hp', type='Highpass', freq=40.0, q=0.7),
@@ -96,7 +97,7 @@ def test_pass_filters_omit_gain_shelves_include_it():
 
 
 def test_foreign_filters_and_steps_are_preserved():
-    config = DSPConfig(id='x', bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=3.0)])
+    config = DSPConfig(player_id='x', bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=3.0)])
     compiled = compile_pipeline(_foreign_config(), config)
     assert compiled['devices'] == {'samplerate': 48000}
     assert 'user_filter' in compiled['filters']
@@ -105,17 +106,17 @@ def test_foreign_filters_and_steps_are_preserved():
 
 def test_does_not_mutate_caller_config():
     base = _empty_config()
-    config = DSPConfig(id='x', bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=3.0)])
+    config = DSPConfig(player_id='x', bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=3.0)])
     compile_pipeline(base, config)
     assert base == {'filters': {}, 'pipeline': []}
 
 
 def test_idempotency():
     config = DSPConfig(
-        id='x',
+        player_id='x',
         preamp_db=-4.0,
         bands=[
-            Band(id='b1', type='LowShelf', freq=90.0, gain=10.0),
+            Band(id='b1', type='Lowshelf', freq=90.0, gain=10.0),
             Band(id='b2', type='Peaking', freq=1000.0, gain=3.0, enabled=False),
         ],
     )
@@ -125,7 +126,7 @@ def test_idempotency():
 
 
 def test_empty_base_config_compiles_cleanly():
-    config = DSPConfig(id='x')
+    config = DSPConfig(player_id='x')
     compiled = compile_pipeline(_empty_config(), config)
     assert compiled['filters'] == {_PREAMP_KEY: {'type': 'Gain', 'parameters': {'gain': 0.0}}}
     assert compiled['pipeline'] == [{'type': 'Filter', 'channels': [0, 1], 'names': [_PREAMP_KEY], 'bypassed': False}]

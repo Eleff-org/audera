@@ -7,7 +7,7 @@ from nicegui import core, ui
 from nicegui.client import Client
 from nicegui.testing import User
 
-import audera.ui.streamer.pages as streamer_pages
+import audera.ui.streamer.pages._plex as streamer_plex
 from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import presets as presets_dal
@@ -128,7 +128,7 @@ def db_volume_mode(audera_home):
 
 
 async def test_index_renders_tabs(audera_home, mock_snapserver_empty, monkeypatch, user: User):
-    monkeypatch.setattr(streamer_pages, '_plexamp_state', lambda: 'inactive')
+    monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'inactive')
     Page().load()
     await user.open('/')
     await user.should_see('Players')
@@ -223,7 +223,7 @@ async def test_players_tab_disabled_experience_toggle_on_unmutes_client(
 
 
 async def test_services_tab_shows_inactive(audera_home, mock_snapserver_empty, monkeypatch, user: User):
-    monkeypatch.setattr(streamer_pages, '_plexamp_state', lambda: 'inactive')
+    monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'inactive')
     Page().load()
     await user.open('/')
     user.find('Services').click()
@@ -231,9 +231,9 @@ async def test_services_tab_shows_inactive(audera_home, mock_snapserver_empty, m
 
 
 async def test_services_tab_shows_unclaimed(audera_home, mock_snapserver_empty, monkeypatch, user: User):
-    monkeypatch.setattr(streamer_pages, '_plexamp_state', lambda: 'inactive')
+    monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'inactive')
     Page().load()
-    monkeypatch.setattr(streamer_pages, '_plexamp_state', lambda: 'unclaimed')
+    monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'unclaimed')
     await user.open('/')
     user.find('Services').click()
     await user.should_see('setup required')
@@ -241,7 +241,7 @@ async def test_services_tab_shows_unclaimed(audera_home, mock_snapserver_empty, 
 
 
 async def test_services_tab_shows_claimed(audera_home, mock_snapserver_empty, monkeypatch, user: User):
-    monkeypatch.setattr(streamer_pages, '_plexamp_state', lambda: 'claimed')
+    monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'claimed')
     Page().load()
     await user.open('/')
     user.find('Services').click()
@@ -294,7 +294,7 @@ async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, u
     ui.run() raises: RuntimeError: ui.page cannot be used in NiceGUI scripts when
     UI is defined in the global scope.
     """
-    monkeypatch.setattr(streamer_pages, '_plexamp_state', lambda: 'inactive')
+    monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'inactive')
     Page().load()
     Client.instances.clear()  # replicate production: no pre-existing clients
     components.theme.apply_defaults()
@@ -419,7 +419,7 @@ async def test_settings_dialog_no_longer_shows_loudness(audera_home, mock_snapse
     await user.should_not_see('Reference level (dB)')
 
 
-# --- Advanced DSP editor (WS-4 / WS-5) ---------------------------------------------------
+# --- Advanced DSP editor -----------------------------------------------------------------
 
 
 async def test_players_tab_shows_dsp_icon(audera_home, mock_snapserver_with_client, mock_camilladsp, user: User):
@@ -476,9 +476,9 @@ def _seed_dsp(config: DSPConfig) -> None:
     """Persists a DSP config keyed by player 'abc123' (the page's load path).
 
     The config is keyed by the player id (`dsp/abc123.json` is the link), so persisting it
-    under that key is all `resolve_for_player` needs to open it instead of a fresh empty one.
+    under that key is all `get_or_create` needs to open it instead of a fresh empty one.
     """
-    dsp_dal.save(config.model_copy(update={'id': 'abc123'}))
+    dsp_dal.save(config.model_copy(update={'player_id': 'abc123'}))
 
 
 async def test_dsp_bandless_shows_chart_message_and_hides_chart(
@@ -502,7 +502,7 @@ async def test_dsp_preamp_clamp_keeps_below_ceiling_value(
     audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
 ):
     # A +6 dB boost sets the ceiling at ~-6 dB; -10 is below it, so the clamp leaves it.
-    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     with user:
@@ -516,7 +516,7 @@ async def test_dsp_preamp_clamp_pulls_above_ceiling_value_down(
 ):
     # Raising the pre-amp to -2 dB over a +6 dB boost would clip, so the clamp snaps it back
     # down to the ~-6 dB clip-safe ceiling.
-    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     with user:
@@ -525,10 +525,11 @@ async def test_dsp_preamp_clamp_pulls_above_ceiling_value_down(
     assert user.find(kind=ui.number, content='auto-protected').elements.pop().value == pytest.approx(-6.0, abs=0.2)
 
 
-async def test_dsp_over_hot_saved_config_opens_clean(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    # Saved with a hot 0 dB pre-amp above the +6 dB boost ceiling; the load-time baseline
-    # clamp pulls it down so the editor opens without a false "Unsaved changes" flag.
-    _seed_dsp(DSPConfig(id='cfg1', preamp_db=0.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+async def test_dsp_saved_config_opens_clean(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    # Save always clamps the pre-amp to the clip-safe ceiling, so a saved config's pre-amp is
+    # never above it; the `_mark_changed` clamp is a fixpoint on open and the editor opens
+    # without a false "Unsaved changes" flag.
+    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     await user.should_see(kind=ui.echart)
@@ -562,7 +563,7 @@ async def test_dsp_save_applies_and_persists(audera_home, mock_snapserver_with_c
     assert len(dsp_dal.get('abc123').bands) == 2
 
 
-# --- REW import/export via Config ▾ (WS-7) -----------------------------------------------
+# --- CamillaDSP YAML import/export via Config ▾ ------------------------------------------
 
 
 async def test_dsp_config_menu_exposes_import_and_export(
@@ -579,46 +580,54 @@ async def test_dsp_import_appends_bands(audera_home, mock_snapserver_with_client
     await user.open('/player/abc123/dsp')
     await user.should_see('Bands (0)')
     user.find(marker='config-import').click()
-    rew = 'Filter 1: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.41\nFilter 2: ON LS Fc 90 Hz Gain 4.0 dB Q 0.7'
+    yaml_text = (
+        'filters:\n'
+        '  band_1: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.41, gain: -3.0}}\n'
+        '  band_2: {type: Biquad, parameters: {type: Lowshelf, freq: 90, q: 0.7, gain: 4.0}}\n'
+    )
     with user:
-        user.find(kind=ui.textarea).elements.pop().value = rew
+        user.find(kind=ui.textarea).elements.pop().value = yaml_text
     user.find(marker='config-import-run').click()
     await user.should_see('Bands (2)')
     await user.should_see('Imported 2 band(s)')
 
 
-async def test_dsp_import_notifies_skipped_lines(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+async def test_dsp_import_notifies_skipped_filters(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(marker='config-import').click()
-    rew = 'Filter 1: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.41\nFilter 2: ON NO Fc 60 Hz Gain 0 dB Q 5.0'
+    yaml_text = (
+        'filters:\n'
+        '  band_1: {type: Biquad, parameters: {type: Peaking, freq: 1000, q: 1.41, gain: -3.0}}\n'
+        '  band_2: {type: Biquad, parameters: {type: Notch, freq: 60, q: 5.0, gain: 0}}\n'
+    )
     with user:
-        user.find(kind=ui.textarea).elements.pop().value = rew
+        user.find(kind=ui.textarea).elements.pop().value = yaml_text
     user.find(marker='config-import-run').click()
     await user.should_see('Bands (1)')
-    await user.should_see('Imported 1 band(s), skipped 1 line(s)')
+    await user.should_see('Imported 1 band(s), skipped 1 filter(s)')
 
 
-async def test_dsp_export_renders_saved_config_text(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+async def test_dsp_export_renders_saved_config_yaml(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(marker='config-export').click()
-    await user.should_see('Preamp:')
-    await user.should_see('Filter 1:')
+    await user.should_see('filters:')  # the CamillaDSP tag REW requires to import
+    await user.should_see('Peaking')
 
 
 async def test_dsp_export_banner_absent_on_clean_open(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(marker='config-export').click()
-    await user.should_see('Filter 1:')
+    await user.should_see('filters:')
     await user.should_not_see(marker='export-unsaved-banner')
 
 
 async def test_dsp_export_banner_shown_after_edit(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(content='+ Add band').click()  # stage an edit so staged ≠ saved
@@ -627,7 +636,7 @@ async def test_dsp_export_banner_shown_after_edit(audera_home, mock_snapserver_w
     await user.should_see(marker='export-unsaved-banner')
 
 
-# --- Named user presets (WS-8) -----------------------------------------------------------
+# --- Named user presets ------------------------------------------------------------------
 
 
 async def test_dsp_saved_preset_appears_and_appends(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
@@ -636,7 +645,7 @@ async def test_dsp_saved_preset_appears_and_appends(audera_home, mock_snapserver
             id='p1',
             name='Bass Boost',
             bands=[
-                Band(id='b1', type='LowShelf', freq=90.0, gain=6.0, q=0.7),
+                Band(id='b1', type='Lowshelf', freq=90.0, gain=6.0, q=0.7),
                 Band(id='b2', type='Peaking', freq=1000.0, gain=-3.0, q=2.0),
             ],
         )

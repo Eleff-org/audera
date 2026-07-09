@@ -14,6 +14,21 @@ Every UI app follows this two-file pattern:
 - Page methods: one per route (e.g. `index()`, `welcome()`, `connect()`)
 - Tab builder methods: `_build_<name>_tab()` — private, called from a page method
 
+**`pages/` sub-package** — when `pages.py` grows past a few hundred lines, split it into a
+`pages/` package instead of one flat file:
+- `pages/__init__.py`: the thin `Page` class (`__init__`, `load()`) re-exported so
+  `from …pages import Page` is unchanged. Each route method delegates to a module-level
+  `render(page, …)` — e.g. `def dsp(self, player_id): dsp.render(self, player_id)`.
+- One module per route (`pages/index.py`, `pages/dsp.py`, …): a `render(page, …)` function
+  plus that route's private `_build_<name>_tab(page)` / `_on_<action>(page, …)` helpers.
+  `page` carries the shared state (`page.settings`, `page._dialog_open`); the `Page` class is
+  **not** split across files. `@ui.refreshable` helpers stay module-level, keyed on the
+  `page` argument, and are refreshed via `_build_<name>_tab.refresh()`.
+- Private helper modules (`pages/_clients.py`, `pages/_plex.py`, …): shared client factories
+  and self-contained flows, imported by the route modules. To avoid an import cycle, route
+  modules never import names from `pages/__init__.py` at runtime — they take `page` as an
+  argument and import `Page` only under `TYPE_CHECKING`.
+
 **`__init__.py`** — thin `run()` entry point only:
 ```python
 def run() -> None:

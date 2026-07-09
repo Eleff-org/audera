@@ -23,6 +23,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "httpx>=0.28.1",
     "websockets>=16.0",
+    "pyyaml>=6.0",
     "camilladsp-plot @ git+https://github.com/HEnquist/pycamilladsp-plot@v3.0.2",
 ]
 
