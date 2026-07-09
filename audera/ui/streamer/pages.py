@@ -16,9 +16,10 @@ import audera
 from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import players as players_dal
+from audera.dal import presets as presets_dal
 from audera.dal import settings as settings_dal
-from audera.domains.dsp import auto_preamp_db, compile_pipeline, format_rew, loudness_preset, parse_rew
-from audera.models.dsp import Band
+from audera.domains.dsp import auto_preamp_db, clone_bands, compile_pipeline, format_rew, loudness_preset, parse_rew
+from audera.models.dsp import Band, Preset
 from audera.models.settings import Settings
 from audera.ui import components, features
 
@@ -268,6 +269,76 @@ class Page:
             _band_table.refresh()
             _mark_changed()
 
+        def _apply_saved_preset(preset: Preset) -> None:
+            """Appends fresh clones of a saved preset's bands onto the staged config.
+
+            Apply = append + clone (never replace); the clones carry fresh ids so their
+            `audera_peq_<id>` filter names can't collide. Routing through `_mark_changed`
+            re-clamps the pre-amp and redraws the chart over the merged set — same wiring
+            as REW import.
+            """
+            state['staged'].bands.extend(clone_bands(preset.bands))
+            _band_table.refresh()
+            _mark_changed()
+
+        def _delete_preset(preset: Preset) -> None:
+            presets_dal.delete_preset(preset.id)
+            _presets_menu.refresh()
+            ui.notify(f'Deleted preset "{preset.name}"', type='positive', position='top-right')
+
+        def _open_save_preset_dialog() -> None:
+            """Opens a dialog to capture the current bands as a named, reusable preset."""
+            with ui.dialog() as dialog, ui.card().classes('w-96'):
+                ui.label('Save preset').classes('font-medium text-lg mb-1')
+                ui.label('Capture the current bands as a reusable preset you can append to any player.').classes(
+                    'text-xs text-gray-500 mb-2'
+                )
+                name_field = (
+                    ui.input('Preset name', placeholder='My preset')
+                    .props('outlined dense')
+                    .classes('w-full')
+                    .mark('preset-save-name')
+                )
+
+                def _on_save_preset() -> None:
+                    preset = Preset(
+                        id=uuid.uuid4().hex,
+                        name=(name_field.value or '').strip() or 'Untitled',
+                        bands=clone_bands(state['staged'].bands),
+                    )
+                    presets_dal.save_preset(preset)
+                    _presets_menu.refresh()
+                    ui.notify(f'Saved preset "{preset.name}"', type='positive', position='top-right')
+                    dialog.close()
+
+                with ui.row().classes('justify-between w-full mt-2'):
+                    ui.button('Cancel', on_click=dialog.close).props('flat dense')
+                    ui.button('Save', on_click=_on_save_preset).props('dense').classes('bg-gray-800 text-white').mark(
+                        'preset-save-run'
+                    )
+
+            dialog.open()
+
+        @ui.refreshable
+        def _presets_menu() -> None:
+            ui.menu_item('Loudness (seed bands)', on_click=lambda: _apply_preset('loudness')).mark('preset-loudness')
+            ui.menu_item('Flat / clear all bands', on_click=lambda: _apply_preset('flat')).mark('preset-flat')
+            saved = presets_dal.get_all_presets()
+            if saved:
+                ui.separator()
+                for preset in saved:
+                    with ui.menu_item(on_click=lambda p=preset: _apply_saved_preset(p)).mark('preset-saved'):
+                        with ui.row().classes('items-center justify-between w-full'):
+                            ui.label(preset.name)
+                            (
+                                ui.button(icon='delete', on_click=lambda p=preset: _delete_preset(p))
+                                .props('flat dense round size=sm')
+                                .classes('text-gray-400')
+                                .on('click.stop')  # .stop: delete doesn't also fire append
+                            )
+            ui.separator()
+            ui.menu_item('Save current as preset…', on_click=_open_save_preset_dialog).mark('preset-save-as')
+
         def _open_import_dialog() -> None:
             """Opens a paste-import dialog that appends REW / Equalizer APO filters as bands.
 
@@ -432,8 +503,7 @@ class Page:
                 )
                 with ui.button('Presets', icon='tune').props('flat dense'):
                     with ui.menu():
-                        ui.menu_item('Loudness (seed bands)', on_click=lambda: _apply_preset('loudness')).mark('preset-loudness')
-                        ui.menu_item('Flat / clear all bands', on_click=lambda: _apply_preset('flat')).mark('preset-flat')
+                        _presets_menu()
                 with ui.button('Config', icon='import_export').props('flat dense'):
                     with ui.menu():
                         ui.menu_item('Import REW…', on_click=_open_import_dialog).mark('config-import')

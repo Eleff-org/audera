@@ -1,4 +1,4 @@
-from audera.models.dsp import Band, DSPConfig
+from audera.models.dsp import Band, DSPConfig, Preset
 
 
 def test_band_defaults():
@@ -75,3 +75,27 @@ def test_dsp_config_id_is_identity():
     b = DSPConfig(id='same', preamp_db=-3.0)
     assert a == b
     assert a != DSPConfig(id='other', preamp_db=-3.0)
+
+
+def test_preset_defaults():
+    preset = Preset(id='p1', name='My preset')
+    assert preset.bands == []
+
+
+def test_preset_round_trip():
+    preset = Preset(
+        id='p1',
+        name='Loudness',
+        bands=[
+            Band(id='b1', type='LowShelf', freq=90.0, gain=10.0, q=0.7),
+            Band(id='b2', type='HighShelf', freq=8000.0, gain=6.0, q=0.7),
+        ],
+    )
+    result = Preset.model_validate(preset.model_dump())
+    assert result == preset
+    assert result.id == 'p1'
+    assert result.name == 'Loudness'
+    # Bands reconstruct as real `Band`s, not raw dicts.
+    assert all(isinstance(band, Band) for band in result.bands)
+    assert result.bands[0].type == 'LowShelf'
+    assert result.bands[1].freq == 8000.0

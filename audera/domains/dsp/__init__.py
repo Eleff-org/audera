@@ -9,7 +9,7 @@ so it is unit-testable with zero I/O.
 
 from audera.domains.dsp.compiler import compile_pipeline
 from audera.domains.dsp.headroom import auto_preamp_db, response_curve, response_peak_db
-from audera.domains.dsp.presets import loudness_preset
+from audera.domains.dsp.presets import clone_bands, loudness_preset
 from audera.domains.dsp.rew import format_rew, parse_rew
 
 __all__ = [
@@ -17,6 +17,7 @@ __all__ = [
     'auto_preamp_db',
     'response_curve',
     'response_peak_db',
+    'clone_bands',
     'loudness_preset',
     'format_rew',
     'parse_rew',

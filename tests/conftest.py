@@ -47,6 +47,7 @@ def audera_home(tmp_path, monkeypatch):
         ('audera.dal.groups', 'groups'),
         ('audera.dal.streams', 'streams'),
         ('audera.dal.dsp', 'dsp'),
+        ('audera.dal.presets', 'dsp/presets'),
         ('audera.dal.settings', 'settings'),
     ]:
         dest = str(tmp_path / subdir)

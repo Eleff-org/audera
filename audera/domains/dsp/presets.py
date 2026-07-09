@@ -24,3 +24,13 @@ def loudness_preset() -> list[Band]:
         Band(id=uuid.uuid4().hex, type='LowShelf', freq=90.0, gain=_LOUDNESS_LOW_BOOST, q=0.7),
         Band(id=uuid.uuid4().hex, type='HighShelf', freq=8000.0, gain=_LOUDNESS_HIGH_BOOST, q=0.7),
     ]
+
+
+def clone_bands(bands: list[Band]) -> list[Band]:
+    """Returns deep copies of `bands`, each with a fresh unique id.
+
+    Reused by both applying a saved preset (append onto the current config) and saving
+    one (capture the current bands). The fresh ids keep `audera_peq_<id>` filter names
+    from colliding within a single compiled config.
+    """
+    return [band.model_copy(deep=True, update={'id': uuid.uuid4().hex}) for band in bands]

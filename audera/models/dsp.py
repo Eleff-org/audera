@@ -95,3 +95,26 @@ class DSPConfig(BaseModel):
     def __repr__(self) -> str:
         """Returns a `DSPConfig` object as a json-formatted `str`."""
         return json.dumps(self.to_dict(), indent=2)
+
+
+class Preset(BaseModel):
+    """A `class` that represents a named, reusable set of parametric-EQ bands.
+
+    A preset is its own entity (not a flavored `DSPConfig`): a display name plus a
+    list of bands that can be cloned and appended onto any player's configuration.
+    Unlike `Band`/`DSPConfig`, it serializes via pydantic directly
+    (`model_dump()`/`model_validate`) — there is no legacy on-disk shape to preserve.
+
+    Attributes
+    ----------
+    id: `str`
+        The preset identifier (uuid; identity + file key).
+    name: `str`
+        The display name (not identity — duplicate names are allowed).
+    bands: `list[Band]`
+        The parametric-EQ bands captured by the preset.
+    """
+
+    id: str
+    name: str
+    bands: list[Band] = Field(default_factory=list)

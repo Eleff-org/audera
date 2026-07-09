@@ -11,8 +11,9 @@ import audera.ui.streamer.pages as streamer_pages
 from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import players as players_dal
+from audera.dal import presets as presets_dal
 from audera.dal import settings as settings_dal
-from audera.models.dsp import Band, DSPConfig
+from audera.models.dsp import Band, DSPConfig, Preset
 from audera.models.player import Player
 from audera.models.settings import Settings
 from audera.ui import components, features
@@ -627,3 +628,42 @@ async def test_dsp_export_banner_shown_after_edit(audera_home, mock_snapserver_w
     await user.should_see('Bands (2)')
     user.find(marker='config-export').click()
     await user.should_see(marker='export-unsaved-banner')
+
+
+# --- Named user presets (WS-8) -----------------------------------------------------------
+
+
+async def test_dsp_saved_preset_appears_and_appends(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    presets_dal.save_preset(
+        Preset(
+            id='p1',
+            name='Bass Boost',
+            bands=[
+                Band(id='b1', type='LowShelf', freq=90.0, gain=6.0, q=0.7),
+                Band(id='b2', type='Peaking', freq=1000.0, gain=-3.0, q=2.0),
+            ],
+        )
+    )
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see('Bands (0)')
+    await user.should_see('Bass Boost')  # the saved preset lists in the menu by name
+    user.find(marker='preset-saved').click()
+    await user.should_see('Bands (2)')  # apply = append cloned bands
+
+
+async def test_dsp_save_current_as_preset_persists(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='preset-loudness').click()  # stage two bands to capture
+    await user.should_see('Bands (2)')
+    user.find(marker='preset-save-as').click()
+    with user:
+        user.find(kind=ui.input).elements.pop().value = 'My Loudness'  # the dialog's only input
+    user.find(marker='preset-save-run').click()
+    await user.should_see('Saved preset')
+
+    saved = presets_dal.get_all_presets()
+    assert len(saved) == 1
+    assert saved[0].name == 'My Loudness'
+    assert len(saved[0].bands) == 2

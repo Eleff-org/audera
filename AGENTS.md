@@ -46,6 +46,8 @@ All models are `@dataclass` with `from_dict()` / `from_config()` / `to_dict()` /
 
 `Player.group_id` and `Group.stream_id` are empty strings (not `None`) when unassigned — required by the pytensils `'str'` DTYPES constraint.
 
+The `dsp` models (`Band`/`DSPConfig`/`Preset`) are pydantic `BaseModel` (the `@dataclass` convention has drifted here); `Preset` (`id, name, bands`) serializes via `model_dump()`/`model_validate` — no hand-written `to_dict`.
+
 ## DAL
 
 - `players`, `groups`, `streams` use `pytensils.config.Handler` + DuckDB for bulk queries via `read_json_auto`.
