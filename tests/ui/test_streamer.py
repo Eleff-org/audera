@@ -562,3 +562,68 @@ async def test_dsp_save_applies_and_persists(audera_home, mock_snapserver_with_c
     config_id = players_dal.get('abc123').dsp_id
     assert config_id
     assert len(dsp_dal.get(config_id).bands) == 2
+
+
+# --- REW import/export via Config ▾ (WS-7) -----------------------------------------------
+
+
+async def test_dsp_config_menu_exposes_import_and_export(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    assert user.find(marker='config-import').elements
+    assert user.find(marker='config-export').elements
+
+
+async def test_dsp_import_appends_bands(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see('Bands (0)')
+    user.find(marker='config-import').click()
+    rew = 'Filter 1: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.41\nFilter 2: ON LS Fc 90 Hz Gain 4.0 dB Q 0.7'
+    with user:
+        user.find(kind=ui.textarea).elements.pop().value = rew
+    user.find(marker='config-import-run').click()
+    await user.should_see('Bands (2)')
+    await user.should_see('Imported 2 band(s)')
+
+
+async def test_dsp_import_notifies_skipped_lines(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='config-import').click()
+    rew = 'Filter 1: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.41\nFilter 2: ON NO Fc 60 Hz Gain 0 dB Q 5.0'
+    with user:
+        user.find(kind=ui.textarea).elements.pop().value = rew
+    user.find(marker='config-import-run').click()
+    await user.should_see('Bands (1)')
+    await user.should_see('Imported 1 band(s), skipped 1 line(s)')
+
+
+async def test_dsp_export_renders_saved_config_text(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='config-export').click()
+    await user.should_see('Preamp:')
+    await user.should_see('Filter 1:')
+
+
+async def test_dsp_export_banner_absent_on_clean_open(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='config-export').click()
+    await user.should_see('Filter 1:')
+    await user.should_not_see(marker='export-unsaved-banner')
+
+
+async def test_dsp_export_banner_shown_after_edit(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(content='+ Add band').click()  # stage an edit so staged ≠ saved
+    await user.should_see('Bands (2)')
+    user.find(marker='config-export').click()
+    await user.should_see(marker='export-unsaved-banner')

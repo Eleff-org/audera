@@ -17,7 +17,7 @@ from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
 from audera.dal import players as players_dal
 from audera.dal import settings as settings_dal
-from audera.domains.dsp import auto_preamp_db, compile_pipeline, loudness_preset
+from audera.domains.dsp import auto_preamp_db, compile_pipeline, format_rew, loudness_preset, parse_rew
 from audera.models.dsp import Band
 from audera.models.settings import Settings
 from audera.ui import components, features
@@ -268,6 +268,76 @@ class Page:
             _band_table.refresh()
             _mark_changed()
 
+        def _open_import_dialog() -> None:
+            """Opens a paste-import dialog that appends REW / Equalizer APO filters as bands.
+
+            Import is append-only (it never replaces existing bands) and routes through
+            `_mark_changed`, so the auto-ceiling re-clamps the pre-amp and the chart redraws
+            over the merged band set. Unparseable lines are surfaced in the notification
+            rather than dropped.
+            """
+            with ui.dialog() as dialog, ui.card().classes('w-96'):
+                ui.label('Import REW filters').classes('font-medium text-lg mb-1')
+                ui.label(
+                    'Paste a REW or Equalizer APO filter export. Bands are appended to the current configuration; '
+                    'the pre-amp stays auto-protected.'
+                ).classes('text-xs text-gray-500 mb-2')
+                text = (
+                    ui.textarea(placeholder='Filter 1: ON PK Fc 1000 Hz Gain -3.0 dB Q 1.41')
+                    .props('outlined autogrow')
+                    .classes('w-full font-mono')
+                )
+
+                def _on_import() -> None:
+                    result = parse_rew(text.value or '')
+                    state['staged'].bands.extend(result.bands)
+                    _band_table.refresh()
+                    _mark_changed()  # re-clamps pre-amp + redraws chart over the merged bands
+                    message = f'Imported {len(result.bands)} band(s)'
+                    if result.skipped:
+                        message += f', skipped {len(result.skipped)} line(s)'
+                    ui.notify(message, type='positive', position='top-right')
+                    dialog.close()
+
+                with ui.row().classes('justify-between w-full mt-2'):
+                    ui.button('Cancel', on_click=dialog.close).props('flat dense')
+                    ui.button('Import', on_click=_on_import).props('dense').classes('bg-gray-800 text-white').mark(
+                        'config-import-run'
+                    )
+
+            dialog.open()
+
+        def _open_export_dialog() -> None:
+            """Opens a dialog showing the *saved* configuration as re-importable REW text.
+
+            The text is always the saved config (never the staged edits): a partial edit
+            would export a config that never clip-guarded, so Save is the gate. When the
+            editor is dirty a banner spells this out; Copy and Download surface the same text.
+            """
+            rew_text = format_rew(state['saved'].preamp_db, state['saved'].bands)
+            with ui.dialog() as dialog, ui.card().classes('w-96'):
+                ui.label('Export REW filters').classes('font-medium text-lg mb-1')
+                if _dirty():
+                    ui.label(
+                        'There are unsaved changes. Export downloads only the saved configuration — '
+                        'Save first to export the current editor contents.'
+                    ).classes('text-xs text-amber-500 mb-2').mark('export-unsaved-banner')
+                ui.textarea(value=rew_text).props('outlined readonly autogrow').classes('w-full font-mono')
+
+                def _on_copy() -> None:
+                    ui.clipboard.write(rew_text)  # synchronous in NiceGUI 3.11.1
+                    ui.notify('Copied to clipboard', type='positive', position='top-right')
+
+                def _on_download() -> None:
+                    ui.download.content(rew_text, f'{live.name}-dsp.txt')
+
+                with ui.row().classes('justify-between w-full mt-2'):
+                    ui.button('Close', on_click=dialog.close).props('flat dense')
+                    ui.button('Copy', on_click=_on_copy).props('dense')
+                    ui.button('Download .txt', on_click=_on_download).props('dense').classes('bg-gray-800 text-white')
+
+            dialog.open()
+
         def _on_reset() -> None:
             state['staged'] = state['saved'].model_copy(deep=True)
             preamp_field.value = state['staged'].preamp_db
@@ -364,6 +434,10 @@ class Page:
                     with ui.menu():
                         ui.menu_item('Loudness (seed bands)', on_click=lambda: _apply_preset('loudness')).mark('preset-loudness')
                         ui.menu_item('Flat / clear all bands', on_click=lambda: _apply_preset('flat')).mark('preset-flat')
+                with ui.button('Config', icon='import_export').props('flat dense'):
+                    with ui.menu():
+                        ui.menu_item('Import REW…', on_click=_open_import_dialog).mark('config-import')
+                        ui.menu_item('Export…', on_click=_open_export_dialog).mark('config-export')
                 ui.space()
                 ui.button('Reset', on_click=_on_reset).props('flat dense')
                 ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
