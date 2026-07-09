@@ -50,9 +50,8 @@ The `dsp` models (`Band`/`DSPConfig`/`Preset`) are pydantic `BaseModel` (the `@d
 
 ## DAL
 
-- `players`, `groups`, `streams` use `pytensils.config.Handler` + DuckDB for bulk queries via `read_json_auto`.
-- `dsp` uses plain `json` — the pipeline dict is too complex for DTYPES validation.
-- Config files: `~/.audera/{players,groups,streams,dsp}/{id}.json`
+- `dsp`, `presets`, and `settings` persist via plain `json` — the pipeline/bands dicts are too complex for DTYPES validation.
+- Config files: `~/.audera/{dsp,dsp/presets,settings}/{id}.json`
 
 ## Code style
 
