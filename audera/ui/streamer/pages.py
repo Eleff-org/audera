@@ -15,7 +15,6 @@ from nicegui import ui
 import audera
 from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
-from audera.dal import players as players_dal
 from audera.dal import presets as presets_dal
 from audera.dal import settings as settings_dal
 from audera.domains.dsp import auto_preamp_db, clone_bands, compile_pipeline, format_rew, loudness_preset, parse_rew
@@ -190,11 +189,9 @@ class Page:
                 ui.label('Player not found or unreachable.').classes('text-gray-500')
             return
 
-        # `SnapserverClient.get_clients` always reports `dsp_id=''` (it has no view of the
-        # persisted FK), so recover the link from the players DAL before resolving —
-        # otherwise `resolve_for_player` would re-mint an orphan config on every open.
-        persisted = players_dal.get(player_id) if players_dal.exists(player_id) else live
-        saved = dsp_dal.resolve_for_player(persisted)
+        # The config is keyed by the player's own id (`dsp/{id}.json` is the link), so
+        # `live.id` is all that's needed to resolve it.
+        saved = dsp_dal.resolve_for_player(live)
         # Clamp the baseline once so an over-hot legacy config opens clean, not falsely dirty.
         saved.preamp_db = min(saved.preamp_db, auto_preamp_db(saved.bands))
         state = {'saved': saved, 'staged': saved.model_copy(deep=True)}
@@ -419,9 +416,8 @@ class Page:
             """Compiles → validates → pushes the live pipeline, then persists the config.
 
             Pattern B (live apply, no restart): the daemon owns volume and `SetConfigJson`
-            leaves the fader untouched, so no volume snapshot/restore is needed. The
-            `dsp_id` FK was already persisted by `resolve_for_player` at page load, so Save
-            only updates the config file.
+            leaves the fader untouched, so no volume snapshot/restore is needed. The config
+            is keyed by the player id (`dsp/{id}.json`), so Save only updates that one file.
             """
             camilla = _camilladsp(live.host)
             try:

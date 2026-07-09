@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import List
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class Player(BaseModel):
@@ -27,8 +27,6 @@ class Player(BaseModel):
         Whether the client is muted.
     group_id: `str`
         The identifier of the Snapcast group this client belongs to.
-    dsp_id: `str`
-        The identifier of the `DSPConfig` this client references; '' = unassigned.
     name: `str`
         The display name from Snapcast responses; not persisted.
     """
@@ -40,37 +38,13 @@ class Player(BaseModel):
     volume: int = 100
     muted: bool = False
     group_id: str = ''
-    dsp_id: str = ''
     name: str = Field(default='', exclude=True)
     latency_ms: int = Field(default=0, ge=-500, le=500, exclude=True)
-
-    @field_validator('dsp_id', mode='before')
-    @classmethod
-    def _coerce_dsp_id(cls, v) -> str:
-        """Coerces a NULL `dsp_id` (from `read_json_auto` on old files) to ''."""
-        return '' if v is None else v
 
     @classmethod
     def from_dict(cls, dict_object: dict) -> 'Player':
         """Returns a `Player` object from a `dict`."""
         return cls.model_validate(dict_object)
-
-    def to_dict(self) -> dict:
-        """Returns a `Player` object as a `dict`."""
-        return {
-            'id': self.id,
-            'host': self.host,
-            'port': self.port,
-            'connected': self.connected,
-            'volume': self.volume,
-            'muted': self.muted,
-            'group_id': self.group_id,
-            'dsp_id': self.dsp_id,
-        }
-
-    def __repr__(self) -> str:
-        """Returns a `Player` object as a json-formatted `str`."""
-        return json.dumps(self.to_dict(), indent=2)
 
     def __eq__(self, compare) -> bool:
         """Returns `True` when compare is an instance of self, excluding `name`."""
@@ -84,7 +58,6 @@ class Player(BaseModel):
                 and self.muted == compare.muted
                 and self.group_id == compare.group_id
                 and self.latency_ms == compare.latency_ms
-                and self.dsp_id == compare.dsp_id
             )
         return False
 

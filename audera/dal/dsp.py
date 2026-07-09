@@ -2,10 +2,9 @@
 
 import json
 import os
-import uuid
 from typing import Union
 
-from audera.dal import path, players
+from audera.dal import path
 from audera.models import dsp, player
 
 PATH: Union[str, os.PathLike] = os.path.join(path.HOME, 'dsp')
@@ -62,23 +61,18 @@ def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
 
 
 def resolve_for_player(player_: player.Player) -> dsp.DSPConfig:
-    """Returns the player's editable `DSPConfig`, minting and linking one if unassigned.
+    """Returns the player's editable `DSPConfig`, keyed by the player's own Snapcast id.
 
-    If `player_.dsp_id` is set, the referenced config is returned. Otherwise a fresh,
-    empty `DSPConfig` is minted, saved, and linked to the player (via `players.update`
-    persisting the `dsp_id`). This is a one-time create-and-link — it reads no legacy
-    file.
+    The config file *is* the link: it lives at `dsp/{player_.id}.json`, so no FK or player
+    shadow file is needed. A fresh empty config is created on first open and re-read on
+    every open thereafter.
 
     Parameters
     ----------
     player_: `audera.models.player.Player`
         An instance of an `audera.models.player.Player` object.
     """
-    if player_.dsp_id:
-        return get(player_.dsp_id)
-    dsp_config = save(dsp.DSPConfig(id=uuid.uuid4().hex))
-    players.update(player_.model_copy(update={'dsp_id': dsp_config.id}))
-    return dsp_config
+    return get_or_create(dsp.DSPConfig(id=player_.id))
 
 
 def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:

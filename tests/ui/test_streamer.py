@@ -10,7 +10,6 @@ from nicegui.testing import User
 import audera.ui.streamer.pages as streamer_pages
 from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import dsp as dsp_dal
-from audera.dal import players as players_dal
 from audera.dal import presets as presets_dal
 from audera.dal import settings as settings_dal
 from audera.models.dsp import Band, DSPConfig, Preset
@@ -473,14 +472,13 @@ async def test_dsp_band_count_reflects_actions(audera_home, mock_snapserver_with
         await user.should_see(expected)
 
 
-def _seed_linked_dsp(config: DSPConfig) -> None:
-    """Persists a DSP config and links player 'abc123' to it (the page's load path).
+def _seed_dsp(config: DSPConfig) -> None:
+    """Persists a DSP config keyed by player 'abc123' (the page's load path).
 
-    The editor recovers the config via `players_dal` → `resolve_for_player`, so a linked
-    player record is required for the seeded config to open instead of a fresh empty one.
+    The config is keyed by the player id (`dsp/abc123.json` is the link), so persisting it
+    under that key is all `resolve_for_player` needs to open it instead of a fresh empty one.
     """
-    dsp_dal.create(config)
-    players_dal.create(Player(id='abc123', host='192.168.1.50', port=1704, connected=True, dsp_id=config.id))
+    dsp_dal.save(config.model_copy(update={'id': 'abc123'}))
 
 
 async def test_dsp_bandless_shows_chart_message_and_hides_chart(
@@ -504,7 +502,7 @@ async def test_dsp_preamp_clamp_keeps_below_ceiling_value(
     audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
 ):
     # A +6 dB boost sets the ceiling at ~-6 dB; -10 is below it, so the clamp leaves it.
-    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     with user:
@@ -518,7 +516,7 @@ async def test_dsp_preamp_clamp_pulls_above_ceiling_value_down(
 ):
     # Raising the pre-amp to -2 dB over a +6 dB boost would clip, so the clamp snaps it back
     # down to the ~-6 dB clip-safe ceiling.
-    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     with user:
@@ -530,7 +528,7 @@ async def test_dsp_preamp_clamp_pulls_above_ceiling_value_down(
 async def test_dsp_over_hot_saved_config_opens_clean(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
     # Saved with a hot 0 dB pre-amp above the +6 dB boost ceiling; the load-time baseline
     # clamp pulls it down so the editor opens without a false "Unsaved changes" flag.
-    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=0.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(id='cfg1', preamp_db=0.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     await user.should_see(kind=ui.echart)
@@ -559,10 +557,9 @@ async def test_dsp_save_applies_and_persists(audera_home, mock_snapserver_with_c
     assert any(name.startswith('audera_peq_') for name in compiled['filters'])
     assert 'reset_clipped_samples' in mock_camilladsp_dsp
 
-    # The config is persisted with the two bands and the player is linked to it.
-    config_id = players_dal.get('abc123').dsp_id
-    assert config_id
-    assert len(dsp_dal.get(config_id).bands) == 2
+    # The config is persisted keyed by the player id, carrying the two bands.
+    assert dsp_dal.exists('abc123')
+    assert len(dsp_dal.get('abc123').bands) == 2
 
 
 # --- REW import/export via Config ▾ (WS-7) -----------------------------------------------
@@ -603,7 +600,7 @@ async def test_dsp_import_notifies_skipped_lines(audera_home, mock_snapserver_wi
 
 
 async def test_dsp_export_renders_saved_config_text(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(marker='config-export').click()
@@ -612,7 +609,7 @@ async def test_dsp_export_renders_saved_config_text(audera_home, mock_snapserver
 
 
 async def test_dsp_export_banner_absent_on_clean_open(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(marker='config-export').click()
@@ -621,7 +618,7 @@ async def test_dsp_export_banner_absent_on_clean_open(audera_home, mock_snapserv
 
 
 async def test_dsp_export_banner_shown_after_edit(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    _seed_linked_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+    _seed_dsp(DSPConfig(id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')
     user.find(content='+ Add band').click()  # stage an edit so staged ≠ saved

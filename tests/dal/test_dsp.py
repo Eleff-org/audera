@@ -1,6 +1,6 @@
 import audera.dal.dsp as dsp_dal
-import audera.dal.players as players_dal
-from audera.models.dsp import Band, DSPConfig
+import audera.dal.presets as presets_dal
+from audera.models.dsp import Band, DSPConfig, Preset
 from audera.models.player import Player
 
 
@@ -13,8 +13,8 @@ def _make_dsp(id='dsp-1') -> DSPConfig:
     )
 
 
-def _make_player(id='abc123', dsp_id='') -> Player:
-    return Player(id=id, host='192.168.1.50', port=1704, connected=True, dsp_id=dsp_id)
+def _make_player(id='abc123') -> Player:
+    return Player(id=id, host='192.168.1.50', port=1704, connected=True)
 
 
 def test_dsp_create(audera_home):
@@ -82,27 +82,43 @@ def test_dsp_get_or_create_reads(audera_home):
     assert result == config
 
 
-def test_resolve_for_player_mints_and_links(audera_home):
-    player = _make_player(dsp_id='')
-    players_dal.create(player)
+def test_resolve_for_player_creates_keyed_by_player_id(audera_home):
+    player = _make_player()
 
     config = dsp_dal.resolve_for_player(player)
 
-    # The minted config is saved, keyed by its own id
-    assert dsp_dal.exists(config.id)
+    # The config is created keyed by the player's own id — the filename is the link.
+    assert config.id == player.id
+    assert dsp_dal.exists(player.id)
     assert config.bands == []
     assert config.preamp_db == 0.0
 
-    # The player is linked (dsp_id persisted) and the returned config re-reads
-    assert players_dal.get(player.id).dsp_id == config.id
-    assert dsp_dal.get(config.id) == config
+
+def test_resolve_for_player_idempotent_after_edit(audera_home):
+    player = _make_player()
+    dsp_dal.resolve_for_player(player)  # first open creates an empty config
+
+    edited = _make_dsp(id=player.id)
+    dsp_dal.update(edited)
+
+    # A second open re-reads the edited config — it never re-mints an empty one.
+    assert dsp_dal.resolve_for_player(player) == edited
 
 
 def test_resolve_for_player_returns_existing(audera_home):
-    existing = _make_dsp(id='dsp-existing')
+    existing = _make_dsp(id='abc123')
     dsp_dal.create(existing)
-    player = _make_player(dsp_id='dsp-existing')
-    players_dal.create(player)
+    player = _make_player(id='abc123')
 
     config = dsp_dal.resolve_for_player(player)
     assert config == existing
+
+
+def test_resolve_for_player_ignores_preset_namespace(audera_home):
+    # A preset keyed with the same id lives under `dsp/presets/`, not `dsp/`.
+    presets_dal.save_preset(Preset(id='abc123', name='Bass', bands=[Band(id='b1', type='LowShelf', freq=90.0, gain=6.0)]))
+
+    config = dsp_dal.resolve_for_player(_make_player(id='abc123'))
+
+    # The preset is never returned — the player config is a fresh, empty one.
+    assert config.bands == []
