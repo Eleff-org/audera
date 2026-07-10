@@ -71,3 +71,18 @@ No implementation logic belongs in `__init__.py`.
 Features with more than one valid UX ("mute checkbox vs. disabled toggle") are registered in `audera/ui/features.py`'s `FEATURES` catalog, not hard-coded as a single rendering path. Every feature ships 2-3 `Option`s; the first is the default. Resolve a user's selection with `audera.ui.features.selected(settings, key)` or `flag_enabled(settings, key, option)` — never read `settings.features[...]` directly.
 
 When asked to implement a new UI feature, treat optionality as the default, not an afterthought: if there's more than one defensible UX for it, propose a `Feature` catalog entry (or ask the user which options to offer) before picking one and hard-coding it. Only skip the catalog when a feature genuinely has one correct UX with no reasonable alternative.
+
+## Previewing UI changes (screenshot loop)
+
+The user iterates on UI from screenshots. Most player UI only renders with live Snapcast clients, so preview a component in isolation rather than the full app:
+
+1. Write a throwaway `_btn_preview.py` at the repo root that reproduces the exact widget/props against `components.theme.apply_defaults()`. Reuse **port 8080** every run so the user doesn't open new browser tabs.
+2. Run it as a **background task** (not `foo &`) so it can be killed cleanly. `uv run python`'s child process holds the socket, and a stray one causes a port conflict (WinError 10048) on the next run — stop it with the task tooling, not `kill`.
+3. Screenshot headless and review, then iterate:
+   ```bash
+   "/c/Program Files/Google/Chrome/Application/chrome.exe" --headless --disable-gpu --screenshot=/tmp/preview.png --force-device-scale-factor=4 --virtual-time-budget=4000 http://127.0.0.1:8080
+   ```
+   `--force-device-scale-factor` zooms for pixel inspection; `--virtual-time-budget` gives Material Symbols web-fonts time to load.
+4. **Clean up before committing**: stop the background server, delete `_btn_preview.py`, and free port 8080. The harness is never committed.
+
+The real app runs with `reload=False`, so the user restarts it to see applied changes.

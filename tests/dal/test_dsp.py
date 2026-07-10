@@ -1,3 +1,5 @@
+import os
+
 import audera.dal.dsp as dsp_dal
 from audera.models.dsp import Band, DSPConfig
 
@@ -58,6 +60,23 @@ def test_dsp_bands_round_trip(audera_home):
     result = dsp_dal.get(config.player_id)
     assert result == config
     assert [b.type for b in result.bands] == ['Lowshelf', 'Highshelf', 'Peaking']
+
+
+def test_dsp_round_trip_with_mac_address_id(audera_home):
+    # A Snapcast player id is a MAC address, whose colons are illegal in a Windows
+    # filename (OSError 22). The DAL must sanitize them out of `dsp/{player_id}.json`.
+    config = _make_dsp(player_id='d8:3a:dd:80:3c:91')
+    dsp_dal.create(config)
+
+    assert dsp_dal.exists('d8:3a:dd:80:3c:91')
+    assert dsp_dal.get('d8:3a:dd:80:3c:91') == config
+
+    # The file on disk carries no colon — the id maps to a filesystem-safe stem.
+    json_files = [f for f in os.listdir(dsp_dal.PATH) if f.endswith('.json')]
+    assert json_files == ['d8-3a-dd-80-3c-91.json']
+
+    dsp_dal.delete('d8:3a:dd:80:3c:91')
+    assert not dsp_dal.exists('d8:3a:dd:80:3c:91')
 
 
 def test_dsp_get_or_create_creates(audera_home):

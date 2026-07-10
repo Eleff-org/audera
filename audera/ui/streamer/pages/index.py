@@ -179,24 +179,28 @@ def build_players_tab(page: 'Page') -> None:
                         mute_cb = ui.checkbox(
                             'Mute', value=client.muted, on_change=lambda e, c=client: _on_mute_change(page, c.id, e.value)
                         )
-                    settings_btn = (
-                        ui.button(on_click=lambda c=client: _open_settings_dialog(page, c))
-                        .props('icon=edit_square flat dense round size=sm')
-                        .classes('text-gray-400')
-                        .mark('player-settings')
-                    )
-                    # Disable the settings icon for a disabled player, matching the intent of "disable".
-                    if minimized:
-                        settings_btn.set_enabled(False)
+                    # DSP first (left), then settings (right), both plain material icons. An icon reads
+                    # as clickable on its own (like the gear), and dropping the bordered circle avoids
+                    # the sub-pixel oval it rendered at some viewport widths. As two icon buttons with
+                    # identical props they are the same size by construction — no pixel pinning needed.
+                    # `sym_o_airwave` (a Material Symbol — hence the `sym_o_` prefix) reads as sound
+                    # waves, fitting the DSP page.
                     dsp_btn = (
                         ui.button(on_click=lambda c=client: ui.navigate.to(f'/player/{c.id}/dsp'))
-                        .props('icon=equalizer flat dense round size=sm')
-                        .classes('text-gray-400')
+                        .props('icon=sym_o_airwave flat dense round size=sm')
                         .mark('player-dsp')
                     )
-                    # A disabled player has no live pipeline to edit, so gray out its EQ icon too.
+                    # A disabled player has no live pipeline to edit, so gray out its DSP button too.
                     if minimized:
                         dsp_btn.set_enabled(False)
+                    settings_btn = (
+                        ui.button(on_click=lambda c=client: _open_settings_dialog(page, c))
+                        .props('icon=settings flat dense round size=sm')
+                        .mark('player-settings')
+                    )
+                    # Disable the settings button for a disabled player, matching the intent of "disable".
+                    if minimized:
+                        settings_btn.set_enabled(False)
 
             if minimized:
                 continue
@@ -239,7 +243,11 @@ def _open_settings_dialog(page: 'Page', client) -> None:
         ui.label('Settings').classes('font-medium text-lg mb-2')
 
         name_input = ui.input('Name', value=client.name).classes('w-full')
-        latency_input = ui.number('Latency (ms)', value=client.latency_ms, min=-500, max=500, step=1).classes('w-full')
+        latency_input = (
+            ui.number('Latency (ms)', value=client.latency_ms, min=-500, max=500, step=1)
+            .classes('w-full')
+            .props('hint="Adds playback delay."')
+        )
 
         # Snapcast volume is a sidecar kept at 100/0; CamillaDSP controls actual loudness.
         snap_vol = client.volume

@@ -17,20 +17,27 @@ def options(config: DSPConfig) -> dict:
     """
     frequencies, magnitudes = response_curve(config)
     return {
-        'grid': {'left': 44, 'right': 16, 'top': 16, 'bottom': 32},
+        'grid': {'left': 28, 'right': 12, 'top': 10, 'bottom': 20},
         'tooltip': {'trigger': 'axis'},
         'xAxis': {
             'type': 'log',
             'min': 20,
             'max': 20000,
-            'axisLabel': {'formatter': '{value} Hz'},
-            'splitLine': {'lineStyle': {'color': '#eeeeee'}},
+            # Only the endpoints carry a label — 20 Hz and 20 kHz — everything between is blank
+            # (`:`-prefixed key → NiceGUI evaluates the value as a JS function; see echart.js).
+            'axisLabel': {
+                'showMinLabel': True,
+                'showMaxLabel': True,
+                ':formatter': "v => v <= 20 ? '20' : v >= 20000 ? '20k' : ''",
+            },
+            'splitLine': {'show': False},
         },
         'yAxis': {
             'type': 'value',
             'min': -18,
             'max': 18,
-            'axisLabel': {'formatter': '{value} dB'},
+            'interval': 36,  # a single 36 dB step lands ticks only on the ±18 endpoints
+            'axisLabel': {'formatter': '{value}'},
             'splitLine': {'lineStyle': {'color': '#eeeeee'}},
         },
         'series': [
@@ -53,4 +60,4 @@ def render(config: DSPConfig) -> ui.echart:
     config: `audera.models.dsp.DSPConfig`
         An instance of an `audera.models.dsp.DSPConfig` object.
     """
-    return ui.echart(options(config)).classes('w-full h-64')
+    return ui.echart(options(config)).classes('w-full h-40')

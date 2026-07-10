@@ -431,7 +431,8 @@ async def test_players_tab_shows_dsp_icon(audera_home, mock_snapserver_with_clie
 async def test_dsp_page_renders(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
     Page().load()
     await user.open('/player/abc123/dsp')
-    await user.should_see('Advanced DSP')
+    await user.should_see('Living Room')  # breadcrumb player segment
+    await user.should_see('DSP')  # breadcrumb tail segment
     await user.should_see('Pre-amp (dB)')
     await user.should_see('Presets')
     await user.should_see('Save')
@@ -486,7 +487,7 @@ async def test_dsp_bandless_shows_chart_message_and_hides_chart(
 ):
     Page().load()
     await user.open('/player/abc123/dsp')
-    await user.should_see('Add a band')
+    await user.should_see('Load a preset')  # the empty-state tip
     await user.should_not_see(kind=ui.echart)
 
 

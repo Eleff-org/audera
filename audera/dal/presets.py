@@ -39,7 +39,7 @@ def save_preset(preset: dsp.Preset) -> dsp.Preset:
         An instance of an `audera.models.dsp.Preset` object.
     """
     os.makedirs(PATH, exist_ok=True)
-    file_path = os.path.join(PATH, '.'.join([preset.id, 'json']))
+    file_path = os.path.join(PATH, path.to_filename(preset.id))
     with open(file_path, 'w') as f:
         json.dump({'preset': preset.model_dump()}, f, indent=2)
     return preset
@@ -55,6 +55,6 @@ def delete_preset(id: str) -> None:
     id: `str`
         The preset identifier.
     """
-    file_path = os.path.join(PATH, '.'.join([id, 'json']))
+    file_path = os.path.join(PATH, path.to_filename(id))
     if os.path.isfile(file_path):
         os.remove(file_path)

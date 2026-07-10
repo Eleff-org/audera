@@ -176,8 +176,8 @@ def render(page: 'Page', player_id: str) -> None:
 
     @ui.refreshable
     def _presets_menu() -> None:
-        ui.menu_item('Loudness (seed bands)', on_click=lambda: _apply_preset('loudness')).mark('preset-loudness')
-        ui.menu_item('Flat / clear all bands', on_click=lambda: _apply_preset('flat')).mark('preset-flat')
+        ui.menu_item('Loudness', on_click=lambda: _apply_preset('loudness')).mark('preset-loudness')
+        ui.menu_item('Clear', on_click=lambda: _apply_preset('flat')).mark('preset-flat')
         saved = presets_dal.get_all_presets()
         if saved:
             ui.separator()
@@ -192,7 +192,7 @@ def render(page: 'Page', player_id: str) -> None:
                             .on('click.stop')  # .stop: delete doesn't also fire append
                         )
         ui.separator()
-        ui.menu_item('Save current as preset…', on_click=_open_save_preset_dialog).mark('preset-save-as')
+        ui.menu_item('New preset', on_click=_open_save_preset_dialog).mark('preset-save-as')
 
     def _open_import_dialog() -> None:
         """Opens a paste-import dialog that appends CamillaDSP YAML filters as bands.
@@ -315,13 +315,14 @@ def render(page: 'Page', player_id: str) -> None:
 
     @ui.refreshable
     def _band_table() -> None:
-        with ui.row(wrap=False).classes('items-center gap-2 w-full text-xs text-gray-500'):
-            ui.label('On').classes('w-10 text-center')
-            ui.label('Type').classes('w-32')
-            ui.label('Freq (Hz)').classes('w-24')
-            ui.label('Gain (dB)').classes('w-24')
-            ui.label('Q').classes('w-20')
-            ui.label('').classes('w-10')
+        if state['staged'].bands:  # the column labels only make sense once there's a row beneath them
+            with ui.row(wrap=False).classes('items-center gap-2 w-full text-xs text-gray-500'):
+                ui.label('On').classes('w-10 text-center')
+                ui.label('Type').classes('w-32')
+                ui.label('Freq (Hz)').classes('w-24')
+                ui.label('Gain (dB)').classes('w-24')
+                ui.label('Q').classes('w-20')
+                ui.label('').classes('w-10')
         for band in state['staged'].bands:
             with ui.row(wrap=False).classes('items-center gap-2 w-full'):
                 ui.checkbox(value=band.enabled, on_change=lambda e, b=band: _on_enabled(b, e.value)).classes('w-10')
@@ -346,11 +347,29 @@ def render(page: 'Page', player_id: str) -> None:
         ui.button('+ Add band', on_click=_add_band).props('flat dense').classes('mt-2')
 
     with ui.row().classes('items-center justify-between w-full'):
-        ui.label(f'{live.name} · Advanced DSP').classes('text-lg font-medium')
-        ui.link('‹ Players', '/')
+        with ui.row().classes('items-center gap-2 text-sm'):
+            ui.link('Players', '/').classes('text-gray-500 no-underline hover:text-gray-700')
+            ui.label('›').classes('text-gray-400')
+            ui.label(live.name).classes('text-gray-500')
+            ui.label('›').classes('text-gray-400')
+            ui.label('DSP').classes('text-gray-800 font-medium')  # the current segment leads
+        ui.button(icon='arrow_back', on_click=lambda: ui.navigate.to('/')).props('flat dense round size=sm').mark('dsp-back')
 
     with ui.column().classes('w-full gap-3'):
-        with ui.row().classes('items-center gap-4 w-full'):
+        # Presets and Config are the two "sources" that build a pipeline, so they lead on their
+        # own row; the pre-amp and the Reset/Save actions sit in line beneath them.
+        with ui.row().classes('items-center gap-2 w-full'):
+            with ui.button('Presets').props('flat dense icon-right=arrow_drop_down'):
+                with ui.menu():
+                    _presets_menu()
+            with ui.button('Config').props('flat dense icon-right=arrow_drop_down'):
+                with ui.menu():
+                    ui.menu_item('Import', on_click=_open_import_dialog).mark('config-import')
+                    ui.menu_item('Export', on_click=_open_export_dialog).mark('config-export')
+
+        # wrap=False keeps Reset/Save on the pre-amp's line: the widened field would
+        # otherwise push Save onto a second row at narrower window widths.
+        with ui.row(wrap=False).classes('items-center gap-4 w-full'):
             preamp_field = (
                 ui.number(
                     'Pre-amp (dB) · auto-protected',
@@ -360,25 +379,24 @@ def render(page: 'Page', player_id: str) -> None:
                     on_change=_on_preamp,
                 )
                 .props('dense outlined')
-                .classes('w-40')
+                .classes('w-64')
             )
-            with ui.button('Presets', icon='tune').props('flat dense'):
-                with ui.menu():
-                    _presets_menu()
-            with ui.button('Config', icon='import_export').props('flat dense'):
-                with ui.menu():
-                    ui.menu_item('Import CamillaDSP YAML…', on_click=_open_import_dialog).mark('config-import')
-                    ui.menu_item('Export CamillaDSP YAML…', on_click=_open_export_dialog).mark('config-export')
             ui.space()
             ui.button('Reset', on_click=_on_reset).props('flat dense')
             ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
 
-        # Persistent handle + empty-state message, both toggled by the forward-closure
-        # `_mark_changed`: the chart shows only once a band exists, the message otherwise.
+        # Persistent handle + empty-state tip, both toggled by the forward-closure
+        # `_mark_changed`: the chart shows only once a band exists, the tip otherwise.
         chart = components.response_plot.render(state['staged'])
-        chart_message = ui.label(
-            'Add a band to see the live frequency-response curve — start from Presets ▾, or + Add band below.'
-        ).classes('text-sm text-gray-500 p-4')
+        with (
+            ui.column()
+            .classes('w-full gap-1 border-l-4 border-blue-500 rounded px-3 py-2')
+            .style('background-color: rgba(59, 130, 246, 0.1)') as chart_message
+        ):
+            with ui.row().classes('items-center gap-1.5'):
+                ui.icon('info').classes('text-blue-600 text-base')
+                ui.label('Info').classes('text-sm font-semibold text-gray-800')
+            ui.html('Load a preset or click <b>+ ADD BAND</b> to build a DSP pipeline.').classes('text-sm text-gray-700')
 
         _band_table()
 
