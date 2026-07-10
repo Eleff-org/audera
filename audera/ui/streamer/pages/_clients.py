@@ -1,22 +1,31 @@
 """Client factories and settings loader shared across the streamer pages."""
 
-import os
-
 import audera
 from audera.clients import CamillaDSPClient, SnapserverClient
 from audera.dal import settings as settings_dal
 from audera.models.settings import Settings
+from audera.settings import settings as env
 from audera.ui import features
 
 
 def _load_settings() -> Settings:
-    return settings_dal.get_or_create(
+    cfg = settings_dal.get_or_create(
         Settings(
-            plexamp_host=os.getenv('AUDERA_PLEXAMP_HOST', 'localhost'),
-            snapserver_host=os.getenv('AUDERA_SNAPSERVER_HOST', 'localhost'),
+            plexamp_host=env.plexamp_host,
+            snapserver_host=env.snapserver_host,
             features=features.default_selections(),
         )
     )
+
+    # An explicitly-set `AUDERA_*` host overrides the persisted `settings.json` so the
+    #   local-dev override stays reliable even after the file has been written; an unset
+    #   var leaves the persisted value untouched (backwards compatible).
+    if 'snapserver_host' in env.model_fields_set:
+        cfg.snapserver_host = env.snapserver_host
+    if 'plexamp_host' in env.model_fields_set:
+        cfg.plexamp_host = env.plexamp_host
+
+    return cfg
 
 
 def _snapserver(settings: Settings) -> SnapserverClient:

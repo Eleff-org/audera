@@ -6,7 +6,7 @@
        \ \__\ \__\ \______/\ \______/\ \______\ \__\\ _\\ \__\ \__\
         \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__|
 
-`Audera` is a new era of composable audio systems that brings open-protocols to your own hardware for multi-room synchronous playback, built on [Plex-Amp](https://www.plex.tv/plexamp/) (headless), [Snapcast](https://github.com/badaix/snapcast), and [CamillaDSP](https://github.com/HEnquist/camilladsp).
+`Audera` is a new era of composable audio systems that brings open-protocols to your own hardware for multi-room synchronous playback, built with [Plex-Amp](https://www.plex.tv/plexamp/) (headless), [Snapcast](https://github.com/badaix/snapcast), and [CamillaDSP](https://github.com/HEnquist/camilladsp).
 
 ## Architecture
 
