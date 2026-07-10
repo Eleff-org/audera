@@ -1,13 +1,4 @@
-"""Compute the combined magnitude response and clip-safe pre-amp of a DSP configuration.
-
-Bands are the source of truth; this module derives everything downstream from the same
-element-wise sum. Each enabled band's magnitude response is evaluated with CamillaDSP's
-own `eval_filter` over a shared `logspace` grid (dependent only on `samplerate`/`npoints`),
-summed, and offset by the flat pre-amp Gain — matching the daemon's math so the live chart,
-the automatic pre-amp ceiling, the headroom peak, and the compiled pipeline can never drift
-apart. `logspace` is not re-exported from the package root, so it is imported from the
-submodule that also backs `eval_filter`.
-"""
+"""DSP headroom"""
 
 from camilladsp_plot import eval_filter
 from camilladsp_plot.eval_filterconfig import logspace

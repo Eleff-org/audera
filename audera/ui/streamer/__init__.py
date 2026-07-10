@@ -1,4 +1,4 @@
-"""Audera streamer web UI"""
+"""Audera app"""
 
 from nicegui import app, ui
 
@@ -8,7 +8,7 @@ from audera.ui.streamer.pages import Page
 
 
 def run() -> None:
-    """Runs the streamer dashboard."""
+    """Runs the Audera app."""
     page = Page()
     page.load()
 

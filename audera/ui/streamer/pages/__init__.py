@@ -1,10 +1,4 @@
-"""Audera streamer dashboard pages.
-
-The `Page` class holds the shared per-app state (settings, Snapcast client, dialog
-flag) and registers routes; each route's rendering lives in its own module and is
-invoked as `module.render(page, …)`, so the class stays thin while the large EQ editor
-(`dsp`) and the multi-tab dashboard (`index`) live in dedicated files.
-"""
+"""Audera app pages"""
 
 from dotenv import load_dotenv
 from nicegui import ui

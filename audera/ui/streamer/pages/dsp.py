@@ -1,4 +1,4 @@
-"""The full-page parametric-EQ editor for a single player."""
+"""Remote audio device parametric-EQ editor page"""
 
 import asyncio
 import uuid

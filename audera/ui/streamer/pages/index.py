@@ -1,4 +1,4 @@
-"""The main dashboard page — Players, Services, and Settings tabs."""
+"""Audera app index"""
 
 import asyncio
 from typing import TYPE_CHECKING

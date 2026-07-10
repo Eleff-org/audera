@@ -1,11 +1,4 @@
-"""Live combined frequency-response chart for the parametric-EQ editor.
-
-Renders the curve `audera.domains.dsp.response_curve` already computes as an ECharts
-line: a fixed −18…+18 dB box over a 20 Hz–20 kHz log frequency axis. The series is
-clipped (ECharts default) so a hot trace stays inside the box rather than rescaling it.
-UI→domain imports are allowed; `theme` is imported as a submodule so this module is
-import-order-independent of the `components` package init.
-"""
+"""Frequency-response chart for the parametric-EQ editor"""
 
 from nicegui import ui
 

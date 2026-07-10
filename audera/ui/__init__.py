@@ -1,1 +1,4 @@
-"""Audera NiceGUI web UIs — player setup wizard and streamer dashboard"""
+"""Audera NiceGUI apps
+
+WiFi setup wizard and Audera app
+"""

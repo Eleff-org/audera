@@ -1,14 +1,4 @@
-"""Named user-preset configuration-layer.
-
-Presets live in their own namespace nested under `dsp/` (`~/.audera/dsp/presets/`),
-glob-listed and wrapped `{'preset': {...}}`, so a corrupt player config can't break the
-preset menu and vice-versa.
-
-Storage is plain `json` + `glob`, not duckdb: a `Preset.bands` is a nested list of band
-objects, which duckdb's `read_json_auto` — built for flat, columnar rows under the
-pytensils DTYPES constraint — cannot model. With the duckdb-backed DALs retired, every
-surviving DAL (`dsp`, `presets`, `settings`) is plain-json for the same reason.
-"""
+"""Preset DSP configuration-layer"""
 
 import glob
 import json

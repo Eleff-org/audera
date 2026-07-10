@@ -1,11 +1,4 @@
-"""Compile `preamp_db` + `bands` into a CamillaDSP pipeline configuration.
-
-Bands are the source of truth; the CamillaDSP config is a derived artifact. The
-compiler strips every previously-managed (`audera_`-prefixed) filter and pipeline
-step, then re-adds a pre-amp Gain followed by one Biquad per band — preserving
-foreign filters/steps and never mutating the caller's dict. Strip-then-re-add
-with stable ordering makes it idempotent by construction.
-"""
+"""DSP compiler"""
 
 import copy
 

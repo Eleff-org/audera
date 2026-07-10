@@ -1,9 +1,4 @@
-"""Editable band presets.
-
-Loudness is a static preset — two editable shelf bands — rather than a dynamic
-filter. The editor pairs this with the headroom guard to suggest a protective
-pre-amp; this module only mints the bands.
-"""
+"""System DSP presets"""
 
 import uuid
 

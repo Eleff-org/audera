@@ -1,15 +1,6 @@
-"""Import/export parametric-EQ bands as CamillaDSP YAML (the format REW interops with).
+"""Import/export parametric-EQ bands as CamillaDSP YAML
 
-REW (v5.20.14+) natively round-trips CamillaDSP YAML: it exports the same structured
-`filters:`/`pipeline:` shape our compiler emits, and it is the only format REW can
-re-import. `parse_rew` and `format_rew` are band-inverses — the bands emitted by
-`format_rew` round-trip back through `parse_rew` modulo fresh ids. Both are pure (they
-import only `audera.models` + `audera.domains.dsp.compiler`, plus stdlib `uuid`, `yaml`,
-and pydantic), so they are Docker-free and unit-testable with zero I/O.
-
-Pre-amp is intentionally not round-tripped: `format_rew` emits only the band biquads (the
-editor's auto-ceiling owns the pre-amp on import), so a pasted export re-derives a
-clip-safe pre-amp rather than carrying a stale one.
+Compatible with REW (v5.20.14+).
 """
 
 import uuid

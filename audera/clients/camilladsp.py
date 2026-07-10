@@ -88,12 +88,11 @@ class CamillaDSPClient:
         config: `dict`
             The CamillaDSP pipeline configuration.
         """
-        # ValidateConfig expects a config string; JSON is a subset of YAML, so a JSON
-        # dict validates directly (ValidateConfigJson is v4+ and unavailable in v3.0.1).
         response = self._call(_CMD_VALIDATE_CONFIG, json.dumps(config))
         inner = response.get(_CMD_VALIDATE_CONFIG, response) if isinstance(response, dict) else response
+
         # `_call` only raises on a literal `result == 'Error'`, but any non-`Ok` result
-        # (e.g. a validation message / ConfigValidationError) means the config is invalid.
+        #   (e.g. a validation message / ConfigValidationError) means the config is invalid.
         if isinstance(inner, dict) and inner.get('result') != 'Ok':
             raise RuntimeError('CamillaDSP validation failed [%s]: %s' % (_CMD_VALIDATE_CONFIG, inner))
 
