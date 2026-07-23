@@ -17,6 +17,7 @@ from audera.models.player import Player
 from audera.models.settings import Settings
 from audera.ui import components, features
 from audera.ui.streamer.pages import Page
+from audera.ui.streamer.pages.dsp import _band_summary
 
 
 @pytest.fixture
@@ -674,3 +675,89 @@ async def test_dsp_save_current_as_preset_persists(audera_home, mock_snapserver_
     assert len(saved) == 1
     assert saved[0].name == 'My Loudness'
     assert len(saved[0].bands) == 2
+
+
+# --- DSP band-editor UX (full / expand / dialog) -----------------------------------------
+
+
+def test_band_summary_omits_gain_for_pass_types():
+    # `dB` also appears in the `Pre-amp (dB)` label, so the pass-type omission is asserted on
+    # the pure helper rather than page-level DOM matching.
+    assert 'dB' not in _band_summary(Band(id='x', type='Highpass', freq=80.0, gain=0.0, q=0.7))
+    assert 'dB' in _band_summary(Band(id='y', type='Peaking', freq=1000.0, gain=-3.0, q=0.707))
+
+
+def _seed_band_editor(mode: str) -> None:
+    """Persists settings selecting the DSP band-editor mode before the page loads."""
+    settings_dal.create(
+        Settings(
+            plexamp_host='localhost',
+            snapserver_host='localhost',
+            features={features.DSP_BAND_EDITOR_KEY: mode},
+        )
+    )
+
+
+# Discriminator for collapsed-vs-revealed controls: the DSP editor has no `ui.select` anywhere
+# except the band Type control, so its presence cleanly signals whether controls are showing.
+def _one_band() -> DSPConfig:
+    return DSPConfig(player_id='cfg1', bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=-3.0, q=0.707)])
+
+
+async def test_dsp_band_editor_full_shows_inline_controls(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    _seed_band_editor(features.FF_DSP_BAND_EDITOR_FULL)
+    _seed_dsp(_one_band())
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see(kind=ui.select)  # full mode renders the type/freq/gain/q controls inline
+
+
+async def test_dsp_band_editor_expand_reveals_controls_on_edit(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    _seed_band_editor(features.FF_DSP_BAND_EDITOR_EXPAND)
+    _seed_dsp(_one_band())
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see('1000 Hz')  # the compact summary row
+    await user.should_not_see(kind=ui.select)  # controls stay collapsed until the ✏ edit
+    user.find(marker='dsp-band-edit').click()
+    await user.should_see(kind=ui.select)  # accordion revealed the controls inline
+
+
+async def test_dsp_band_editor_dialog_opens_modal_on_edit(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    _seed_band_editor(features.FF_DSP_BAND_EDITOR_DIALOG)
+    _seed_dsp(_one_band())
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see('1000 Hz')  # the compact summary row
+    await user.should_not_see(kind=ui.select)  # controls live in the modal, not the row
+    user.find(marker='dsp-band-edit').click()
+    await user.should_see('Edit band')  # the modal title
+    await user.should_see(marker='dsp-band-close')
+    await user.should_see(kind=ui.select)  # controls render inside the modal
+
+
+async def test_dsp_band_editor_expand_add_band_reveals_controls(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    _seed_band_editor(features.FF_DSP_BAND_EDITOR_EXPAND)
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_not_see(kind=ui.select)
+    user.find(content='+ Add band').click()
+    await user.should_see(kind=ui.select)  # the new band's editor auto-reveals — no second click
+
+
+async def test_dsp_band_editor_dialog_add_band_opens_modal(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    _seed_band_editor(features.FF_DSP_BAND_EDITOR_DIALOG)
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(content='+ Add band').click()
+    await user.should_see('Edit band')  # the new band's editor auto-opens as a modal

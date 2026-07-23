@@ -62,9 +62,14 @@ class Feature:
 
 PLAYER_SELECTION_KEY = 'player_selection'
 VOLUME_KEY = 'volume'
+DSP_BAND_EDITOR_KEY = 'dsp_band_editor'
 
 FF_DISABLED_VS_MUTE = 'disabled'
 FF_VOLUME_PERC_OR_DB = 'db'
+
+FF_DSP_BAND_EDITOR_FULL = 'full'
+FF_DSP_BAND_EDITOR_EXPAND = 'expand'
+FF_DSP_BAND_EDITOR_DIALOG = 'dialog'
 
 FEATURES: list[Feature] = [
     Feature(
@@ -76,6 +81,15 @@ FEATURES: list[Feature] = [
         VOLUME_KEY,
         'Volume',
         (Option('percent', 'Percent'), Option('db', 'Decibels')),
+    ),
+    Feature(
+        DSP_BAND_EDITOR_KEY,
+        'DSP Band Editor',
+        (
+            Option(FF_DSP_BAND_EDITOR_FULL, 'Full'),
+            Option(FF_DSP_BAND_EDITOR_EXPAND, 'Expanded'),
+            Option(FF_DSP_BAND_EDITOR_DIALOG, 'Dialog'),
+        ),
     ),
 ]
 

@@ -11,7 +11,7 @@ from audera.dal import dsp as dsp_dal
 from audera.dal import presets as presets_dal
 from audera.domains.dsp import auto_preamp_db, clone_bands, compile_pipeline, format_rew, loudness_preset, parse_rew
 from audera.models.dsp import PASS_TYPES, Band, DSPConfig, Preset
-from audera.ui import components
+from audera.ui import components, features
 from audera.ui.streamer.pages._clients import _camilladsp, _snapserver
 
 if TYPE_CHECKING:
@@ -21,6 +21,15 @@ if TYPE_CHECKING:
 # `audera.models.dsp.Band`. Pass filters carry no gain, so their gain field is disabled
 # (their membership is tested against the shared `PASS_TYPES` taxonomy).
 _BAND_TYPES = list(get_args(Band.model_fields['type'].annotation))
+
+
+def _band_summary(band: Band) -> str:
+    """One-line band description for compact rows; omits gain for pass filters."""
+    parts = [band.type, f'{band.freq:.0f} Hz']
+    if band.type not in PASS_TYPES:
+        parts.append(f'{band.gain:.1f} dB')
+    parts.append(f'Q {band.q:.3f}')
+    return ' · '.join(parts)
 
 
 def render(page: 'Page', player_id: str) -> None:
@@ -53,6 +62,9 @@ def render(page: 'Page', player_id: str) -> None:
     # so `live.id` is all that's needed to resolve it.
     saved = dsp_dal.get_or_create(DSPConfig(player_id=live.id))
     state = {'saved': saved, 'staged': saved.model_copy(deep=True)}
+    dsp_band_editor = features.selected(page.settings, features.DSP_BAND_EDITOR_KEY)
+    # `expand` mode reveals one band's controls at a time (single id ⇒ one-open-at-a-time).
+    expanded = {'id': None}
 
     def _dirty() -> bool:
         return state['staged'] != state['saved']
@@ -84,11 +96,11 @@ def render(page: 'Page', player_id: str) -> None:
         band.enabled = bool(value)
         _mark_changed()
 
-    def _on_type(band: Band, value: str) -> None:
+    def _on_type(band: Band, value: str, refresh) -> None:
         # `value` is constrained to `_BAND_TYPES` by the select; the assignment is
         # unvalidated (Band sets no `validate_assignment`), so the literal narrows fine.
         band.type = value  # type: ignore
-        _band_table.refresh()  # the gain field's enabled state depends on the type
+        refresh()  # re-render the tree owning the gain field (its enabled state depends on the type)
         _mark_changed()
 
     def _on_freq(band: Band, value) -> None:
@@ -107,12 +119,21 @@ def render(page: 'Page', player_id: str) -> None:
         _mark_changed()
 
     def _add_band() -> None:
-        state['staged'].bands.append(Band(id=uuid.uuid4().hex, type='Peaking', freq=1000.0, gain=0.0, q=0.707))
+        # A default Peaking band can't be edited from a compact row alone, so the
+        # compact modes auto-reveal its editor (accordion for expand, modal for dialog).
+        band = Band(id=uuid.uuid4().hex, type='Peaking', freq=1000.0, gain=0.0, q=0.707)
+        state['staged'].bands.append(band)
+        if dsp_band_editor == features.FF_DSP_BAND_EDITOR_EXPAND:
+            expanded['id'] = band.id
         _band_table.refresh()
         _mark_changed()
+        if dsp_band_editor == features.FF_DSP_BAND_EDITOR_DIALOG:
+            _open_band_dialog(band)
 
     def _remove_band(band: Band) -> None:
         state['staged'].bands = [b for b in state['staged'].bands if b.id != band.id]
+        if expanded['id'] == band.id:  # tidy; a dangling id is otherwise harmless (matches no row)
+            expanded['id'] = None
         _band_table.refresh()
         _mark_changed()
 
@@ -313,9 +334,113 @@ def render(page: 'Page', player_id: str) -> None:
         else:
             clip_label.set_visibility(False)
 
+    def _band_controls(band: Band, refresh, labeled: bool = False, full_width: bool = False) -> None:
+        """Renders the Type / Freq / Gain / Q editors — shared by all three variants.
+
+        Excludes the On checkbox and delete button (those live on the row and are never
+        duplicated in the editor). `refresh` re-renders the tree that owns the gain field,
+        whose enabled state flips with the type — the table body in full/expand, the dialog
+        body in dialog mode (a separate tree `_band_table.refresh()` can't reach).
+
+        `labeled` adds floating field labels for the header-less compact modes (full mode
+        keeps its own column-header row instead). `full_width` stretches every field to fill
+        its container, for the dialog's vertical stack on narrow phone screens.
+        """
+        type_w = 'w-full' if full_width else 'w-32'
+        num_w = 'w-full' if full_width else 'w-24'
+        q_w = 'w-full' if full_width else 'w-20'
+        ui.select(
+            _BAND_TYPES,
+            value=band.type,
+            label='Type' if labeled else None,
+            on_change=lambda e, b=band: _on_type(b, e.value, refresh),
+        ).props('dense outlined').classes(type_w)
+        ui.number(
+            'Freq (Hz)' if labeled else None,
+            value=band.freq,
+            step=1,
+            format='%.0f',
+            on_change=lambda e, b=band: _on_freq(b, e.value),
+        ).props('dense outlined debounce=200').classes(num_w)
+        gain_field = (
+            ui.number(
+                'Gain (dB)' if labeled else None,
+                value=band.gain,
+                step=0.1,
+                format='%.1f',
+                on_change=lambda e, b=band: _on_gain(b, e.value),
+            )
+            .props('dense outlined debounce=200')
+            .classes(num_w)
+        )
+        gain_field.set_enabled(band.type not in PASS_TYPES)
+        ui.number(
+            'Q' if labeled else None,
+            value=band.q,
+            step=0.001,
+            format='%.3f',
+            on_change=lambda e, b=band: _on_q(b, e.value),
+        ).props('dense outlined debounce=200').classes(q_w)
+
+    def _compact_row(band: Band, on_edit) -> None:
+        """Renders a one-line band row (On · summary · ✏ edit · 🗑 delete) for expand + dialog.
+
+        The two compact modes differ only in the ✏ handler passed as `on_edit`.
+        """
+        with ui.row(wrap=False).classes('items-center gap-2 w-full'):
+            ui.checkbox(value=band.enabled, on_change=lambda e, b=band: _on_enabled(b, e.value)).classes('w-10')
+            ui.label(_band_summary(band)).classes('grow text-sm')
+            (
+                ui.button(icon='edit', on_click=lambda b=band: on_edit(b))
+                .props('flat dense round size=sm')
+                .classes('text-gray-400')
+                .mark('dsp-band-edit')
+            )
+            (
+                ui.button(icon='delete', on_click=lambda b=band: _remove_band(b))
+                .props('flat dense round size=sm')
+                .classes('text-gray-400')
+                .mark('dsp-band-delete')
+            )
+
+    def _toggle_expand(band: Band) -> None:
+        expanded['id'] = None if expanded['id'] == band.id else band.id
+        _band_table.refresh()  # rebuilds every summary from live band values
+
+    def _open_band_dialog(band: Band) -> None:
+        """Raises a modal with the band controls; edits apply live (chart previews behind it).
+
+        The dialog body is its own nested refreshable so a type-change re-renders the dialog
+        (not the table). Single Close button — no snapshot; the table refreshes on close so
+        the compact summary reflects the live edits.
+        """
+        with ui.dialog() as dialog, ui.card().classes('w-96'):
+            ui.label('Edit band').classes('font-medium text-lg mb-1')
+
+            @ui.refreshable
+            def _dialog_body() -> None:
+                # Vertical stack — phones have the vertical room, and full-width labeled
+                # fields read far more clearly than a cramped horizontal row.
+                with ui.column().classes('w-full gap-3'):
+                    _band_controls(band, refresh=_dialog_body.refresh, labeled=True, full_width=True)
+
+            _dialog_body()
+
+            def _close() -> None:
+                _band_table.refresh()  # summary line now reflects the live edits
+                dialog.close()
+
+            with ui.row().classes('justify-end w-full mt-2'):
+                (ui.button('Close', on_click=_close).props('dense').classes('bg-gray-800 text-white').mark('dsp-band-close'))
+
+        dialog.open()
+
     @ui.refreshable
     def _band_table() -> None:
-        if state['staged'].bands:  # the column labels only make sense once there's a row beneath them
+        bands = state['staged'].bands
+        # The column labels only make sense in full mode (compact rows self-describe) and
+        # only once there's a row beneath them.
+        if bands and dsp_band_editor == features.FF_DSP_BAND_EDITOR_FULL:
             with ui.row(wrap=False).classes('items-center gap-2 w-full text-xs text-gray-500'):
                 ui.label('On').classes('w-10 text-center')
                 ui.label('Type').classes('w-32')
@@ -323,27 +448,30 @@ def render(page: 'Page', player_id: str) -> None:
                 ui.label('Gain (dB)').classes('w-24')
                 ui.label('Q').classes('w-20')
                 ui.label('').classes('w-10')
-        for band in state['staged'].bands:
-            with ui.row(wrap=False).classes('items-center gap-2 w-full'):
-                ui.checkbox(value=band.enabled, on_change=lambda e, b=band: _on_enabled(b, e.value)).classes('w-10')
-                ui.select(_BAND_TYPES, value=band.type, on_change=lambda e, b=band: _on_type(b, e.value)).props(
-                    'dense outlined'
-                ).classes('w-32')
-                ui.number(value=band.freq, step=1, format='%.0f', on_change=lambda e, b=band: _on_freq(b, e.value)).props(
-                    'dense outlined debounce=200'
-                ).classes('w-24')
-                gain_field = (
-                    ui.number(value=band.gain, step=0.1, format='%.1f', on_change=lambda e, b=band: _on_gain(b, e.value))
-                    .props('dense outlined debounce=200')
-                    .classes('w-24')
-                )
-                gain_field.set_enabled(band.type not in PASS_TYPES)
-                ui.number(value=band.q, step=0.001, format='%.3f', on_change=lambda e, b=band: _on_q(b, e.value)).props(
-                    'dense outlined debounce=200'
-                ).classes('w-20')
-                ui.button(icon='delete', on_click=lambda b=band: _remove_band(b)).props('flat dense round size=sm').classes(
-                    'text-gray-400'
-                )
+        for band in bands:
+            if dsp_band_editor == features.FF_DSP_BAND_EDITOR_FULL:
+                with ui.row(wrap=False).classes('items-center gap-2 w-full'):
+                    ui.checkbox(value=band.enabled, on_change=lambda e, b=band: _on_enabled(b, e.value)).classes('w-10')
+                    _band_controls(band, refresh=_band_table.refresh)
+                    (
+                        ui.button(icon='delete', on_click=lambda b=band: _remove_band(b))
+                        .props('flat dense round size=sm')
+                        .classes('text-gray-400')
+                        .mark('dsp-band-delete')
+                    )
+            elif dsp_band_editor == features.FF_DSP_BAND_EDITOR_EXPAND:
+                # Each band is its own card; the ✏ edit grows the card downward to reveal
+                # the labeled controls inline (one card open at a time).
+                with ui.card().classes('w-full p-3 gap-2'):
+                    _compact_row(band, on_edit=_toggle_expand)
+                    if expanded['id'] == band.id:
+                        with ui.row().classes('items-center gap-2 w-full pl-10'):
+                            _band_controls(band, refresh=_band_table.refresh, labeled=True)
+            else:  # FF_DSP_BAND_EDITOR_DIALOG
+                # Each band is its own card (matching the expanded view); the ✏ edit raises
+                # the modal rather than growing the card inline.
+                with ui.card().classes('w-full p-3 gap-2'):
+                    _compact_row(band, on_edit=_open_band_dialog)
         ui.button('+ Add band', on_click=_add_band).props('flat dense').classes('mt-2')
 
     with ui.row().classes('items-center justify-between w-full'):

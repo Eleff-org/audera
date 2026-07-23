@@ -84,3 +84,12 @@ def test_flag_enabled_false_when_unset_uses_default():
 def test_option_resolves_unknown_value_to_default():
     feature = features.get_feature(features.PLAYER_SELECTION_KEY)
     assert feature.option('does_not_exist') == feature.default
+
+
+def test_default_selections_includes_dsp_band_editor_full():
+    assert features.default_selections()[features.DSP_BAND_EDITOR_KEY] == features.FF_DSP_BAND_EDITOR_FULL
+
+
+def test_dsp_band_editor_has_three_options():
+    feature = features.get_feature(features.DSP_BAND_EDITOR_KEY)
+    assert [opt.value for opt in feature.options] == ['full', 'expand', 'dialog']
