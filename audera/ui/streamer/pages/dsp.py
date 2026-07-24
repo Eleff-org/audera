@@ -553,11 +553,10 @@ def render(page: 'Page', player_id: str) -> None:
         with ui.row(wrap=False).classes('items-center justify-between w-full gap-4'):
             with ui.row().classes('items-center gap-4 text-xs text-gray-500 min-w-0'):
                 count_label = ui.label()
-                ui.label('IIR biquads · ~0% CPU')
                 dirty_label = ui.label('Unsaved changes ●').classes('text-amber-500')
                 clip_label = ui.label('').classes('text-red-500')
                 clip_label.set_visibility(False)  # hidden until the clip poll reports a nonzero count
-            ui.button('+ Add band', on_click=_add_band).props('flat dense')
+            ui.button('+ Add band', on_click=_add_band).props('flat dense').classes('shrink-0 whitespace-nowrap')
 
         # Full mode's column headers stay pinned above the scrolling rows; their visibility
         # tracks `has_bands` in `_mark_changed` (mode is fixed per page, so only that can change).
