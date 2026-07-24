@@ -44,6 +44,7 @@ def render(page: 'Page', player_id: str) -> None:
     (add/delete/type/preset/reset) refresh the band table.
     """
     components.header.render(audera.NAME, 'Streamer')
+    components.layout.fill_viewport()  # page fills the viewport; the editor's `grow` column owns the scroll region
 
     snap = _snapserver(page.settings)
     try:
@@ -121,7 +122,10 @@ def render(page: 'Page', player_id: str) -> None:
         # A default Peaking band can't be edited from a compact row alone, so the
         # compact modes auto-reveal its editor (accordion for expand, modal for dialog).
         band = Band(id=uuid.uuid4().hex, type='Peaking', freq=1000.0, gain=0.0, q=0.707)
-        state['staged'].bands.append(band)
+        # Prepend, not append: biquads cascade so their order doesn't change the response, and a
+        # new band at the top is always in view and ready to edit — appended it would land below
+        # the fold of the scroll area once several bands exist.
+        state['staged'].bands.insert(0, band)
         if dsp_band_editor == features.FF_DSP_BAND_EDITOR_EXPAND:
             expanded['id'] = band.id
         _band_table.refresh()
@@ -490,19 +494,22 @@ def render(page: 'Page', player_id: str) -> None:
                 with ui.card().classes('w-full p-3 gap-2'):
                     _compact_row(band, on_edit=_open_band_dialog)
 
-    with ui.row().classes('items-center justify-between w-full'):
-        with ui.row().classes('items-center gap-2 text-sm'):
-            ui.link('Players', '/').classes('text-gray-500 no-underline hover:text-gray-700')
-            ui.label('›').classes('text-gray-400')
-            ui.label(live.name).classes('text-gray-500')
-            ui.label('›').classes('text-gray-400')
-            ui.label('DSP').classes('text-gray-800 font-medium')  # the current segment leads
-        ui.button(icon='arrow_back', on_click=lambda: ui.navigate.to('/')).props('flat dense round size=sm').mark('dsp-back')
+    # One flex column owns the whole editor: the breadcrumb and everything above the band table keep
+    # their natural height, and the `grow` scroll area beneath them flexes to fill the rest — so the
+    # band list always sizes to the screen with no per-element height math. `components.layout.
+    # fill_viewport()` (called at the top of `render`) bounds this column to the viewport minus the
+    # fixed header, so `grow min-h-0` here just claims that leftover height — no `dvh`/`6rem` constant.
+    with ui.column().classes('w-full gap-3 flex flex-col grow min-h-0'):
+        # Breadcrumb leads the column at its natural height; the current segment ("DSP") is bolded.
+        with ui.row().classes('items-center justify-between w-full'):
+            with ui.row().classes('items-center gap-2 text-sm'):
+                ui.link('Players', '/').classes('text-gray-500 no-underline hover:text-gray-700')
+                ui.label('›').classes('text-gray-400')
+                ui.label(live.name).classes('text-gray-500')
+                ui.label('›').classes('text-gray-400')
+                ui.label('DSP').classes('text-gray-800 font-medium')  # the current segment leads
+            ui.button(icon='arrow_back', on_click=lambda: ui.navigate.to('/')).props('flat dense round size=sm').mark('dsp-back')
 
-    # Viewport-bounded flex column: everything above the band table is pinned in the fixed
-    # region, and only the `grow` scroll area beneath it consumes the remaining height and
-    # scrolls (height tuned so the editor seats within the viewport under the breadcrumb).
-    with ui.column().classes('w-full gap-3 flex flex-col').style('height: calc(100vh - 9rem)'):
         # --- Fixed region: presets, pre-amp, chart, info line, headers all stay put ---
         # Presets and Config are the two "sources" that build a pipeline, so they lead on their
         # own row; the pre-amp and the Reset/Save actions sit in line beneath them.
@@ -540,15 +547,17 @@ def render(page: 'Page', player_id: str) -> None:
                 ui.label('Info').classes('text-sm font-semibold text-gray-800')
             ui.html('Load a preset or click <b>+ ADD BAND</b> to build a DSP pipeline.').classes('text-sm text-gray-700')
 
-        # Band info + Add band sit above the scrolling table so they stay fixed with the chart.
-        with ui.row().classes('items-center gap-4 w-full text-xs text-gray-500'):
-            count_label = ui.label()
-            ui.label('IIR biquads · ~0% CPU')
-            dirty_label = ui.label('Unsaved changes ●').classes('text-amber-500')
-            clip_label = ui.label('').classes('text-red-500')
-            clip_label.set_visibility(False)  # hidden until the clip poll reports a nonzero count
-
-        ui.button('+ Add band', on_click=_add_band).props('flat dense')
+        # Band info (left) and Add band (right) share one fixed row above the scrolling table:
+        # right-aligning the button favours one-handed phone use, and merging the two rows leaves
+        # more height for the band list below.
+        with ui.row(wrap=False).classes('items-center justify-between w-full gap-4'):
+            with ui.row().classes('items-center gap-4 text-xs text-gray-500 min-w-0'):
+                count_label = ui.label()
+                ui.label('IIR biquads · ~0% CPU')
+                dirty_label = ui.label('Unsaved changes ●').classes('text-amber-500')
+                clip_label = ui.label('').classes('text-red-500')
+                clip_label.set_visibility(False)  # hidden until the clip poll reports a nonzero count
+            ui.button('+ Add band', on_click=_add_band).props('flat dense')
 
         # Full mode's column headers stay pinned above the scrolling rows; their visibility
         # tracks `has_bands` in `_mark_changed` (mode is fixed per page, so only that can change).
@@ -566,8 +575,12 @@ def render(page: 'Page', player_id: str) -> None:
         # `grow min-h-0` lets this box shrink below its content and claim the column's leftover
         # height; `relative` + the scroll area's `absolute inset-0` give QScrollArea a concrete
         # box to fill (it collapses to nothing at short viewports when sized by flex alone).
+        # `height: auto` is required: NiceGUI's `.nicegui-scroll-area` hard-codes `height: 16rem`,
+        # which — being a real `height` — otherwise wins over `inset-0`'s `bottom: 0` and pins the
+        # scroll area to 256px, leaving the rest of this box empty. Clearing it lets `inset-0`
+        # stretch the scroll area to fill the wrapper.
         with ui.element('div').classes('w-full grow min-h-0 relative'):
-            with ui.scroll_area().classes('absolute inset-0'):
+            with ui.scroll_area().classes('absolute inset-0').style('height: auto'):
                 _band_table()
 
     _mark_changed()
