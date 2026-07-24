@@ -663,6 +663,67 @@ async def test_dsp_save_current_as_preset_persists(audera_home, mock_snapserver_
     assert len(saved[0].bands) == 2
 
 
+async def test_dsp_save_preset_name_collision_replace_overwrites(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    # A trimmed, case-insensitive name match prompts a confirm; Replace overwrites the same
+    # preset (reusing its id) rather than appending a duplicate.
+    presets_dal.save_preset(
+        Preset(id='p1', name='My Preset', bands=[Band(id='b0', type='Peaking', freq=500.0, gain=2.0, q=1.0)])
+    )
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='preset-loudness').click()  # stage two bands to capture
+    await user.should_see('Bands (2)')
+    user.find(marker='preset-save-as').click()
+    with user:
+        user.find(kind=ui.input, marker='preset-save-name').elements.pop().value = 'my preset'  # differs only by case
+    user.find(marker='preset-save-run').click()
+    await user.should_see('already exists')  # the collision confirm
+    user.find(marker='preset-replace-confirm').click()
+    await user.should_see('Replaced preset')
+
+    saved = presets_dal.get_all_presets()
+    assert len(saved) == 1  # overwrote in place — no duplicate
+    assert saved[0].id == 'p1'  # reused the existing id so references stay stable
+    assert len(saved[0].bands) == 2  # bands swapped to the staged loudness set
+
+
+async def test_dsp_save_preset_name_collision_cancel_keeps_original(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
+):
+    # Cancel on the confirm leaves the existing preset untouched (and the save dialog open).
+    presets_dal.save_preset(
+        Preset(id='p1', name='My Preset', bands=[Band(id='b0', type='Peaking', freq=500.0, gain=2.0, q=1.0)])
+    )
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    user.find(marker='preset-loudness').click()
+    await user.should_see('Bands (2)')
+    user.find(marker='preset-save-as').click()
+    with user:
+        user.find(kind=ui.input, marker='preset-save-name').elements.pop().value = 'My Preset'
+    user.find(marker='preset-save-run').click()
+    await user.should_see('already exists')
+    user.find(marker='preset-replace-cancel').click()
+
+    saved = presets_dal.get_all_presets()
+    assert len(saved) == 1
+    assert saved[0].id == 'p1'
+    assert len(saved[0].bands) == 1  # original bands untouched
+
+
+def test_response_plot_options_axes():
+    # Max is fixed display headroom (the auto pre-amp keeps the curve ≤ 0 dB); min floors at
+    # -18 dB but auto-extends downward when a deep cut dips below it.
+    flat = DSPConfig(player_id='cfg1', bands=[])
+    flat_axis = components.response_plot.options(flat)['yAxis']
+    assert flat_axis['max'] == 5
+    assert flat_axis['min'] == -18  # floor holds with no deep cut
+    deep = DSPConfig(player_id='cfg1', bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=-24.0, q=1.0)])
+    assert components.response_plot.options(deep)['yAxis']['min'] < -18
+
+
 # --- DSP band-editor UX (full / expand / dialog) -----------------------------------------
 
 

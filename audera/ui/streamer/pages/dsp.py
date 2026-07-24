@@ -81,6 +81,8 @@ def render(page: 'Page', player_id: str) -> None:
         has_bands = bool(state['staged'].bands)  # chart only once a band exists
         chart.set_visibility(has_bands)
         chart_message.set_visibility(not has_bands)
+        if header_row is not None:  # full mode only; column headers show only above real rows
+            header_row.set_visibility(has_bands)
         if has_bands:
             # `EChart.options` is a read-only view onto the live props dict; swap its
             # contents in place (the documented "change the options" push) and redraw.
@@ -173,16 +175,43 @@ def render(page: 'Page', player_id: str) -> None:
                 .mark('preset-save-name')
             )
 
-            def _on_save_preset() -> None:
-                preset = Preset(
-                    id=uuid.uuid4().hex,
-                    name=(name_field.value or '').strip() or 'Untitled',
-                    bands=clone_bands(state['staged'].bands),
-                )
+            def _save_preset(preset: Preset, notice: str) -> None:
                 presets_dal.save_preset(preset)
                 _presets_menu.refresh()
-                ui.notify(f'Saved preset "{preset.name}"', type='positive', position='top-right')
+                ui.notify(notice, type='positive', position='top-right')
                 dialog.close()
+
+            def _on_save_preset() -> None:
+                name = (name_field.value or '').strip() or 'Untitled'
+                bands = clone_bands(state['staged'].bands)
+                # Case-insensitive, trimmed name match against the same source the menu reads.
+                existing = next(
+                    (preset for preset in presets_dal.get_all_presets() if preset.name.strip().lower() == name.lower()),
+                    None,
+                )
+                if existing is None:
+                    _save_preset(Preset(id=uuid.uuid4().hex, name=name, bands=bands), f'Saved preset "{name}"')
+                    return
+
+                # A preset with this name already exists — confirm before overwriting it.
+                with ui.dialog() as confirm, ui.card().classes('w-96'):
+                    ui.label(f'Preset "{name}" already exists.').classes('font-medium mb-1')
+                    ui.label('Replace the existing preset with the current bands?').classes('text-xs text-gray-500 mb-2')
+
+                    def _on_replace() -> None:
+                        # Reuse the existing id so save_preset overwrites the same {id}.json and any
+                        # references to the preset stay stable.
+                        _save_preset(Preset(id=existing.id, name=name, bands=bands), f'Replaced preset "{name}"')
+                        confirm.close()
+
+                    with ui.row().classes('justify-between w-full mt-2'):
+                        # Cancel dismisses only the confirm, leaving the save dialog open to rename.
+                        ui.button('Cancel', on_click=confirm.close).props('flat dense').mark('preset-replace-cancel')
+                        ui.button('Replace', on_click=_on_replace).props('dense').classes('bg-gray-800 text-white').mark(
+                            'preset-replace-confirm'
+                        )
+
+                confirm.open()
 
             with ui.row().classes('justify-between w-full mt-2'):
                 ui.button('Cancel', on_click=dialog.close).props('flat dense')
@@ -434,18 +463,9 @@ def render(page: 'Page', player_id: str) -> None:
 
     @ui.refreshable
     def _band_table() -> None:
-        bands = state['staged'].bands
-        # The column labels only make sense in full mode (compact rows self-describe) and
-        # only once there's a row beneath them.
-        if bands and dsp_band_editor == features.FF_DSP_BAND_EDITOR_FULL:
-            with ui.row(wrap=False).classes('items-center gap-2 w-full text-xs text-gray-500'):
-                ui.label('On').classes('w-10 text-center')
-                ui.label('Type').classes('w-32')
-                ui.label('Freq (Hz)').classes('w-24')
-                ui.label('Gain (dB)').classes('w-24')
-                ui.label('Q').classes('w-20')
-                ui.label('').classes('w-10')
-        for band in bands:
+        # Only the band rows live here — the full-mode column headers and the '+ Add band'
+        # button sit in the fixed region above so they stay put while these rows scroll.
+        for band in state['staged'].bands:
             if dsp_band_editor == features.FF_DSP_BAND_EDITOR_FULL:
                 with ui.row(wrap=False).classes('items-center gap-2 w-full'):
                     ui.checkbox(value=band.enabled, on_change=lambda e, b=band: _on_enabled(b, e.value)).classes('w-10')
@@ -469,7 +489,6 @@ def render(page: 'Page', player_id: str) -> None:
                 # the modal rather than growing the card inline.
                 with ui.card().classes('w-full p-3 gap-2'):
                     _compact_row(band, on_edit=_open_band_dialog)
-        ui.button('+ Add band', on_click=_add_band).props('flat dense').classes('mt-2')
 
     with ui.row().classes('items-center justify-between w-full'):
         with ui.row().classes('items-center gap-2 text-sm'):
@@ -480,7 +499,11 @@ def render(page: 'Page', player_id: str) -> None:
             ui.label('DSP').classes('text-gray-800 font-medium')  # the current segment leads
         ui.button(icon='arrow_back', on_click=lambda: ui.navigate.to('/')).props('flat dense round size=sm').mark('dsp-back')
 
-    with ui.column().classes('w-full gap-3'):
+    # Viewport-bounded flex column: everything above the band table is pinned in the fixed
+    # region, and only the `grow` scroll area beneath it consumes the remaining height and
+    # scrolls (height tuned so the editor seats within the viewport under the breadcrumb).
+    with ui.column().classes('w-full gap-3 flex flex-col').style('height: calc(100vh - 9rem)'):
+        # --- Fixed region: presets, pre-amp, chart, info line, headers all stay put ---
         # Presets and Config are the two "sources" that build a pipeline, so they lead on their
         # own row; the pre-amp and the Reset/Save actions sit in line beneath them.
         with ui.row().classes('items-center gap-2 w-full'):
@@ -517,14 +540,35 @@ def render(page: 'Page', player_id: str) -> None:
                 ui.label('Info').classes('text-sm font-semibold text-gray-800')
             ui.html('Load a preset or click <b>+ ADD BAND</b> to build a DSP pipeline.').classes('text-sm text-gray-700')
 
-        _band_table()
-
-        with ui.row().classes('items-center gap-4 w-full mt-2 text-xs text-gray-500'):
+        # Band info + Add band sit above the scrolling table so they stay fixed with the chart.
+        with ui.row().classes('items-center gap-4 w-full text-xs text-gray-500'):
             count_label = ui.label()
             ui.label('IIR biquads · ~0% CPU')
             dirty_label = ui.label('Unsaved changes ●').classes('text-amber-500')
             clip_label = ui.label('').classes('text-red-500')
             clip_label.set_visibility(False)  # hidden until the clip poll reports a nonzero count
+
+        ui.button('+ Add band', on_click=_add_band).props('flat dense')
+
+        # Full mode's column headers stay pinned above the scrolling rows; their visibility
+        # tracks `has_bands` in `_mark_changed` (mode is fixed per page, so only that can change).
+        header_row = None
+        if dsp_band_editor == features.FF_DSP_BAND_EDITOR_FULL:
+            with ui.row(wrap=False).classes('items-center gap-2 w-full text-xs text-gray-500') as header_row:
+                ui.label('On').classes('w-10 text-center')
+                ui.label('Type').classes('w-32')
+                ui.label('Freq (Hz)').classes('w-24')
+                ui.label('Gain (dB)').classes('w-24')
+                ui.label('Q').classes('w-20')
+                ui.label('').classes('w-10')
+
+        # --- Scrollable region: only the band rows scroll; `grow` claims the leftover height ---
+        # `grow min-h-0` lets this box shrink below its content and claim the column's leftover
+        # height; `relative` + the scroll area's `absolute inset-0` give QScrollArea a concrete
+        # box to fill (it collapses to nothing at short viewports when sized by flex alone).
+        with ui.element('div').classes('w-full grow min-h-0 relative'):
+            with ui.scroll_area().classes('absolute inset-0'):
+                _band_table()
 
     _mark_changed()
     ui.timer(3.0, _poll_clips)
