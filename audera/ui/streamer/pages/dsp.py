@@ -40,7 +40,7 @@ def render(page: 'Page', player_id: str) -> None:
     across every connected client): `state['saved']` mirrors the persisted config and
     `state['staged']` is the working copy that is compiled, validated, and pushed on
     Save. Scalar field edits mutate a band in place and only recompute the dirty
-    indicator, clip-safe pre-amp clamp, and live response chart; structural changes
+    indicator, derived pre-amp, and live response chart; structural changes
     (add/delete/type/preset/reset) refresh the band table.
     """
     components.header.render(audera.NAME, 'Streamer')
@@ -61,6 +61,8 @@ def render(page: 'Page', player_id: str) -> None:
     # The config is keyed by the player's own id (`dsp/{player_id}.json` is the link),
     # so `live.id` is all that's needed to resolve it.
     saved = dsp_dal.get_or_create(DSPConfig(player_id=live.id))
+    # The pre-amp is fully derived; normalize any legacy value so the editor opens clean.
+    saved.preamp_db = auto_preamp_db(saved.bands)
     state = {'saved': saved, 'staged': saved.model_copy(deep=True)}
     dsp_band_editor = features.selected(page.settings, features.DSP_BAND_EDITOR_KEY)
     # `expand` mode reveals one band's controls at a time (single id ⇒ one-open-at-a-time).
@@ -70,11 +72,11 @@ def render(page: 'Page', player_id: str) -> None:
         return state['staged'] != state['saved']
 
     def _mark_changed() -> None:
-        """Clamps pre-amp to the clip-safe ceiling, then refreshes dirty state, chart, count."""
-        clamped = min(state['staged'].preamp_db, auto_preamp_db(state['staged'].bands))
-        if clamped != state['staged'].preamp_db:  # min is a fixpoint — converges in one pass
-            state['staged'].preamp_db = clamped
-            preamp_field.value = clamped
+        """Recomputes the auto pre-amp from the bands, then refreshes dirty state, chart, count."""
+        auto = auto_preamp_db(state['staged'].bands)
+        if auto != state['staged'].preamp_db:
+            state['staged'].preamp_db = auto
+            preamp_field.value = auto
         dirty_label.set_visibility(_dirty())
         has_bands = bool(state['staged'].bands)  # chart only once a band exists
         chart.set_visibility(has_bands)
@@ -86,11 +88,6 @@ def render(page: 'Page', player_id: str) -> None:
             chart.options.update(components.response_plot.options(state['staged']))
             chart.update()
         count_label.set_text(f'Bands ({len(state["staged"].bands)})')
-
-    def _on_preamp(e) -> None:
-        if e.value is not None:
-            state['staged'].preamp_db = float(e.value)
-        _mark_changed()
 
     def _on_enabled(band: Band, value: bool) -> None:
         band.enabled = bool(value)
@@ -499,14 +496,8 @@ def render(page: 'Page', player_id: str) -> None:
         # otherwise push Save onto a second row at narrower window widths.
         with ui.row(wrap=False).classes('items-center gap-4 w-full'):
             preamp_field = (
-                ui.number(
-                    'Pre-amp (dB) · auto-protected',
-                    value=state['staged'].preamp_db,
-                    step=0.1,
-                    format='%.1f',
-                    on_change=_on_preamp,
-                )
-                .props('dense outlined')
+                ui.number('Pre-amp (dB) · auto-protected', value=state['staged'].preamp_db, format='%.1f')
+                .props('dense outlined readonly')
                 .classes('w-64')
             )
             ui.space()

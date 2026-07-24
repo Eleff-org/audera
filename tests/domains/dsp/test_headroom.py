@@ -1,3 +1,5 @@
+import math
+
 import pytest
 from camilladsp_plot import eval_filter
 from camilladsp_plot.eval_filterconfig import logspace
@@ -87,6 +89,19 @@ def test_auto_preamp_db_cancels_boost_peak_so_clamped_config_never_clips():
     assert ceiling == pytest.approx(-6.0, abs=0.1)
     clamped = DSPConfig(player_id='x', preamp_db=ceiling, bands=[band])
     assert response_peak_db(clamped) <= 1e-6
+
+
+def test_auto_preamp_db_returns_positive_zero_not_negative_zero():
+    # A flat/net-cut/unity response needs no attenuation, but its ceiling arrives as either exact
+    # IEEE-754 -0.0 or a sub-nanodecibel float-noise residual (the default 0 dB Peaking band added
+    # via '+ Add band' peaks at ~1e-14 dB). All must normalize to positive 0.0 so the editor never
+    # renders '-0.0'.
+    all_cut = Band(id='b1', type='Peaking', freq=1000.0, gain=-6.0, q=1.0)
+    unity = Band(id='b2', type='Peaking', freq=1000.0, gain=0.0, q=0.707)  # the default added band
+    for ceiling in (auto_preamp_db([]), auto_preamp_db([all_cut]), auto_preamp_db([unity])):
+        assert ceiling == 0.0
+        assert math.copysign(1.0, ceiling) == 1.0  # positive zero
+        assert f'{ceiling:.1f}' == '0.0'  # mirrors the editor's format='%.1f'
 
 
 def test_auto_preamp_db_honours_margin():

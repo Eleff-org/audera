@@ -500,37 +500,23 @@ async def test_dsp_adding_band_reveals_chart(audera_home, mock_snapserver_with_c
     await user.should_see(kind=ui.echart)
 
 
-async def test_dsp_preamp_clamp_keeps_below_ceiling_value(
-    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
-):
-    # A +6 dB boost sets the ceiling at ~-6 dB; -10 is below it, so the clamp leaves it.
-    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
+async def test_dsp_preamp_rises_when_band_removed(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
+    # The pre-amp is fully derived from the bands: removing the boost that lowered it must
+    # return it to 0 (regression: the old min() clamp only ratcheted down, never up).
+    band = Band(id='b1', type='Peaking', freq=1000.0, gain=5.0, q=0.707)
+    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-5.0, bands=[band]))
     Page().load()
     await user.open('/player/abc123/dsp')
     with user:
-        user.find(kind=ui.number, content='auto-protected').elements.pop().value = -10.0
+        user.find(marker='dsp-band-delete').click()
     await asyncio.sleep(0.1)
-    assert user.find(kind=ui.number, content='auto-protected').elements.pop().value == pytest.approx(-10.0)
-
-
-async def test_dsp_preamp_clamp_pulls_above_ceiling_value_down(
-    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User
-):
-    # Raising the pre-amp to -2 dB over a +6 dB boost would clip, so the clamp snaps it back
-    # down to the ~-6 dB clip-safe ceiling.
-    _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
-    Page().load()
-    await user.open('/player/abc123/dsp')
-    with user:
-        user.find(kind=ui.number, content='auto-protected').elements.pop().value = -2.0
-    await asyncio.sleep(0.1)
-    assert user.find(kind=ui.number, content='auto-protected').elements.pop().value == pytest.approx(-6.0, abs=0.2)
+    assert user.find(kind=ui.number, content='auto-protected').elements.pop().value == pytest.approx(0.0, abs=0.05)
 
 
 async def test_dsp_saved_config_opens_clean(audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, user: User):
-    # Save always clamps the pre-amp to the clip-safe ceiling, so a saved config's pre-amp is
-    # never above it; the `_mark_changed` clamp is a fixpoint on open and the editor opens
-    # without a false "Unsaved changes" flag.
+    # The pre-amp is fully derived from the bands and normalized on load, so a saved config's
+    # seeded pre-amp is replaced by the recomputed clip-safe ceiling; the editor opens without
+    # a false "Unsaved changes" flag.
     _seed_dsp(DSPConfig(player_id='cfg1', preamp_db=-6.0, bands=[Band(id='b1', type='Peaking', freq=1000.0, gain=6.0, q=1.0)]))
     Page().load()
     await user.open('/player/abc123/dsp')

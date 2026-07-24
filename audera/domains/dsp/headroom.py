@@ -9,6 +9,10 @@ from audera.models.dsp import Band, DSPConfig
 _SAMPLERATE = 48000
 _CHART_NPOINTS = 400
 _SAFETY_NPOINTS = 1000
+# Ceilings within this of 0 dB are float noise from a flat/net-cut/unity response (a 0 dB Peaking
+# band peaks at ~1e-14 dB), not real attenuation; they get snapped to positive 0.0. Sits far above
+# the observed noise (~1e-14) yet far below the editor's 0.1 dB display resolution.
+_ZERO_CEILING_TOL = 1e-9
 
 
 def _summed_magnitude(bands: list[Band], samplerate: int, npoints: int) -> list[float]:
@@ -104,4 +108,7 @@ def auto_preamp_db(bands: list[Band], samplerate: int = _SAMPLERATE, margin_db: 
         Extra headroom in dB reserved below 0 dBFS (default 0.0).
     """
     summed = _summed_magnitude(bands, samplerate, npoints=_SAFETY_NPOINTS)
-    return -(max(0.0, max(summed)) + margin_db)
+    ceiling = -(max(0.0, max(summed)) + margin_db)
+    # A flat/net-cut/unity response needs no attenuation, but the magnitude eval leaves a
+    # sub-nanodecibel residual that negates to a tiny -0.0 (renders as '-0.0'); snap it to 0.0.
+    return 0.0 if abs(ceiling) < _ZERO_CEILING_TOL else ceiling
