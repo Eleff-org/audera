@@ -1,33 +1,14 @@
+import os
+
 import audera.dal.dsp as dsp_dal
-from audera.models.dsp import DSPConfig
-
-_COMPLEX_PIPELINE = {
-    'filters': {
-        'low_pass': {'type': 'Biquad', 'parameters': {'type': 'Lowpass', 'freq': 2000, 'q': 0.707}},
-        'high_pass': {'type': 'Biquad', 'parameters': {'type': 'Highpass', 'freq': 80, 'q': 0.5}},
-    },
-    'mixers': {
-        'stereo': {
-            'channels': {'in': 2, 'out': 2},
-            'mapping': [
-                {'dest': 0, 'sources': [{'channel': 0, 'gain': 0, 'inverted': False}]},
-                {'dest': 1, 'sources': [{'channel': 1, 'gain': 0, 'inverted': False}]},
-            ],
-        }
-    },
-    'pipeline': [
-        {'type': 'Mixer', 'name': 'stereo'},
-        {'type': 'Filter', 'channels': [0], 'names': ['low_pass']},
-        {'type': 'Filter', 'channels': [1], 'names': ['high_pass']},
-    ],
-}
+from audera.models.dsp import Band, DSPConfig
 
 
-def _make_dsp(player_id='player1') -> DSPConfig:
+def _make_dsp(player_id='abc123') -> DSPConfig:
     return DSPConfig(
-        id='dsp-1',
         player_id=player_id,
-        pipeline={'filters': {}, 'mixers': {}, 'pipeline': []},
+        preamp_db=-6.0,
+        bands=[Band(id='b1', type='Lowshelf', freq=90.0, gain=10.0)],
         enabled=True,
     )
 
@@ -50,17 +31,11 @@ def test_dsp_update(audera_home):
     config = _make_dsp()
     dsp_dal.create(config)
 
-    updated = DSPConfig(
-        id=config.id,
-        player_id=config.player_id,
-        pipeline={'filters': {'lp': {}}, 'mixers': {}, 'pipeline': []},
-        enabled=False,
-    )
+    updated = config.model_copy(update={'enabled': False})
     dsp_dal.update(updated)
 
     result = dsp_dal.get(config.player_id)
     assert result.enabled is False
-    assert 'lp' in result.pipeline.get('filters', {})
 
 
 def test_dsp_delete(audera_home):
@@ -70,17 +45,38 @@ def test_dsp_delete(audera_home):
     assert not dsp_dal.exists(config.player_id)
 
 
-def test_dsp_pipeline_preserved(audera_home):
+def test_dsp_bands_round_trip(audera_home):
     config = DSPConfig(
-        id='dsp-complex',
-        player_id='player-complex',
-        pipeline=_COMPLEX_PIPELINE,
-        enabled=True,
+        player_id='dsp-bands',
+        preamp_db=-3.0,
+        bands=[
+            Band(id='b1', type='Lowshelf', freq=90.0, gain=10.0, q=0.7),
+            Band(id='b2', type='Highshelf', freq=8000.0, gain=6.0, q=0.7),
+            Band(id='b3', type='Peaking', freq=1000.0, gain=-3.0, q=2.0, enabled=False),
+        ],
     )
     dsp_dal.create(config)
 
     result = dsp_dal.get(config.player_id)
-    assert result.pipeline == _COMPLEX_PIPELINE
+    assert result == config
+    assert [b.type for b in result.bands] == ['Lowshelf', 'Highshelf', 'Peaking']
+
+
+def test_dsp_round_trip_with_mac_address_id(audera_home):
+    # A Snapcast player id is a MAC address, whose colons are illegal in a Windows
+    # filename (OSError 22). The DAL must sanitize them out of `dsp/{player_id}.json`.
+    config = _make_dsp(player_id='d8:3a:dd:80:3c:91')
+    dsp_dal.create(config)
+
+    assert dsp_dal.exists('d8:3a:dd:80:3c:91')
+    assert dsp_dal.get('d8:3a:dd:80:3c:91') == config
+
+    # The file on disk carries no colon — the id maps to a filesystem-safe stem.
+    json_files = [f for f in os.listdir(dsp_dal.PATH) if f.endswith('.json')]
+    assert json_files == ['d8-3a-dd-80-3c-91.json']
+
+    dsp_dal.delete('d8:3a:dd:80:3c:91')
+    assert not dsp_dal.exists('d8:3a:dd:80:3c:91')
 
 
 def test_dsp_get_or_create_creates(audera_home):
@@ -91,6 +87,16 @@ def test_dsp_get_or_create_creates(audera_home):
     assert dsp_dal.exists(config.player_id)
 
 
+def test_dsp_get_or_create_creates_keyed_by_player_id(audera_home):
+    # The config file is `dsp/{player_id}.json` — the filename is the link to the player.
+    config = dsp_dal.get_or_create(DSPConfig(player_id='abc123'))
+
+    assert config.player_id == 'abc123'
+    assert dsp_dal.exists('abc123')
+    assert config.bands == []
+    assert config.preamp_db == 0.0
+
+
 def test_dsp_get_or_create_reads(audera_home):
     config = _make_dsp()
     dsp_dal.create(config)
@@ -99,27 +105,11 @@ def test_dsp_get_or_create_reads(audera_home):
     assert result == config
 
 
-def test_dsp_loudness_fields_default(audera_home):
-    config = _make_dsp()
-    dsp_dal.create(config)
-    result = dsp_dal.get(config.player_id)
-    assert result.loudness_enabled is False
-    assert result.loudness_reference_level == -25.0
+def test_dsp_get_or_create_idempotent_after_edit(audera_home):
+    dsp_dal.get_or_create(DSPConfig(player_id='abc123'))  # first open creates an empty config
 
+    edited = _make_dsp(player_id='abc123')
+    dsp_dal.update(edited)
 
-def test_dsp_update_loudness_fields(audera_home):
-    config = _make_dsp()
-    dsp_dal.create(config)
-    updated = config.model_copy(update={'loudness_enabled': True})
-    dsp_dal.update(updated)
-    result = dsp_dal.get(config.player_id)
-    assert result.loudness_enabled is True
-
-
-def test_dsp_update_loudness_reference_level(audera_home):
-    config = _make_dsp()
-    dsp_dal.create(config)
-    updated = config.model_copy(update={'loudness_reference_level': -40.0})
-    dsp_dal.update(updated)
-    result = dsp_dal.get(config.player_id)
-    assert result.loudness_reference_level == -40.0
+    # A second open re-reads the edited config — it never re-mints an empty one.
+    assert dsp_dal.get_or_create(DSPConfig(player_id='abc123')) == edited

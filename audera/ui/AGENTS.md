@@ -14,6 +14,11 @@ Every UI app follows this two-file pattern:
 - Page methods: one per route (e.g. `index()`, `welcome()`, `connect()`)
 - Tab builder methods: `_build_<name>_tab()` — private, called from a page method
 
+**`pages/` sub-package** — when `pages.py` grows past a few hundred lines, split it into a `pages/` package instead of one flat file:
+- `pages/__init__.py`: the thin `Page` class (`__init__`, `load()`) re-exported so `from …pages import Page` is unchanged. Each route method delegates to a module-level `render(page, …)` — e.g. `def dsp(self, player_id): dsp.render(self, player_id)`.
+- One module per route (`pages/index.py`, `pages/dsp.py`, …): a `render(page, …)` function plus that route's private `_build_<name>_tab(page)` / `_on_<action>(page, …)` helpers. `page` carries the shared state (`page.settings`, `page._dialog_open`); the `Page` class is **not** split across files. `@ui.refreshable` helpers stay module-level, keyed on the `page` argument, and are refreshed via `_build_<name>_tab.refresh()`.
+- Private helper modules (`pages/_clients.py`, `pages/_plex.py`, …): shared client factories and self-contained flows, imported by the route modules. To avoid an import cycle, route modules never import names from `pages/__init__.py` at runtime — they take `page` as an argument and import `Page` only under `TYPE_CHECKING`.
+
 **`__init__.py`** — thin `run()` entry point only:
 ```python
 def run() -> None:
@@ -56,3 +61,32 @@ No implementation logic belongs in `__init__.py`.
 Features with more than one valid UX ("mute checkbox vs. disabled toggle") are registered in `audera/ui/features.py`'s `FEATURES` catalog, not hard-coded as a single rendering path. Every feature ships 2-3 `Option`s; the first is the default. Resolve a user's selection with `audera.ui.features.selected(settings, key)` or `flag_enabled(settings, key, option)` — never read `settings.features[...]` directly.
 
 When asked to implement a new UI feature, treat optionality as the default, not an afterthought: if there's more than one defensible UX for it, propose a `Feature` catalog entry (or ask the user which options to offer) before picking one and hard-coding it. Only skip the catalog when a feature genuinely has one correct UX with no reasonable alternative.
+
+## Previewing UI changes (screenshot loop)
+
+The user iterates on UI from screenshots. Most player UI only renders with live Snapcast clients, so preview a component in isolation rather than the full app:
+
+1. Write a throwaway `_preview.py` at the repo root that reproduces the exact widget/props against `components.theme.apply_defaults()`. Reuse **port 8080** every run so the user doesn't open new browser tabs.
+2. Run it as a **background task** (not `foo &`) so it can be killed cleanly. `uv run python`'s child process holds the socket, and a stray one causes a port conflict (WinError 10048) on the next run — stop it with the task tooling, not `kill`.
+3. Screenshot headless and review, then iterate:
+   ```bash
+   "/c/Program Files/Google/Chrome/Application/chrome.exe" --headless --disable-gpu --screenshot=/tmp/preview.png --force-device-scale-factor=4 --virtual-time-budget=4000 http://127.0.0.1:8080
+   ```
+   `--force-device-scale-factor` zooms for pixel inspection; `--virtual-time-budget` gives Material Symbols web-fonts time to load.
+4. **Clean up before committing**: stop the background server, delete `_preview.py`, and free port 8080. The harness is never committed.
+
+The real app runs with `reload=False`, so the user restarts it to see applied changes.
+
+## Running a local dev server
+
+When a change needs the **full app** against real players — e.g. the DSP editor, which only renders for a live Snapcast client — run the streamer itself pointed at a streamer on the network. Override the deployment settings (`audera/settings.py`) with `AUDERA_`-prefixed env vars and call `streamer.run()` directly: that's exactly what `audera streamer start` runs, minus the Raspberry-Pi network-setup gate that's inappropriate on a dev box.
+
+```bash
+AUDERA_SNAPSERVER_HOST=<streamer-ip> AUDERA_PLEXAMP_HOST=<streamer-ip> AUDERA_SERVER_HOST=127.0.0.1 AUDERA_SERVER_PORT=8080 uv run python -c "from audera.ui import streamer; streamer.run()"
+```
+
+- **Bind loopback only** (`AUDERA_SERVER_HOST=127.0.0.1`). The app defaults to `0.0.0.0`, which exposes the UI to the whole network — never bind non-loopback for a local review.
+- **Port 8080**, not the default `80` (needs admin on Windows and tends to conflict); reuse it every run, same as the screenshot loop.
+- Run it as a **background task** so it can be stopped cleanly with the task tooling, not `kill` (see the port-conflict note above).
+- The DSP editor lives at `/player/<client-id>/dsp`; enumerate client ids with `SnapserverClient(host=..., port=...).get_clients()` when you need to deep-link a screenshot.
+- `reload=False`, so **restart the server** to pick up code changes — stop the background task, then relaunch.

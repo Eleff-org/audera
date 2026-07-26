@@ -1,5 +1,5 @@
 """Data-access layer"""
 
-from audera.dal import dsp, groups, players, settings, streams
+from audera.dal import dsp, presets, settings
 
-__all__ = ['players', 'groups', 'streams', 'dsp', 'settings']
+__all__ = ['dsp', 'presets', 'settings']

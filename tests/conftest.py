@@ -43,10 +43,8 @@ def _wait_for_client(host: str, port: int, timeout: float = 90) -> None:
 @pytest.fixture
 def audera_home(tmp_path, monkeypatch):
     for module, subdir in [
-        ('audera.dal.players', 'players'),
-        ('audera.dal.groups', 'groups'),
-        ('audera.dal.streams', 'streams'),
         ('audera.dal.dsp', 'dsp'),
+        ('audera.dal.presets', 'dsp/presets'),
         ('audera.dal.settings', 'settings'),
     ]:
         dest = str(tmp_path / subdir)

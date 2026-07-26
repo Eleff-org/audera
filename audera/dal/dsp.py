@@ -18,7 +18,7 @@ def exists(player_id: str) -> bool:
     player_id: `str`
         The player identifier.
     """
-    return os.path.isfile(os.path.abspath(os.path.join(PATH, '.'.join([player_id, 'json']))))
+    return os.path.isfile(os.path.abspath(os.path.join(PATH, path.to_filename(player_id))))
 
 
 def create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
@@ -40,7 +40,7 @@ def get(player_id: str) -> dsp.DSPConfig:
     player_id: `str`
         The player identifier.
     """
-    file_path = os.path.join(PATH, '.'.join([player_id, 'json']))
+    file_path = os.path.join(PATH, path.to_filename(player_id))
     with open(file_path, 'r') as f:
         data = json.load(f)
     return dsp.DSPConfig.from_dict(data['dsp'])
@@ -70,7 +70,7 @@ def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
     """
     if not os.path.isdir(PATH):
         os.makedirs(PATH)
-    file_path = os.path.join(PATH, '.'.join([dsp_config.player_id, 'json']))
+    file_path = os.path.join(PATH, path.to_filename(dsp_config.player_id))
     with open(file_path, 'w') as f:
         json.dump({'dsp': dsp_config.to_dict()}, f, indent=2)
     return dsp_config
@@ -100,4 +100,4 @@ def delete(player_id: str):
         The player identifier.
     """
     if exists(player_id):
-        os.remove(os.path.join(PATH, '.'.join([player_id, 'json'])))
+        os.remove(os.path.join(PATH, path.to_filename(player_id)))

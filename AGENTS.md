@@ -40,17 +40,14 @@ Significant technical and UX decisions are recorded in `docs/adrs/`. Consult the
 All models are `@dataclass` with `from_dict()` / `from_config()` / `to_dict()` / `__repr__()` (JSON) / `__eq__()`.
 
 - `Player` — Snapcast client: `id, host, port, connected, volume, muted, group_id`
-- `Group` — Snapcast group: `id, name, client_ids, stream_id, muted, volume`
-- `Stream` — Plex-Amp stream: `id, name, uri, status, current_track`
-- `DSPConfig` — CamillaDSP pipeline: `id, player_id, pipeline (dict), enabled`
+- `DSPConfig` — parametric-EQ config: `player_id, preamp_db, bands, enabled` (keyed by `player_id`; the CamillaDSP pipeline is compiled from `preamp_db` + `bands` on Save)
 
-`Player.group_id` and `Group.stream_id` are empty strings (not `None`) when unassigned — required by the pytensils `'str'` DTYPES constraint.
+The `dsp` models (`Band`/`DSPConfig`/`Preset`) are pydantic `BaseModel` (the `@dataclass` convention has drifted here); `Preset` (`id, name, bands`) serializes via `model_dump()`/`model_validate` — no hand-written `to_dict`.
 
 ## DAL
 
-- `players`, `groups`, `streams` use `pytensils.config.Handler` + DuckDB for bulk queries via `read_json_auto`.
-- `dsp` uses plain `json` — the pipeline dict is too complex for DTYPES validation.
-- Config files: `~/.audera/{players,groups,streams,dsp}/{id}.json`
+- `dsp`, `presets`, and `settings` all persist via plain `json` (not duckdb). A `DSPConfig`'s and a `Preset`'s `bands` are nested lists of objects, which duckdb's `read_json_auto` — flat/columnar under the pytensils DTYPES constraint — cannot model. The duckdb-backed DALs were retired, so every surviving DAL is plain-json for the same reason.
+- Config files: `~/.audera/{dsp,dsp/presets,settings}/{id}.json` (`dsp` is keyed by `player_id`)
 
 ## Code style
 

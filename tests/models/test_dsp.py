@@ -1,130 +1,102 @@
-import pytest
-
-from audera.models.dsp import (
-    _LOUDNESS_FILTER_KEY,
-    _LOUDNESS_HIGH_BOOST,
-    _LOUDNESS_LOW_BOOST,
-    _PREAMP_ATTENUATION_DB,
-    _PREAMP_FILTER_KEY,
-    DSPConfig,
-    apply_loudness,
-    remove_loudness,
-)
+from audera.models.dsp import Band, DSPConfig, Preset
 
 
-@pytest.fixture
-def empty_pipeline():
-    return {'filters': {}, 'pipeline': []}
+def test_band_defaults():
+    band = Band(id='b1', freq=1000.0)
+    assert band.type == 'Peaking'
+    assert band.gain == 0.0
+    assert band.q == 0.707
+    assert band.enabled is True
 
 
-@pytest.fixture
-def user_pipeline():
-    return {
-        'filters': {'user_filter': {'type': 'Biquad', 'parameters': {}}},
-        'pipeline': [{'type': 'Filter', 'channels': [0], 'names': ['user_filter']}],
+def test_band_to_dict():
+    band = Band(id='b1', type='Lowshelf', freq=90.0, gain=10.0, q=0.7, enabled=False)
+    assert band.to_dict() == {
+        'id': 'b1',
+        'type': 'Lowshelf',
+        'freq': 90.0,
+        'gain': 10.0,
+        'q': 0.7,
+        'enabled': False,
     }
 
 
-@pytest.fixture
-def applied_pipeline(empty_pipeline):
-    return apply_loudness(empty_pipeline)
+def test_band_from_dict_round_trip():
+    band = Band(id='b1', type='Highshelf', freq=8000.0, gain=6.0, q=0.7)
+    assert Band.from_dict(band.to_dict()) == band
 
 
-def test_apply_loudness_inserts_filter(applied_pipeline):
-    assert _LOUDNESS_FILTER_KEY in applied_pipeline['filters']
+def test_dsp_config_defaults():
+    config = DSPConfig(player_id='x')
+    assert config.preamp_db == 0.0
+    assert config.bands == []
+    assert config.enabled is True
 
 
-def test_apply_loudness_fader_param(applied_pipeline):
-    params = applied_pipeline['filters'][_LOUDNESS_FILTER_KEY]['parameters']
-    assert params['fader'] == 'Main'
-    assert params['reference_level'] == -25.0
+def test_dsp_config_to_dict_keys():
+    config = DSPConfig(player_id='x')
+    assert set(config.to_dict().keys()) == {'player_id', 'preamp_db', 'bands', 'enabled'}
 
 
-def test_apply_loudness_custom_reference_level(empty_pipeline):
-    result = apply_loudness(empty_pipeline, -40.0)
-    params = result['filters'][_LOUDNESS_FILTER_KEY]['parameters']
-    assert params['reference_level'] == -40.0
+def test_dsp_config_bands_round_trip():
+    config = DSPConfig(
+        player_id='x',
+        preamp_db=-6.0,
+        bands=[
+            Band(id='b1', type='Lowshelf', freq=90.0, gain=10.0),
+            Band(id='b2', type='Highshelf', freq=8000.0, gain=6.0),
+        ],
+    )
+    result = DSPConfig.from_dict(config.to_dict())
+    assert result == config
+    assert result.bands[0].type == 'Lowshelf'
+    assert result.bands[1].freq == 8000.0
 
 
-def test_apply_loudness_boost_values(applied_pipeline):
-    params = applied_pipeline['filters'][_LOUDNESS_FILTER_KEY]['parameters']
-    assert params['low_boost'] == _LOUDNESS_LOW_BOOST
-    assert params['high_boost'] == _LOUDNESS_HIGH_BOOST
+def test_dsp_config_legacy_dict_drops_retired_keys():
+    legacy = {
+        'player_id': 'player-1',
+        'id': 'dsp-1',
+        'dsp_id': 'dsp-1',
+        'pipeline': {'filters': {}, 'pipeline': []},
+        'loudness_enabled': True,
+        'loudness_reference_level': -30.0,
+        'volume': 40.0,
+        'enabled': True,
+    }
+    config = DSPConfig.from_dict(legacy)
+    result = config.to_dict()
+    assert set(result.keys()) == {'player_id', 'preamp_db', 'bands', 'enabled'}
+    for retired in ('id', 'dsp_id', 'pipeline', 'loudness_enabled', 'loudness_reference_level', 'volume'):
+        assert retired not in result
 
 
-def test_apply_loudness_adds_pipeline_steps(applied_pipeline):
-    loudness_steps = [s for s in applied_pipeline['pipeline'] if _LOUDNESS_FILTER_KEY in s.get('names', [])]
-    assert len(loudness_steps) == 2
+def test_dsp_config_player_id_is_identity():
+    a = DSPConfig(player_id='same', preamp_db=-3.0)
+    b = DSPConfig(player_id='same', preamp_db=-3.0)
+    assert a == b
+    assert a != DSPConfig(player_id='other', preamp_db=-3.0)
 
 
-def test_apply_loudness_inserts_preamp_filter(applied_pipeline):
-    assert _PREAMP_FILTER_KEY in applied_pipeline['filters']
+def test_preset_defaults():
+    preset = Preset(id='p1', name='My preset')
+    assert preset.bands == []
 
 
-def test_apply_loudness_preamp_gain_value(applied_pipeline):
-    params = applied_pipeline['filters'][_PREAMP_FILTER_KEY]['parameters']
-    assert params['gain'] == _PREAMP_ATTENUATION_DB
-    assert params['gain'] == -_LOUDNESS_LOW_BOOST
-
-
-def test_apply_loudness_adds_preamp_pipeline_steps(applied_pipeline):
-    preamp_steps = [s for s in applied_pipeline['pipeline'] if _PREAMP_FILTER_KEY in s.get('names', [])]
-    assert len(preamp_steps) == 2
-
-
-def test_apply_loudness_orders_preamp_before_loudness(applied_pipeline):
-    names_in_order = [step['names'][0] for step in applied_pipeline['pipeline']]
-    assert names_in_order.index(_PREAMP_FILTER_KEY) < names_in_order.index(_LOUDNESS_FILTER_KEY)
-
-
-def test_remove_loudness_cleans_filter_and_steps(applied_pipeline):
-    result = remove_loudness(applied_pipeline)
-    assert _LOUDNESS_FILTER_KEY not in result['filters']
-    assert all(_LOUDNESS_FILTER_KEY not in s.get('names', []) for s in result['pipeline'])
-
-
-def test_remove_loudness_cleans_preamp_filter_and_steps(applied_pipeline):
-    result = remove_loudness(applied_pipeline)
-    assert _PREAMP_FILTER_KEY not in result['filters']
-    assert all(_PREAMP_FILTER_KEY not in s.get('names', []) for s in result['pipeline'])
-
-
-def test_apply_then_remove_is_idempotent(empty_pipeline):
-    result = remove_loudness(apply_loudness(empty_pipeline))
-    assert result['filters'] == empty_pipeline['filters']
-    assert result['pipeline'] == empty_pipeline['pipeline']
-
-
-def test_apply_loudness_does_not_touch_user_filters(user_pipeline):
-    applied = apply_loudness(user_pipeline)
-    assert 'user_filter' in applied['filters']
-    removed = remove_loudness(applied)
-    assert 'user_filter' in removed['filters']
-    assert any('user_filter' in s.get('names', []) for s in removed['pipeline'])
-
-
-def test_apply_loudness_idempotent_steps(empty_pipeline):
-    once = apply_loudness(empty_pipeline)
-    twice = apply_loudness(once)
-    loudness_steps = [s for s in twice['pipeline'] if _LOUDNESS_FILTER_KEY in s.get('names', [])]
-    assert len(loudness_steps) == 2
-
-
-def test_apply_loudness_idempotent_preamp_steps(empty_pipeline):
-    once = apply_loudness(empty_pipeline)
-    twice = apply_loudness(once)
-    preamp_steps = [s for s in twice['pipeline'] if _PREAMP_FILTER_KEY in s.get('names', [])]
-    assert len(preamp_steps) == 2
-
-
-def test_dsp_config_loudness_defaults():
-    config = DSPConfig(id='x', player_id='x')
-    assert config.loudness_enabled is False
-    assert config.loudness_reference_level == -25.0
-
-
-def test_dsp_config_to_dict_includes_loudness_fields():
-    config = DSPConfig(id='x', player_id='x', loudness_enabled=True)
-    d = config.to_dict()
-    assert d['loudness_enabled'] is True
-    assert d['loudness_reference_level'] == -25.0
+def test_preset_round_trip():
+    preset = Preset(
+        id='p1',
+        name='Loudness',
+        bands=[
+            Band(id='b1', type='Lowshelf', freq=90.0, gain=10.0, q=0.7),
+            Band(id='b2', type='Highshelf', freq=8000.0, gain=6.0, q=0.7),
+        ],
+    )
+    result = Preset.model_validate(preset.model_dump())
+    assert result == preset
+    assert result.id == 'p1'
+    assert result.name == 'Loudness'
+    # Bands reconstruct as real `Band`s, not raw dicts.
+    assert all(isinstance(band, Band) for band in result.bands)
+    assert result.bands[0].type == 'Lowshelf'
+    assert result.bands[1].freq == 8000.0

@@ -46,22 +46,6 @@ class Player(BaseModel):
         """Returns a `Player` object from a `dict`."""
         return cls.model_validate(dict_object)
 
-    def to_dict(self) -> dict:
-        """Returns a `Player` object as a `dict`."""
-        return {
-            'id': self.id,
-            'host': self.host,
-            'port': self.port,
-            'connected': self.connected,
-            'volume': self.volume,
-            'muted': self.muted,
-            'group_id': self.group_id,
-        }
-
-    def __repr__(self) -> str:
-        """Returns a `Player` object as a json-formatted `str`."""
-        return json.dumps(self.to_dict(), indent=2)
-
     def __eq__(self, compare) -> bool:
         """Returns `True` when compare is an instance of self, excluding `name`."""
         if isinstance(compare, Player):

@@ -6,6 +6,7 @@ open-protocols to your own hardware for multi-room synchronous playback.
 
 from audera import dal, models
 from audera.services import ap, logging, netifaces, platform
+from audera.settings import settings
 
 __all__ = [
     'platform',
@@ -27,8 +28,9 @@ DESCRIPTION: str = ''.join(
 # Websites
 HOME: str = 'https://github.com/Eleff-org/audera'
 
-# Service ports
-SNAPSERVER_PORT: int = 1780
-CAMILLADSP_PORT: int = 1234
-PLEXAMP_PORT: int = 32500
-SERVER_PORT: int = 80
+# Service ports (sourced from the cached environment-settings singleton so the
+#   `audera.*_PORT` call sites stay unchanged while becoming env-overridable)
+SNAPSERVER_PORT: int = settings.snapserver_port
+CAMILLADSP_PORT: int = settings.camilladsp_port
+PLEXAMP_PORT: int = settings.plexamp_port
+SERVER_PORT: int = settings.server_port
