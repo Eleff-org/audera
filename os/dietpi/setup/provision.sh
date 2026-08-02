@@ -10,8 +10,6 @@ PORT='22'
 IDENTITY=''
 NO_REBOOT=0
 WIPE_NETWORKS=0
-CHECK=0
-CHECK_TIMEOUT=120
 LOG=''
 DRY_RUN=0
 AUDIO_DEVICE=''
@@ -34,8 +32,6 @@ Options:
                                     (default: unset, leaves existing dtoverlay untouched)
       --no-reboot                  Skip final reboot; leaves device running for inspection
       --wipe-networks              Delete all NM connections before reboot (triggers WiFi wizard on next boot)
-      --check                      After reboot, poll until device is reachable then verify systemd services
-      --check-timeout <seconds>    Seconds to wait for device to come back after reboot (default: 120)
   -l, --log <file>                 Tee session output to a local file
       --dry-run                    Print the remote command without executing
   -h, --help                       Show this help message
@@ -55,8 +51,6 @@ while [[ $# -gt 0 ]]; do
         -a|--audio-device)   AUDIO_DEVICE="$2"; shift 2 ;;
         --no-reboot)         NO_REBOOT=1; shift ;;
         --wipe-networks)     WIPE_NETWORKS=1; shift ;;
-        --check)             CHECK=1; shift ;;
-        --check-timeout)     CHECK_TIMEOUT="$2"; shift 2 ;;
         -l|--log)            LOG="$2"; shift 2 ;;
         --dry-run)           DRY_RUN=1; shift ;;
         -h|--help)           usage; exit 0 ;;
@@ -67,7 +61,6 @@ done
 [[ -n "$DEVICE" ]] || die "--device is required (streamer or player)"
 [[ -n "$HOST" ]]   || die "--host is required"
 [[ "$DEVICE" == 'streamer' || "$DEVICE" == 'player' ]] || die "--device must be 'streamer' or 'player'"
-[[ "$WIPE_NETWORKS" -eq 1 && "$CHECK" -eq 1 ]] && die "--wipe-networks and --check are incompatible (device won't have WiFi after wipe)"
 if [[ -n "$AUDIO_DEVICE" ]]; then
     case "$AUDIO_DEVICE" in
         hdmi|digiamp-plus|dac-plus|hifiberry-dac-plus) ;;
@@ -95,8 +88,6 @@ WIPE_CMD="nohup bash -c '
   done
   reboot
 ' &>/dev/null &"
-
-REBOOT_CMD='reboot'
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o ConnectTimeout=10 -p "$PORT")
 [[ -n "$IDENTITY" ]] && SSH_OPTS+=(-i "$IDENTITY")
@@ -158,44 +149,5 @@ elif [[ "$NO_REBOOT" -eq 0 ]]; then
     _log "[$(date '+%Y-%m-%d %H:%M:%S')] (setup.sh triggered its own reboot)"
 fi
 
-if [[ "$CHECK" -eq 1 && "$NO_REBOOT" -eq 0 ]]; then
-    case "$DEVICE" in
-        streamer) SERVICES=('snapserver' 'snapclient' 'camilladsp' 'nginx' 'avahi-daemon') ;;
-        player)   SERVICES=('snapclient' 'camilladsp') ;;
-    esac
+_log "[$(date '+%Y-%m-%d %H:%M:%S')] Re-provisioning complete."
 
-    _log "[$(date '+%Y-%m-%d %H:%M:%S')] Waiting for ${HOST} to come back (timeout: ${CHECK_TIMEOUT}s) ..."
-    DEADLINE=$(( $(date +%s) + CHECK_TIMEOUT ))
-    REACHABLE=0
-    while [[ $(date +%s) -lt $DEADLINE ]]; do
-        if ssh "${SSH_OPTS[@]}" -o BatchMode=yes "${USER}@${HOST}" true 2>/dev/null; then
-            REACHABLE=1
-            break
-        fi
-        sleep 5
-    done
-
-    if [[ "$REACHABLE" -eq 0 ]]; then
-        die "Device ${HOST} did not come back within ${CHECK_TIMEOUT}s."
-    fi
-
-    _log "[$(date '+%Y-%m-%d %H:%M:%S')] Device is reachable. Checking services ..."
-    FAILED=()
-    for svc in "${SERVICES[@]}"; do
-        STATUS=$(_ssh systemctl is-active "$svc" 2>/dev/null || true)
-        if [[ "$STATUS" == 'active' ]]; then
-            _log "  [OK]   ${svc}"
-        else
-            _log "  [FAIL] ${svc} (${STATUS})"
-            FAILED+=("$svc")
-        fi
-    done
-
-    if [[ "${#FAILED[@]}" -gt 0 ]]; then
-        die "Services not active: ${FAILED[*]}"
-    fi
-
-    _log "[$(date '+%Y-%m-%d %H:%M:%S')] All services active. Re-provisioning complete."
-else
-    _log "[$(date '+%Y-%m-%d %H:%M:%S')] Re-provisioning complete."
-fi

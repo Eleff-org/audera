@@ -7,6 +7,8 @@
 
 The Audera audio pipeline passes through several format conversion points between PlexAmp and the physical DAC. Each point constrains the maximum audio quality that can be delivered, regardless of the source material's original resolution.
 
+The PlexAmp pipeline below is no longer the default path; a flashed device boots with AirPlay enabled (`dal.sources.DEFAULT_ENABLED`). The ceiling this ADR sets applies to every source: see *Per-source sample rates*, where every catalogued source lands at or below 16-bit / 48 kHz and snapserver resamples to the common stream format.
+
 ## Pipeline summary
 
 ```
@@ -28,6 +30,18 @@ PlexAmp
 
 The ALSA `asound.conf` on the streamer converts all audio to `S16_LE` at 48000 Hz before writing to `/tmp/snapfifo`. The Snapserver `source` URI specifies `sampleformat=48000:16:2`. These two points cap the pipeline at CD quality (16-bit, 48 kHz stereo) regardless of what PlexAmp outputs.
 
+#### Per-source sample rates
+
+The pipeline above describes the PlexAmp source. Since the source catalog (`audera/domains/sources/catalog.py`) replaced the single hard-coded `source =` line, the stream rate varies per source:
+
+| Source | `sampleformat` | Set by |
+|---|---|---|
+| PlexAmp | `48000:16:2` | the catalog URI, matching `asound.conf`'s conversion |
+| Spotify | `44100:16:2` | the catalog URI, matching go-librespot's fixed-rate pipe |
+| AirPlay | `44100:16:2` | snapserver; the `airplay://` wrapper rewrites the query and ignores any supplied value, so the catalog URI must not state one |
+
+Snapserver resamples each stream to the server default (`48000:16:2`) before encoding, and the playback chain stays 48 kHz throughout (ADR 003). The ceiling remains 16-bit / 48 kHz; the 44.1 kHz sources are upsampled to it.
+
 The downstream expansion from 16-bit to 32-bit (Snapclient `--sampleformat 48000:32:2`, CamillaDSP S32LE) is lossless zero-padding — it does not recover any information lost at the 16-bit conversion step and exists solely to satisfy CamillaDSP's minimum format requirements.
 
 ### Why this is acceptable now
@@ -39,7 +53,7 @@ The downstream expansion from 16-bit to 32-bit (Snapclient `--sampleformat 48000
 ### What must change to raise the ceiling
 
 1. **`audera/cli/conf.py` (`render_asound`)** — Change the `snapcast_format` plug's `format` from `S16_LE` to `S32_LE` (or remove the conversion entirely and let Snapserver handle resampling).
-2. **`audera/cli/conf.py` (`render_snapserver`)** — Change `source = pipe:///tmp/snapfifo?name=PlexAmp&sampleformat=48000:16:2&mode=create` to `sampleformat=48000:32:2` (or higher, e.g. `96000:32:2`).
+2. **`audera/domains/sources/catalog.py`** — Change the PlexAmp entry's `uri` from `sampleformat=48000:16:2` to `48000:32:2` (or higher, e.g. `96000:32:2`). The rates of the other sources are fixed by their backends rather than by Audera.
 3. **Both `setup.sh` files** — The Snapclient `--sampleformat` flag must match the new Snapserver format.
 4. **`audera/cli/conf.py` (`render_camilladsp`)** — If the sample rate changes, `devices.samplerate` must be updated to match.
 

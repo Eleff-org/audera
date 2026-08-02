@@ -11,7 +11,8 @@ uv run python testing.py    # run ad-hoc tests (no formal test framework)
 uv run pytest tests/dal/ -v                          # DAL tests (no Docker required)
 uv run pytest tests/clients/test_snapserver.py -v   # requires Docker
 uv run pytest tests/clients/ -v                      # all client tests
-uv run pytest -v                                     # everything
+uv run pytest -v                                     # everything except the systemd lane
+uv run pytest -m systemd -v                          # real systemd in a privileged container (requires Docker)
 pre-commit install          # install git hooks (run once after clone)
 pre-commit run --all-files  # run all hooks manually
 ```
@@ -31,23 +32,59 @@ Significant technical and UX decisions are recorded in `docs/adrs/`. Consult the
 
 ## Clients
 
-- **SnapserverClient** (`clients/snapserver.py`): JSON-RPC 2.0 over WebSocket at `ws://host:1780/jsonrpc` (HTTP server port). Opens a new connection per call. Methods: `get_status`, `get_clients`, `get_groups`, `set_client_volume`, `set_group_stream`, `set_group_mute`.
+- **SnapserverClient** (`clients/snapserver.py`): JSON-RPC 2.0 over WebSocket at `ws://host:1780/jsonrpc` (HTTP server port). Opens a new connection per call. Methods: `get_status`, `get_clients`, `get_groups`, `get_stream_status`, `set_client_volume`, `set_client_latency`, `set_client_name`, `set_group_stream`, `set_group_mute`.
 - **CamillaDSPClient** (`clients/camilladsp.py`): WebSocket at `ws://host:1234`. Methods: `get_config`, `set_config`, `get_volume`, `set_volume`.
 - **PlexAmpClient** (`clients/plexamp.py`): HTTP at `http://host:32500` via `httpx`. Methods: `get_sessions`, `get_now_playing`, `play`, `pause`, `skip`.
 
+## Services
+
+Host-level side effects live in `audera/services/`, never inline in the UI or the CLI. Every function that touches the device is gated with `@platform.requires('dietpi')`, which raises `RuntimeError` at *call* time so it does not mutate a developer's own machine.
+
+- **system** (`services/system.py`): the systemd seam. `systemctl(*args, check=True)` returns the `CompletedProcess`. `is_active(unit)` returns a `bool` and does not raise for a unit that is stopped, missing, or slow, because `systemctl is-active` exits 3 for a stopped unit and so it must not `check`. Nothing else calls `subprocess.run(['systemctl', …])` directly, because the correctness of an enable or a disable depends on the order of its calls, which is only assertable when every call goes through one seam. `TIMEOUT` bounds every call. Every call captures output, so a failure's `stderr` is logged in the seam before the `CalledProcessError` is re-raised. `CalledProcessError.__str__` contains the argv and the exit status but not the reason, so a caller that renders the exception must read `exc.stderr`.
+- **platform** (`services/platform.py`): `NAME` / `VERSION`, read from `/boot/dietpi/.version`, and the `requires()` decorator.
+- **netifaces** (`services/netifaces.py`): `nmcli` — Wi-Fi scan, connect, and connection state.
+- **ap** (`services/ap.py`): the setup-mode Wi-Fi access point. Still shells out to `systemctl` inline; moving it onto `system` is a follow-up.
+- **logging** (`services/logging.py`): the shared logger.
+
 ## Data models
 
-All models are `@dataclass` with `from_dict()` / `from_config()` / `to_dict()` / `__repr__()` (JSON) / `__eq__()`.
+All seven models (`Band`, `DSPConfig`, `Preset`, `Player`, `Group`, `Settings`, `Stream`) are pydantic `BaseModel` with a `from_dict()` classmethod. There is no `from_config()` anywhere. Most carry a hand-written `to_dict()` and a JSON `__repr__()`; `Player` and `Preset` do not, and serialize via `model_dump()` / `model_validate`.
 
 - `Player` — Snapcast client: `id, host, port, connected, volume, muted, group_id`
 - `DSPConfig` — parametric-EQ config: `player_id, preamp_db, bands, enabled` (keyed by `player_id`; the CamillaDSP pipeline is compiled from `preamp_db` + `bands` on Save)
 
-The `dsp` models (`Band`/`DSPConfig`/`Preset`) are pydantic `BaseModel` (the `@dataclass` convention has drifted here); `Preset` (`id, name, bands`) serializes via `model_dump()`/`model_validate` — no hand-written `to_dict`.
-
 ## DAL
 
-- `dsp`, `presets`, and `settings` all persist via plain `json` (not duckdb). A `DSPConfig`'s and a `Preset`'s `bands` are nested lists of objects, which duckdb's `read_json_auto` — flat/columnar under the pytensils DTYPES constraint — cannot model. The duckdb-backed DALs were retired, so every surviving DAL is plain-json for the same reason.
-- Config files: `~/.audera/{dsp,dsp/presets,settings}/{id}.json` (`dsp` is keyed by `player_id`)
+- `dsp`, `presets`, `settings`, and `sources` all persist via plain `json` (not duckdb). A `DSPConfig`'s and a `Preset`'s `bands` are nested lists of objects, which duckdb's `read_json_auto` — flat/columnar under the pytensils DTYPES constraint — cannot model. The duckdb-backed DALs were retired, so every surviving DAL is plain-json for the same reason.
+- Config files: `~/.audera/{dsp,dsp/presets}/{id}.json` (`dsp` is keyed by `player_id`), `~/.audera/settings.json`, `~/.audera/sources.json`
+- Every configuration write goes through `audera/io.py`'s `write_text(path, content, *, encoding='utf-8', mode=None)` — the DALs, `/etc/snapserver.conf`, the PlexAmp claim drop-in (`mode=0o600`, it carries a plex.tv token), and the access point's dnsmasq conf. It takes rendered content, so no caller can truncate a destination and only then discover the content does not exist, and it writes a sibling temp and `os.replace`s it into place, so a concurrent reader sees the old file or the new one and a failure leaves the old one. `mode` is applied to the temp, since `os.replace` carries the source's bits. `os/dietpi/streamer/automation/setup.sh` renders to `.tmp` and `mv`s for the same reason.
+
+## Audio sources
+
+`audera/domains/sources/catalog.py`'s `CATALOG` is the single vocabulary for audio sources: provisioning, the Sources tab, the Players tab, and `render_snapserver()` all derive from it. A source's id, URI, and units are not restated anywhere else.
+
+`~/.audera/sources.json` holds `{'sources': {'enabled': [...], 'setup': {id: {...}}}}` via `dal.sources`. `enabled` is which sources the operator wants running; a source absent from the list is disabled. `setup` is the durable record of a source's one-time setup, today only `{'complete': true}` for a claimed PlexAmp, read by `index._setup_state` ahead of any live probe and discarded when the source is disabled. The probes report what the device does *now* — a stopped unit reads as unclaimed — so without the record a reprovision re-asks for a claim that already happened. Every writer reads the whole document and re-writes it, so the two sections cannot clobber each other, and `is_recorded()` tests the `enabled` key rather than the file, since a setup write creates the file too.
+
+Applying a toggle to the host is `audera/domains/sources/toggle.py`'s `apply(source, enable, enabled_ids)`. In order, it writes `snapserver.conf`, clears the start-limit counter of every unit it is about to start, moves the source's units through the `system` seam, and restarts Snapserver. Clearing the counters is required: each toggle restarts Snapserver, systemd's default start limit counts manual starts, and without the clear the sixth toggle inside ten seconds is refused, leaving the server dead and `Restart=on-failure` unable to recover it. `apply` takes the enabled ids instead of reading them back, so the conf cannot be rendered from a set other than the one the caller recorded. It lives in `domains/` rather than `services/` because it composes the `services.system` and `cli.conf` seams around catalog knowledge. It takes no `page`; the lock, the data-access-layer write, group reassignment, the readiness wait, and the notifications stay in `ui/streamer/pages/index.py`.
+
+**The ownership split:** Audera owns which sources run (the enabled set, and therefore the rendered `snapserver.conf`). Snapcast owns which player listens to what. It persists group membership and `stream_id` in its own `server.json`, so Audera stores no assignment and reads it live.
+
+Audera uses two words for this, following `snapserver.conf`, which models the same split with `[stream]` as a section header, `source = <uri>` per input, and `default_source` for the default:
+
+- **source** — a `SourceDefinition` an operator enables and provisions. Owns the Sources tab, `sources.json`, `default_source`, the `source =` lines, setup flows, and systemd units.
+- **stream** — the Snapcast runtime object a group listens to. Owns `stream_id`, `Group.SetStream`, `get_stream_status`, the `[stream]` conf section, and the Players tab's assignment surface.
+
+The Players tab's "Stream" caption, its "By stream" grouping, and `FF_GROUPING_BY_STREAM = 'stream'` are correct as written. A `SourceDefinition.id` is the Snapcast stream name; that is stated once, in `catalog.py`'s rule 1 below.
+
+Three rules follow from upstream Snapcast behaviour. Record an ADR before contradicting one:
+
+1. A `SourceDefinition.id` is immutable. It is also the Snapcast stream name, so renaming it orphans every group Snapcast persisted against it. Change `label` instead.
+2. At least one source must stay enabled. Snapserver dereferences a null default stream at the first client connect, so a zero-stream conf crashes it; `render_snapserver()` raises instead of emitting one.
+3. `default_source` must always be set and must name a live stream. Removing a stream reassigns its groups to `default_source`, and naming a stream that is not live mis-routes them with no error. `default_source()` derives the value, so no caller can supply one.
+
+The bootstrap set is `dal.sources.DEFAULT_ENABLED`, today `('AirPlay',)`, which is the only source that plays with no account, claim, or pairing. It is a fallback for a device with no recorded set, not a value that overwrites one: `get_enabled()` degrades to it, and provisioning renders both the conf (`audera streamer conf snapserver.conf`) and the systemd unit state (`audera streamer units --enabled` / `--disabled`) from `get_enabled()`. On a flashed device, which has no `sources.json`, that is AirPlay's units enabled and started and every other source's installed but disabled; on a reprovision it is whatever the operator recorded, since `sources.json` survives a flash. The shell names no source, so changing `DEFAULT_ENABLED` or reordering `CATALOG` is a change to Python alone; see `os/dietpi/AGENTS.md`.
+
+An absent `sources.json` is seeded from what is running. `index.adopt_running_sources`, called once from `Page.__init__`, seeds the file from the streams Snapserver is serving ∩ `CATALOG`. On a fresh flash that writes the same set `DEFAULT_ENABLED` already implied; on an in-place upgrade it keeps the enabled set and the running conf from diverging. The enabled set is the sole input to the conf rewrite, so a divergence would let the first toggle of any source truncate a pre-existing stream out of `/etc/snapserver.conf` without the disable path's reassignment safeguard firing. Adoption writes nothing on an unreachable Snapserver or an empty intersection, so the next load retries and the "at least one source stays enabled" invariant still holds.
 
 ## Code style
 

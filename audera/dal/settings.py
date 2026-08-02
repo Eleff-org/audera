@@ -4,6 +4,7 @@ import json
 import os
 from typing import Union
 
+from audera import io
 from audera.dal import path
 from audera.models import settings
 
@@ -57,11 +58,7 @@ def save(settings_: settings.Settings) -> settings.Settings:
     settings_: `audera.models.settings.Settings`
         An instance of a `Settings` object.
     """
-    if not os.path.isdir(PATH):
-        os.mkdir(PATH)
-    file_path = os.path.join(PATH, FILE_NAME)
-    with open(file_path, 'w') as f:
-        json.dump({'settings': settings_.to_dict()}, f, indent=2)
+    io.write_text(os.path.join(PATH, FILE_NAME), json.dumps({'settings': settings_.to_dict()}, indent=2))
     return settings_
 
 

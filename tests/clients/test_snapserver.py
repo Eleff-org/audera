@@ -1,6 +1,8 @@
 import pytest
 
+import audera.dal.sources as sources_dal
 from audera.clients import SnapserverClient
+from audera.domains.sources import default_source
 from audera.models.player import Group, Player
 
 
@@ -28,6 +30,17 @@ def test_get_clients(client):
     assert isinstance(result, list)
     for p in result:
         assert isinstance(p, Player)
+
+
+def test_get_stream_status(client):
+    # The container boots the no-arg render of the bootstrap set, so the expected stream is
+    # derived from `DEFAULT_ENABLED` rather than named here.
+    expected = default_source(sources_dal.DEFAULT_ENABLED)
+    result = client.get_stream_status()
+    assert isinstance(result, dict)
+    assert expected in result
+    assert isinstance(result[expected], str)
+    assert result[expected]
 
 
 def test_set_client_latency(client):

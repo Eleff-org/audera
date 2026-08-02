@@ -106,6 +106,15 @@ class SnapserverClient:
             )
         return groups
 
+    def get_stream_status(self) -> dict[str, str]:
+        """Returns the status of every Snapcast stream, keyed by stream id.
+
+        Projects the payload `get_status()` already fetches. The status is Snapserver's own value
+        for the stream: `'playing'`, `'idle'`, or `'disabled'`.
+        """
+        status = self.get_status()
+        return {stream['id']: stream['status'] for stream in status.get('server', {}).get('streams', [])}
+
     def set_client_volume(self, client_id: str, percent: int, muted: bool = False) -> dict:
         """Sets the volume for a Snapcast client.
 

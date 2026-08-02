@@ -1,4 +1,13 @@
-* text=auto
-
-*.sh text eol=lf
-*.py text eol=lf
+# `eol=lf` pins the *worktree*, not just the index, and that is the point. `text=auto` alone
+# normalizes what git stores, so a commit made on Windows looks clean while the checked-out file
+# holds CRLF — and `docker COPY` takes worktree bytes, so `tests/docker/`'s images get a shell script
+# bash refuses with `$'\r': command not found`, a unit whose `ExecStart` carries a trailing `\r`, and
+# a `.version` that reads back as `dietpi\r`.
+#
+# Applied to everything rather than per extension, so a file added to an image is covered without
+# anyone remembering a rule for it.
+#
+# A file written by Python rather than checked out gets no protection from this at all:
+# `pathlib.Path.write_text` translates `\n` to `\r\n` on Windows, so use `write_bytes` or a `sed -i`
+# in the image for those.
+* text=auto eol=lf

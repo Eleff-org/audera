@@ -24,9 +24,13 @@ Using a different DAC requires:
 - Updating the CamillaDSP `playback.device` in `audera/cli/conf.py` (`render_camilladsp`)
 - Verifying the ALSA card index does not shift when `snd-aloop` is loaded at `index=7`
 
-### OS: DietPi (Debian Bookworm, Raspberry Pi image)
+### OS: DietPi (Debian Trixie, Raspberry Pi OS-based image)
 
 `setup.sh` sources `/boot/dietpi/func/dietpi-globals` for `G_CONFIG_INJECT` and `dietpi-set_hardware`. These functions do not exist on standard Debian or Raspberry Pi OS. The automated first-boot flow (`AUTO_SETUP_*` keys in `dietpi.txt`) is also DietPi-specific.
+
+Packages resolve from two apt origins, Raspberry Pi OS and Debian trixie, so a package name alone does not determine which build is installed. Use `apt-cache policy` to check which origin a given package resolves to.
+
+`snapserver` is pinned to `0.31.0-1` and held (`apt-mark hold`) in `setup.sh`, and the CI testcontainer (`tests/docker/snapserver/Dockerfile`) pins the same version on `debian:trixie-slim`. The Snapcast behaviours Audera's source catalog depends on are version-specific: `default_source` reassignment semantics, the `airplay://` wrapper's forced `44100:16:2`, and the absence of `sandbox_dir` before 0.33.0. The Debian release and the snapserver version are therefore a single assumption. If the version disappears from trixie in a point release, the image build and a fresh flash both fail rather than silently installing a release with different behaviour.
 
 ### Network: WiFi only
 

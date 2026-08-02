@@ -4,6 +4,7 @@ import json
 import os
 from typing import Union
 
+from audera import io
 from audera.dal import path
 from audera.models import dsp
 
@@ -68,11 +69,8 @@ def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
     dsp_config: `audera.models.dsp.DSPConfig`
         An instance of an `audera.models.dsp.DSPConfig` object.
     """
-    if not os.path.isdir(PATH):
-        os.makedirs(PATH)
     file_path = os.path.join(PATH, path.to_filename(dsp_config.player_id))
-    with open(file_path, 'w') as f:
-        json.dump({'dsp': dsp_config.to_dict()}, f, indent=2)
+    io.write_text(file_path, json.dumps({'dsp': dsp_config.to_dict()}, indent=2))
     return dsp_config
 
 

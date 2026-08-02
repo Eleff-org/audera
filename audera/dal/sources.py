@@ -1,0 +1,176 @@
+"""Audio sources configuration-layer
+
+`~/.audera/sources.json` holds `{'sources': {'enabled': [...], 'setup': {id: {...}}}}`.
+
+`enabled` is which audio sources the operator wants running. Snapcast does not persist this. A
+source absent from the list is disabled, so adding a catalog entry needs no migration.
+
+`setup` is the durable record of a source's one-time setup, today only `{'complete': true}` for a
+claimed PlexAmp. The live probes that detect setup are what the operator's device does *now* — a
+disabled unit reads as unclaimed — so provisioning, which stops the unit, would otherwise re-ask
+for a claim that already happened. The record is discarded when the source is disabled.
+
+An absent `enabled` key means nothing has been recorded yet, and `get_enabled()` falls back to
+`DEFAULT_ENABLED`. `is_recorded()` and `adopt()` exist for the one caller that must tell those
+two apart, `ui.streamer.pages.index.adopt_running_sources`. The key rather than the file is what
+is tested, since a setup record can create the file before any enabled set is recorded.
+"""
+
+import json
+import os
+from typing import Union
+
+from audera import io
+from audera.dal import path
+
+PATH: Union[str, os.PathLike] = path.HOME
+FILE_NAME: str = 'sources.json'
+
+# The bootstrap set, restated here rather than imported from `domains.sources.CATALOG` so the
+# DAL keeps its standard-library-plus-`dal.path` imports. `tests/dal/test_sources.py` asserts
+# every id here is catalogued and renders cleanly.
+#
+# AirPlay is the only source that plays audio as soon as the image boots; it needs no account,
+# claim flow, or app-side pairing. It is a bootstrap default and nothing more: provisioning
+# renders the conf and the systemd unit state from `get_enabled()`, so this constant is what a
+# device with no recorded set gets, not a value that overwrites a recording.
+DEFAULT_ENABLED: tuple[str, ...] = ('AirPlay',)
+
+
+def is_recorded() -> bool:
+    """Returns whether an enabled set has been written to disk.
+
+    `get_enabled()` cannot answer this, since it degrades an unrecorded set to `DEFAULT_ENABLED`,
+    which is indistinguishable from a device whose operator left AirPlay as the only enabled
+    source.
+    """
+    return 'enabled' in _document().get('sources', {})
+
+
+def get_enabled() -> list[str]:
+    """Returns the enabled source ids, or `DEFAULT_ENABLED` when none have been recorded."""
+    enabled = _document().get('sources', {}).get('enabled')
+    return list(DEFAULT_ENABLED) if enabled is None else enabled
+
+
+def adopt(ids: list[str]) -> bool:
+    """Records `ids` as the enabled set only when nothing has been recorded yet, and returns
+    whether the write happened.
+
+    Two cases are refused. An already-recorded set is the operator's own intent and takes
+    precedence over anything inferred from the server. An empty `ids` indicates a failed
+    observation; recording it would break the "at least one source stays enabled" invariant.
+
+    Parameters
+    ----------
+    ids: `list[str]`
+        The source ids observed running, in catalog order.
+    """
+    if not ids or is_recorded():
+        return False
+    _save(ids)
+    return True
+
+
+def set_enabled(id: str, enabled: bool) -> list[str]:
+    """Enables or disables a source and returns the new set of enabled source ids.
+
+    The new set is returned so callers render from the value they just wrote rather than
+    reading the configuration file back.
+
+    Parameters
+    ----------
+    id: `str`
+        The source id to toggle.
+    enabled: `bool`
+        Whether the source is enabled.
+    """
+    ids = get_enabled()
+    if enabled and id not in ids:
+        ids.append(id)
+    elif not enabled and id in ids:
+        ids.remove(id)
+    return _save(ids)
+
+
+def get_setup(id: str) -> dict:
+    """Returns the recorded setup state of a source, or `{}` when nothing has been recorded.
+
+    Parameters
+    ----------
+    id: `str`
+        The source id.
+    """
+    return _document().get('sources', {}).get('setup', {}).get(id, {})
+
+
+def set_setup_complete(id: str, complete: bool) -> None:
+    """Records whether a source's one-time setup has been completed.
+
+    Parameters
+    ----------
+    id: `str`
+        The source id.
+    complete: `bool`
+        Whether setup is complete.
+    """
+    data = _document()
+    setup = data.setdefault('sources', {}).setdefault('setup', {})
+    setup[id] = {**setup.get(id, {}), 'complete': complete}
+    _save_document(data)
+
+
+def clear_setup(id: str) -> None:
+    """Discards a source's recorded setup state.
+
+    Disabling a source is the one thing that discards its record: the operator has said they no
+    longer want the source, and whatever they set up may not survive to the next enable.
+
+    Parameters
+    ----------
+    id: `str`
+        The source id.
+    """
+    data = _document()
+    setup = data.get('sources', {}).get('setup', {})
+    if id not in setup:
+        return
+    del setup[id]
+    _save_document(data)
+
+
+def _document() -> dict:
+    """Returns the whole configuration document, or an empty one when the file is absent."""
+    file_path = os.path.abspath(os.path.join(PATH, FILE_NAME))
+    if not os.path.isfile(file_path):
+        return {'sources': {}}
+    with open(file_path, 'r') as f:
+        return json.load(f)
+
+
+def _save(ids: list[str]) -> list[str]:
+    """Saves the enabled source ids to `~/.audera/sources.json` and returns them.
+
+    Parameters
+    ----------
+    ids: `list[str]`
+        The enabled source ids.
+    """
+    data = _document()
+    data.setdefault('sources', {})['enabled'] = ids
+    _save_document(data)
+    return ids
+
+
+def _save_document(data: dict) -> None:
+    """Writes the whole configuration document to `~/.audera/sources.json`.
+
+    Every writer reads the document first and re-writes all of it, so an enabled-set write and a
+    setup write cannot clobber each other's section.
+
+    Parameters
+    ----------
+    data: `dict`
+        The whole configuration document.
+    """
+    io.write_text(os.path.join(PATH, FILE_NAME), json.dumps(data, indent=2))

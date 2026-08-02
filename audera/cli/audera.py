@@ -72,6 +72,29 @@ def main():
     )
     _STREAMER_CONF_PARSER.set_defaults(func=commands.streamer_conf)
 
+    _STREAMER_UNITS_PARSER = _STREAMER_VERB_SUBPARSER.add_parser(
+        name='units',
+        help="Print the audio sources' systemd units to stdout, one per line.",
+        epilog='Execute `audera streamer units --help` for help.',
+    )
+    # One destination, so the two flags cannot disagree and neither can be omitted. Required
+    # because provisioning enables one list and disables the other, and a bare `units` silently
+    # meaning one of them would make the wrong call look right.
+    _STREAMER_UNITS_SELECTION = _STREAMER_UNITS_PARSER.add_mutually_exclusive_group(required=True)
+    _STREAMER_UNITS_SELECTION.add_argument(
+        '--enabled',
+        dest='disabled',
+        action='store_false',
+        help="The enabled audio sources' units.",
+    )
+    _STREAMER_UNITS_SELECTION.add_argument(
+        '--disabled',
+        dest='disabled',
+        action='store_true',
+        help="Every other catalogued audio source's units.",
+    )
+    _STREAMER_UNITS_PARSER.set_defaults(func=commands.streamer_units)
+
     # player subject
     _PLAYER_PARSER = _SUBJECT_SUBPARSER.add_parser(
         name='player',

@@ -5,6 +5,7 @@ import json
 import os
 from typing import Union
 
+from audera import io
 from audera.dal import path
 from audera.models import dsp
 
@@ -38,10 +39,8 @@ def save_preset(preset: dsp.Preset) -> dsp.Preset:
     preset: `audera.models.dsp.Preset`
         An instance of an `audera.models.dsp.Preset` object.
     """
-    os.makedirs(PATH, exist_ok=True)
     file_path = os.path.join(PATH, path.to_filename(preset.id))
-    with open(file_path, 'w') as f:
-        json.dump({'preset': preset.model_dump()}, f, indent=2)
+    io.write_text(file_path, json.dumps({'preset': preset.model_dump()}, indent=2))
     return preset
 
 

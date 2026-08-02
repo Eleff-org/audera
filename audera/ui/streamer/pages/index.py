@@ -1,13 +1,17 @@
 """Audera app index"""
 
 import asyncio
-from typing import TYPE_CHECKING
+import time
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, Callable, NamedTuple, TypeVar
 
 from nicegui import ui
 
 import audera
-from audera.clients import CamillaDSPClient
 from audera.dal import settings as settings_dal
+from audera.dal import sources as sources_dal
+from audera.domains.sources import CATALOG, SourceDefinition, default_source, toggle
+from audera.models.player import Player
 from audera.ui import components, features
 from audera.ui.streamer.pages import _plex
 from audera.ui.streamer.pages._clients import _camilladsp, _snapserver
@@ -15,21 +19,94 @@ from audera.ui.streamer.pages._clients import _camilladsp, _snapserver
 if TYPE_CHECKING:
     from audera.ui.streamer.pages import Page
 
+# `sources_dal` is imported as a module so that `sources_dal.PATH` resolves at call time, which
+# lets the tests redirect it. The conf write, the units, and the restart live in
+# `domains.sources.toggle`, which carries the same convention for `conf.SNAPSERVER_CONF` and
+# `system.systemctl`.
 
-def render(page: 'Page') -> None:
-    """Renders the main dashboard page."""
+# Serializes the enable/disable choreography process-wide: two tabs toggling at once would
+# interleave their DAL writes, conf renders, and `systemctl restart snapserver` calls, leaving a
+# conf that does not match the last recorded intent. An `asyncio.Lock()` constructed at import
+# time only binds an event loop on a contended acquire, so it is safe across pytest's per-test
+# loops; a test that contends on it deliberately must first
+# `monkeypatch.setattr(index, '_CHOREOGRAPHY_LOCK', asyncio.Lock())`.
+_CHOREOGRAPHY_LOCK = asyncio.Lock()
+
+# `ui.tabs.on_value_change` reports the tab name rather than the `ui.tab` element, so the handler
+# and the constructor must agree on the string.
+_PLAYERS_TAB = 'Players'
+_SOURCES_TAB = 'Sources'
+_SETTINGS_TAB = 'Settings'
+
+# How long to keep asking a restarted Snapserver for its stream status before rendering the
+# Sources tab anyway, and how long to sleep between asks.
+_READY_TIMEOUT = 20.0
+_READY_INTERVAL = 0.5
+
+_LAST_SOURCE_MESSAGE = 'At least one audio source must stay enabled.'
+_INTERRUPTION_MESSAGE = 'Applying this will briefly interrupt playback on all players.'
+_NO_GROUP_MESSAGE = 'This player is not in a Snapcast group yet.'
+_NO_DESTINATION_MESSAGE = 'There is nowhere else to move this player.'
+_NO_LIVE_DESTINATION_MESSAGE = 'No other enabled source is running, so Snapserver will reassign these players itself.'
+
+# The by-stream layout's section for players whose stream Snapserver did not name. A marker
+# suffix has to be non-empty, and `''` is not a source id any catalog entry can collide with.
+_UNASSIGNED_SECTION = 'unassigned'
+
+# What both layouts call a player whose stream Snapserver did not name: the by-stream section
+# header and the by-player chip.
+_UNASSIGNED_LABEL = 'Unassigned'
+_UNASSIGNED_MESSAGE = 'Snapserver has not said what this player is listening to.'
+
+
+# What the chip reads for a flow that exists but cannot be queried. The tab's own fallback, since
+# a flow that raises reports nothing about its state.
+_SETUP_REQUIRED = 'setup required'
+
+
+class _SetupFlow(NamedTuple):
+    """A `class` that represents a source's post-enable configuration flow.
+
+    Attributes
+    ----------
+    state: `Callable[[], str | None]`
+        The chip label while the flow is incomplete, or `None` once it is done. A label rather
+        than a `bool` so a flow can distinguish its own incomplete states without the tab learning
+        what they are; PlexAmp separates a unit that is still starting from one that was never
+        claimed.
+    build: `Callable[['Page', str | None], None]`
+        Renders the flow's panel on the source's card, given that same label.
+    """
+
+    state: Callable[[], str | None]
+    build: Callable[['Page', str | None], None]
+
+
+# Keyed on `SourceDefinition.setup`, the catalog's discriminator, rather than an `if` chain, so
+# the card builder never learns what `'plex_claim'` means and a second flow is a one-row diff.
+_SETUP_FLOWS: dict[str, _SetupFlow] = {'plex_claim': _SetupFlow(_plex.setup_state, _plex.build_setup_panel)}
+
+
+async def render(page: 'Page') -> None:
+    """Renders the main dashboard page.
+
+    `async` because `build_players_tab` is `async`. `@ui.refreshable` returns the coroutine its
+    function produced, so the initial build has to be awaited here or it is never scheduled. Every
+    subsequent `.refresh()` is an `AwaitableResponse` that fires itself as a background task, so
+    those call sites are unchanged.
+    """
     components.header.render(audera.NAME, 'Streamer')
 
     with ui.tabs().classes('w-full') as tabs:
-        players_tab = ui.tab('Players')
-        services_tab = ui.tab('Services')
-        settings_tab = ui.tab('Settings')
+        players_tab = ui.tab(_PLAYERS_TAB)
+        sources_tab = ui.tab(_SOURCES_TAB)
+        settings_tab = ui.tab(_SETTINGS_TAB)
 
     with ui.tab_panels(tabs, value=players_tab).classes('w-full'):
         with ui.tab_panel(players_tab):
-            page._build_players_tab()  # type: ignore
-        with ui.tab_panel(services_tab):
-            page._build_services_tab()  # type: ignore
+            await page._build_players_tab()  # type: ignore
+        with ui.tab_panel(sources_tab):
+            page._build_sources_tab()  # type: ignore
         with ui.tab_panel(settings_tab):
             _build_settings_tab(page)
 
@@ -39,181 +116,1439 @@ def render(page: 'Page') -> None:
 
     ui.timer(10.0, _maybe_refresh)
 
+    # Whether the operator has opened the Sources tab yet this page. NiceGUI builds every tab
+    # panel eagerly at page load, so without this the tab renders once per page and a status word
+    # that went stale while the operator was on another tab could only be corrected by reloading.
+    entered_sources = False
 
-def build_services_tab(page: 'Page') -> None:
-    """Renders the Services tab — shows PlexAmp status and a browser-based OAuth claiming flow.
+    def _on_tab_change(e) -> None:
+        nonlocal entered_sources
+        if e.value != _SOURCES_TAB:
+            return
+        # The first entry is not repainted, because that panel is as fresh as the page.
+        # `refresh()` defers the rebuild to a background task, so repainting on first entry would
+        # delete the card out from under a toggle the operator clicked in the meantime, and the
+        # handler already running on it would raise into a deleted slot.
+        if not entered_sources:
+            entered_sources = True
+            return
+        # A repaint deletes the claim flow's elements and cancels its timers, so a claim in flight
+        # refuses it, as `_on_change` does for a source toggle. No notification, since returning
+        # to a tab is not a request to abandon what is on it.
+        if page._claim_in_flight:
+            return
+        # One read per return to the tab, bounded by the operator rather than by a timer.
+        page._build_sources_tab.refresh()
 
-    Called by `Page._build_services_tab`, the `@ui.refreshable` method that owns the refresh
-    target (so refreshes are keyed per `Page` instance).
+    tabs.on_value_change(_on_tab_change)
+
+
+def adopt_running_sources(page: 'Page') -> None:
+    """Seeds the enabled source set from the streams Snapserver is serving, once, when nothing has
+    been recorded yet.
+
+    Called once from `Page.__init__` rather than from a render path.
+
+    `dal.sources.get_enabled()` degrades an absent `sources.json` to `DEFAULT_ENABLED`, which is
+    only correct for a flashed device, whose provisioning wrote a matching conf. An in-place
+    upgrade inherits a conf naming sources this code never recorded. The enabled set is the only
+    input to `_write_snapserver_conf`, so the first toggle of any source would truncate the
+    inherited streams out of `/etc/snapserver.conf` without the disable path's reassignment
+    safeguard firing, because from Audera's point of view those sources were never enabled. Every
+    group parked on one would be silently reassigned at the next client connect.
+
+    Writes only on a successful, non-empty intersection with `CATALOG`. An unreachable Snapserver,
+    or one naming no catalogued stream, leaves the file absent so the next load retries, which
+    stops a boot-time race from permanently mis-seeding the device. `dal.sources.adopt` re-checks
+    both preconditions.
+
+    An uncatalogued stream in a hand-edited conf is dropped by the intersection.
+    `render_snapserver()` only ever emits `CATALOG` sources, so such a stream cannot survive a conf
+    rewrite regardless.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
     """
-    state = _plex._plexamp_state()
-
-    with ui.card().classes('w-full mb-2'):
-        with ui.row().classes('items-center justify-between w-full'):
-            ui.label('PlexAmp Headless').classes('font-medium')
-            if state == 'claimed':
-                ui.label('available').classes('text-sm text-green-500')
-            elif state == 'unclaimed':
-                ui.label('setup required').classes('text-sm text-amber-500')
-            else:
-                ui.label('inactive').classes('text-sm text-red-500')
-
-        if state == 'claimed':
-            ui.link('Open PlexAmp', 'https://plexamp.local').classes('text-sm mt-1')
-
-        elif state == 'unclaimed':
-            connect_btn = ui.button('Connect with Plex').classes('mt-2')
-            status_label = ui.label('').classes('text-sm text-gray-500 mt-1')
-            auth_link = ui.link("Didn't open? Click here to authorize with Plex", '#', new_tab=True).classes('text-sm mt-1')
-            auth_link.set_visibility(False)
-
-            async def _on_connect():
-                connect_btn.disable()
-                status_label.set_text('Opening Plex authorization…')
-
-                try:
-                    pin_id, pin_code = await asyncio.to_thread(_plex._create_plex_pin)
-                except Exception as exc:
-                    status_label.set_text(f'Error: {exc}')
-                    connect_btn.enable()
-                    return
-
-                auth_url = (
-                    f'https://app.plex.tv/auth/#!?clientID={_plex._PLEX_CLIENT_ID}'
-                    f'&code={pin_code}'
-                    f'&context%5Bdevice%5D%5Bproduct%5D={audera.NAME}'
-                )
-                ui.navigate.to(auth_url, new_tab=True)
-                status_label.set_text('Waiting for Plex authorization…')
-                auth_link.props(f'href="{auth_url}"')
-                auth_link.set_visibility(True)
-
-                deadline = asyncio.get_event_loop().time() + 300  # 5-minute timeout
-                poll_timer: list[ui.timer] = []
-
-                async def _poll_auth():
-                    if asyncio.get_event_loop().time() > deadline:
-                        poll_timer[0].cancel()
-                        status_label.set_text('Authorization timed out. Please try again.')
-                        connect_btn.enable()
-                        return
-
-                    try:
-                        auth_token = await asyncio.to_thread(_plex._poll_plex_pin, pin_id)
-                    except Exception:
-                        return  # transient error; retry on next tick
-
-                    if not auth_token:
-                        return
-
-                    poll_timer[0].cancel()
-                    status_label.set_text('Authorized. Claiming PlexAmp…')
-
-                    try:
-                        claim_token = await asyncio.to_thread(_plex._get_claim_token, auth_token)
-                        await asyncio.to_thread(_plex._restart_plexamp_with_claim, claim_token)
-                    except Exception as exc:
-                        status_label.set_text(f'Claim failed: {exc}')
-                        connect_btn.enable()
-                        return
-
-                    status_label.set_text('PlexAmp restarting…')
-
-                    port_deadline = asyncio.get_event_loop().time() + 120
-                    port_timer: list[ui.timer] = []
-
-                    async def _poll_port():
-                        if asyncio.get_event_loop().time() > port_deadline:
-                            port_timer[0].cancel()
-                            _plex._remove_claim_override()
-                            status_label.set_text('PlexAmp did not come up in time. Check the service.')
-                            connect_btn.enable()
-                            return
-
-                        if _plex._plexamp_state() == 'claimed':
-                            port_timer[0].cancel()
-                            _plex._remove_claim_override()
-                            page._build_services_tab.refresh()
-
-                    port_timer.append(ui.timer(2.0, _poll_port))
-
-                poll_timer.append(ui.timer(2.0, _poll_auth))
-
-            connect_btn.on('click', _on_connect)
+    if sources_dal.is_recorded():
+        return
+    status = _stream_status(page)
+    sources_dal.adopt([source.id for source in CATALOG if source.id in status])
 
 
-def build_players_tab(page: 'Page') -> None:
-    """Renders the Players tab — lists Snapcast clients with per-client volume and mute/enable controls.
+def build_sources_tab(page: 'Page') -> None:
+    """Renders the Sources tab: one card per catalogued audio source, with a live status chip and
+    an enable/disable toggle.
 
-    Called by `Page._build_players_tab`, the `@ui.refreshable` method that owns the refresh
+    Called by `Page._build_sources_tab`, the `@ui.refreshable` method that owns the refresh
     target (so refreshes are keyed per `Page` instance).
+
+    Not polled: `render()`'s 10 s timer refreshes the Players tab only, since polling here would
+    put `get_stream_status()`, and with PlexAmp enabled a `systemctl is-active`, on a 10 s loop,
+    and would cancel the claim flow's own timers every tick. The chip is refreshed at load, after
+    each toggle, and at claim completion.
+    """
+    enabled = _enabled_ids()
+    status = _stream_status(page)
+    for source in CATALOG:
+        _build_source_card(page, source, enabled, status)
+
+
+def _enabled_ids() -> list[str]:
+    """Returns the enabled source ids that name a catalog entry, in catalog order.
+
+    Intersected with `CATALOG` at the point of use because `dal.sources` stores whatever was
+    toggled and does not filter: an id left behind by a removed catalog entry renders no card,
+    and must not count toward the "at least one enabled" guard either.
+    """
+    stored = set(sources_dal.get_enabled())
+    return [source.id for source in CATALOG if source.id in stored]
+
+
+def _remaining_ids(source_id: str) -> list[str]:
+    """Returns the enabled source ids that would survive disabling `source_id`.
+
+    Parameters
+    ----------
+    source_id: `str`
+        The source id about to be disabled.
+    """
+    return [id for id in _enabled_ids() if id != source_id]
+
+
+def _stream_status(page: 'Page') -> dict[str, str]:
+    """Returns Snapserver's own status word per stream id, or `{}` when it is unreachable.
+
+    Keyed by stream id, so a caller holding a source indexes it directly: a source's id is its
+    Snapcast stream name, per `CATALOG`'s rule 1. Every `status` parameter downstream is this dict.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    """
+    try:
+        return _snapserver(page.settings).get_stream_status()
+    except Exception:
+        # An unreachable Snapserver renders every enabled source as `not running`, which is
+        # accurate and avoids a traceback in place of the tab.
+        return {}
+
+
+def _await_snapserver(page: 'Page') -> None:
+    """Blocks until a restarted Snapserver answers `Server.GetStatus` again, or the deadline passes.
+
+    `systemctl restart snapserver` returns once systemd has forked the process, not once the
+    process is serving. The unit declares no readiness protocol, so the JSON-RPC socket refuses
+    connections for seconds afterwards, and refreshing the Sources tab inside that window renders
+    every enabled source `not running`.
+
+    A non-empty status is the readiness signal, which is sound because of `CATALOG`'s rule 2: the
+    conf this restart just loaded always names at least one stream, so `{}` means unreachable
+    rather than "reachable but serving nothing".
+
+    Returns rather than raises on timeout: a Snapserver still down after `_READY_TIMEOUT` is a
+    genuine fault, and `not running` is then the correct chip.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    """
+    deadline = time.monotonic() + _READY_TIMEOUT
+    while True:
+        if _stream_status(page):
+            return
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(_READY_INTERVAL)
+
+
+def _attachable(source_id: str, status: dict[str, str]) -> bool:
+    """Returns whether a player's group may be pointed at `source_id`.
+
+    A source is attachable when Snapserver names it and its status word is not `'disabled'`.
+    `'playing'` and `'idle'` are both attachable: pointing a speaker at an idle source before
+    starting playback is the normal order of operations. Absence and Snapserver's own `'disabled'`
+    both mean its backend is not feeding the stream, so both are blocked; an assignment made there
+    produces silence with no error.
+
+    Fails open: a word this build does not know (upstream's `kUnknown`, or a future addition) stays
+    attachable, since refusing a live source reads as a broken control. `_SETUP_FLOWS` handles an
+    unrecognised discriminator the same way.
+
+    Parameters
+    ----------
+    source_id: `str`
+        The source id being offered as a destination.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    return status.get(source_id, '') not in ('', 'disabled')
+
+
+def _label(source_id: str) -> str:
+    """Returns a source id's display label, falling back to the id itself.
+
+    Parameters
+    ----------
+    source_id: `str`
+        The source id.
+    """
+    for source in CATALOG:
+        if source.id == source_id:
+            return source.label
+    return source_id
+
+
+def _setup_state(source: SourceDefinition) -> str | None:
+    """Returns `source`'s pending-setup chip label, or `None` when nothing is pending.
+
+    The only seam through which the render path queries a setup flow, so a per-process lifetime
+    cache would stay a one-function change. Reached only for enabled sources, so a freshly flashed
+    device, whose only enabled source is AirPlay, makes no systemd calls to render this tab.
+
+    Parameters
+    ----------
+    source: `audera.domains.sources.SourceDefinition`
+        The catalog entry being rendered.
+    """
+    if not source.setup:
+        return None
+    if sources_dal.get_setup(source.id).get('complete'):
+        # A recorded completion outranks the flow, whose probes read what the device does now. A
+        # reprovision stops the source's units, which makes every live probe report the setup as
+        # undone, and asks the operator to redo a claim or a pairing that is still valid. The
+        # record is discarded when the source is disabled, so this can only mask a flow for a
+        # source the operator still wants running.
+        return None
+    flow = _SETUP_FLOWS.get(source.setup)
+    if flow is None:
+        # Fail open: an unrecognised discriminator is a catalog entry this build has no flow for,
+        # so the card shows the stream's real status rather than staying in `setup required`.
+        return None
+    try:
+        return flow.state()
+    except Exception:
+        # Fail closed: a flow that raised reports nothing about whether it is done, and the setup
+        # step is the one the operator can act on.
+        return _SETUP_REQUIRED
+
+
+def _source_status(
+    source: SourceDefinition,
+    enabled: list[str],
+    status: dict[str, str],
+    pending: str | None,
+) -> tuple[str, str]:
+    """Returns the status chip's `(text, classes)` for one source.
+
+    Parameters
+    ----------
+    source: `audera.domains.sources.SourceDefinition`
+        The catalog entry being rendered.
+    enabled: `list[str]`
+        The enabled source ids.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    pending: `str | None`
+        The source's pending-setup label, or `None` when nothing is pending.
+        `_setup_state(source)`, resolved by the caller so the chip and the panel below it cannot
+        disagree within a render. The flow supplies the word, so this ladder does not enumerate a
+        flow's own incomplete states.
+    """
+    if source.id not in enabled:
+        return 'disabled', 'text-sm text-gray-500'
+    if pending:
+        return pending, 'text-sm text-amber-500'
+    if source.id in status:
+        # Snapserver's own vocabulary: `'playing'`, `'idle'`, or `'disabled'`, the last meaning its
+        # backend process is not feeding the stream. That is a different `'disabled'` from the one
+        # above, which means the operator turned the source off; the collision comes from
+        # upstream's choice of word and is not reconciled here.
+        state = status[source.id]
+        return state, 'text-sm text-green-500' if state == 'playing' else 'text-sm text-gray-500'
+    return 'not running', 'text-sm text-red-500'
+
+
+def _build_source_card(
+    page: 'Page',
+    source: SourceDefinition,
+    enabled: list[str],
+    status: dict[str, str],
+) -> None:
+    """Renders one audio source's card.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    source: `audera.domains.sources.SourceDefinition`
+        The catalog entry being rendered.
+    enabled: `list[str]`
+        The enabled source ids.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    is_enabled = source.id in enabled
+    pending = _setup_state(source) if is_enabled else None
+    text, classes = _source_status(source, enabled, status, pending)
+    # The "at least one enabled" guard, first of its three appearances, as an affordance: the last
+    # switch is disabled before the click rather than refused afterwards.
+    is_last = is_enabled and len(enabled) == 1
+
+    # Two markers: the per-source one addresses a single card, and the shared one lets a test
+    # subtract the whole tab (`.not_within(marker='source-card')`), which the Players tab's
+    # assertions about switches need so that they do not pick these up.
+    with ui.card().classes('w-full mb-2').mark(f'source-card source-card-{source.id}'):
+        with ui.row().classes('items-center justify-between w-full'):
+            with ui.row().classes('items-center gap-2'):
+                ui.label(source.label).classes('font-medium')
+                ui.label(text).classes(classes).mark(f'source-status-{source.id}')
+            with ui.row().classes('items-center gap-2'):
+                spinner = ui.spinner(size='sm')
+                spinner.set_visibility(False)
+                switch = ui.switch(value=is_enabled).mark(f'source-toggle-{source.id}')
+                if is_last:
+                    switch.set_enabled(False)
+                    switch.tooltip(_LAST_SOURCE_MESSAGE)
+
+        ui.label(source.description).classes('text-sm text-gray-500')
+
+        if is_enabled and source.setup:
+            flow = _SETUP_FLOWS.get(source.setup)
+            if flow is not None:
+                flow.build(page, pending)
+
+    async def _on_change(e) -> None:
+        # The claim-in-flight refusal below reverts the switch to the value this card rendered
+        # with, which re-enters here; a change back to the rendered state is never a click.
+        if e.value == is_enabled:
+            return
+        if page._claim_in_flight:
+            ui.notify(
+                'Finish or cancel the PlexAmp setup before changing sources.',
+                type='warning',
+                position='top-right',
+            )
+            # Revert rather than refresh, because refreshing would delete the claim flow's
+            # elements and cancel its timers.
+            switch.set_value(is_enabled)
+            return
+        # The busy state is never restored; every terminal path below refreshes the tab, which
+        # rebuilds this card from the state that landed.
+        switch.set_enabled(False)
+        spinner.set_visibility(True)
+        await _toggle_source(page, source, e.value)
+
+    # Registered after construction rather than passed to `ui.switch(on_change=…)`: the handler
+    # closes over `switch` and `spinner`, and post-construction registration guarantees the initial
+    # value never fires it. No `lambda …, s=source` capture is needed, since the loop lives in
+    # `build_sources_tab` and these locals are already per-call.
+    switch.on_value_change(_on_change)
+
+
+async def _toggle_source(page: 'Page', source: SourceDefinition, enable: bool) -> None:
+    """Routes a source toggle to the enable or disable choreography.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    source: `audera.domains.sources.SourceDefinition`
+        The catalog entry being toggled.
+    enable: `bool`
+        The switch's new value.
+    """
+    if enable:
+        await _enable_source(page, source)
+        return
+
+    # The guard, second of its three appearances; this one stops the disable dialog from opening
+    # with an empty destination list. It is racy against a second browser tab, so
+    # `_disable_source` re-reads it inside the lock, and only that re-read enforces the invariant.
+    if len(_remaining_ids(source.id)) == 0:
+        ui.notify(_LAST_SOURCE_MESSAGE, type='warning', position='top-right')
+        page._build_sources_tab.refresh()
+        return
+
+    players = await asyncio.to_thread(_attached_players, page, source.id)
+    if not players:
+        await _disable_source(page, source, None)
+        return
+
+    # Read here rather than in the dialog builder, which is synchronous. The dialog needs it to
+    # withhold a destination Snapserver is not feeding, since assigning to one mis-routes the
+    # listeners silently.
+    status = await asyncio.to_thread(_stream_status, page)
+    _open_disable_dialog(page, source, players, _remaining_ids(source.id), status)
+
+
+async def _enable_source(page: 'Page', source: SourceDefinition) -> None:
+    """Enables a source: records the intent, re-renders the conf, starts its units, restarts Snapserver.
+
+    The data-access layer goes first because the enabled set is the intent and everything
+    `toggle.apply` writes is derived from it. The enabled set it returns is passed through rather
+    than read back, so the conf cannot be rendered from a set other than the one just recorded.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    source: `audera.domains.sources.SourceDefinition`
+        The catalog entry being enabled.
+    """
+    async with _CHOREOGRAPHY_LOCK:
+        ui.notify(f'Enabling {source.label}. {_INTERRUPTION_MESSAGE}', type='warning', position='top-right')
+
+        try:
+            enabled = await asyncio.to_thread(sources_dal.set_enabled, source.id, True)
+        except Exception as exc:
+            _notify_failure(f'Could not enable {source.label}', exc)
+            page._build_sources_tab.refresh()
+            return
+
+        # The remaining steps roll forward rather than unwinding: the intent is already recorded,
+        # so a later failure notifies and leaves the new state, and the next render's chip reports
+        # what is running.
+        try:
+            await asyncio.to_thread(toggle.apply, source, True, enabled)
+        except Exception as exc:
+            _notify_failure(f'{source.label} is enabled, but applying it failed', exc)
+            page._build_sources_tab.refresh()
+            return
+
+        # Inside the lock, so a second toggle cannot restart Snapserver out from under the wait
+        # and be reported against the status this one is waiting for.
+        await asyncio.to_thread(_await_snapserver, page)
+
+    ui.notify(f'{source.label} enabled', type='positive', position='top-right')
+    page._build_sources_tab.refresh()
+
+
+async def _disable_source(page: 'Page', source: SourceDefinition, destination: str | None) -> None:
+    """Disables a source: moves its listeners, records the intent, re-renders the conf, stops its units.
+
+    Reassignment is the only abort point: before the data-access-layer write, aborting changes
+    nothing, and after the conf is written the stream no longer exists to reassign anyone off, so
+    every step from there on rolls forward.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    source: `audera.domains.sources.SourceDefinition`
+        The catalog entry being disabled.
+    destination: `str | None`
+        The source id to move this stream's groups to, or `None` when nothing is listening.
+    """
+    async with _CHOREOGRAPHY_LOCK:
+        # The guard, third of its three appearances, re-read inside the lock against a freshly
+        # read enabled set. This is the check that keeps `render_snapserver()` from raising
+        # `ValueError`; the switch affordance and `_toggle_source`'s check are both decided
+        # against a render that may be seconds stale.
+        enabled = _enabled_ids()
+        if source.id not in enabled:
+            page._build_sources_tab.refresh()
+            return
+        if len(enabled) == 1:
+            ui.notify(_LAST_SOURCE_MESSAGE, type='warning', position='top-right')
+            page._build_sources_tab.refresh()
+            return
+
+        ui.notify(f'Disabling {source.label}. {_INTERRUPTION_MESSAGE}', type='warning', position='top-right')
+
+        if destination is not None:
+            try:
+                await asyncio.to_thread(_reassign_groups, page, source.id, destination)
+            except Exception as exc:
+                _notify_failure(f'Could not move players off {source.label}', exc)
+                page._build_sources_tab.refresh()
+                return
+
+        try:
+            remaining = await asyncio.to_thread(_record_disabled, source.id)
+        except Exception as exc:
+            _notify_failure(f'Could not disable {source.label}', exc)
+            page._build_sources_tab.refresh()
+            return
+
+        try:
+            await asyncio.to_thread(toggle.apply, source, False, remaining)
+        except Exception as exc:
+            _notify_failure(f'{source.label} is disabled, but applying it failed', exc)
+            page._build_sources_tab.refresh()
+            return
+
+        await asyncio.to_thread(_await_snapserver, page)
+
+    ui.notify(f'{source.label} disabled', type='positive', position='top-right')
+    page._build_sources_tab.refresh()
+
+
+def _record_disabled(source_id: str) -> list[str]:
+    """Records a source as disabled, discards its setup record, and returns the remaining ids.
+
+    Disabling is the one action that discards a setup record. The record outranks the live probes
+    while a source is enabled, so keeping it across a disable would let a source the operator
+    re-enabled months later render as set up without anything having checked. Both writes happen
+    in one call, on the near side of the choreography's single abort point.
+
+    Blocking, and called through `asyncio.to_thread`.
+
+    Parameters
+    ----------
+    source_id: `str`
+        The source id being disabled.
+    """
+    remaining = sources_dal.set_enabled(source_id, False)
+    sources_dal.clear_setup(source_id)
+    return remaining
+
+
+def _reassign_groups(page: 'Page', source_id: str, destination: str) -> None:
+    """Moves every Snapcast group listening to `source_id` onto `destination`.
+
+    The groups are re-read here rather than reused from the ids captured when the disable
+    dialog opened, so a group that joined the stream while the dialog was up is moved too
+    instead of being stranded on a stream about to disappear.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    source_id: `str`
+        The source being disabled.
+    destination: `str`
+        The source id to move the groups to.
+    """
+    snap = _snapserver(page.settings)
+    for group in snap.get_groups():
+        if group.stream_id == source_id:
+            snap.set_group_stream(group.id, destination)
+
+
+def _attached_players(page: 'Page', source_id: str) -> list[Player]:
+    """Returns the connected Snapcast clients currently listening to `source_id`.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    source_id: `str`
+        The source being disabled.
     """
     snap = _snapserver(page.settings)
     try:
+        group_ids = {group.id for group in snap.get_groups() if group.stream_id == source_id}
         clients = snap.get_clients()
     except Exception:
-        clients = []
+        # An unreachable Snapserver has no listeners to strand; the disable proceeds without
+        # the dialog rather than blocking on a server that is already down.
+        return []
+    return [client for client in clients if client.connected and client.group_id in group_ids]
+
+
+def _open_disable_dialog(
+    page: 'Page',
+    source: SourceDefinition,
+    players: list[Player],
+    remaining: list[str],
+    status: dict[str, str],
+) -> None:
+    """Asks where to move a source's listeners before disabling it.
+
+    Only running survivors are offered, since a destination Snapserver is not feeding routes the
+    listeners into silence. When none of the survivors is running the dialog says so and the
+    disable proceeds without an explicit reassignment; Snapserver then moves the groups to
+    `default_source` at the next client connect.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    source: `audera.domains.sources.SourceDefinition`
+        The catalog entry being disabled.
+    players: `list[audera.models.player.Player]`
+        The connected clients listening to the source.
+    remaining: `list[str]`
+        The source ids that survive the disable.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    page._dialog_open = True
+    # Latched by whichever path closes the dialog first, so the `hide` the browser emits on a
+    # programmatic close does not re-run a decision already taken.
+    state = {'handled': False}
+
+    with ui.dialog() as dialog, ui.card().classes('w-96'):
+        ui.label(f'Disable {source.label}').classes('font-medium text-lg mb-2')
+
+        names = ', '.join(player.name for player in players)
+        verb = 'is' if len(players) == 1 else 'are'
+        ui.label(f'{names} {verb} listening to {source.label}.').classes('text-sm')
+
+        live = [id for id in remaining if _attachable(id, status)]
+        destination = None
+        if live:
+            ui.label('Move to').classes('text-xs text-gray-500 mt-2')
+            destination = (
+                ui.select(
+                    # Maps id -> label and submits the id. Snapcast's stream id is the source id
+                    # rather than its display label, and the two differ for Spotify, so
+                    # `set_group_stream(gid, 'Spotify Connect')` mis-routes silently.
+                    {id: _label(id) for id in live},
+                    # The destination Snapserver would pick on its own, shown rather than left to
+                    # a server-side fallback. Derived from the live subset, since a value absent
+                    # from the options renders blank.
+                    value=default_source(live),
+                )
+                .classes('w-full')
+                .mark('disable-destination')
+            )
+        else:
+            ui.label(_NO_LIVE_DESTINATION_MESSAGE).classes('text-sm text-amber-500 mt-2').mark('disable-no-destination')
+
+        ui.label(_INTERRUPTION_MESSAGE).classes('text-xs text-gray-500 mt-2')
+
+        def _dismiss():
+            # Cancel, ESC, and a backdrop click are all the same answer, and the switch has
+            # already flipped, so a dismissal refreshes the tab back to the recorded state. Not
+            # reached on the confirm path, where a refresh would land mid-choreography.
+            if state['handled']:
+                return
+            state['handled'] = True
+            page._dialog_open = False
+            page._build_sources_tab.refresh()
+
+        with ui.row().classes('justify-between w-full mt-4'):
+
+            def _on_cancel():
+                # Closed first, then dismissed: the `hide` this raises in the browser arrives
+                # after `state['handled']` is latched, so the refresh happens only once.
+                dialog.close()
+                _dismiss()
+
+            async def _on_confirm():
+                state['handled'] = True
+                page._dialog_open = False
+                dialog.close()
+                # `None` is the same answer `_toggle_source` gives when nothing is listening:
+                # disable without an explicit move, and let Snapserver's own fallback apply.
+                await _disable_source(page, source, destination.value if destination is not None else None)
+
+            ui.button('Cancel', on_click=_on_cancel).props('flat dense')
+            (ui.button('Disable', on_click=_on_confirm).props('dense').classes('bg-gray-800 text-white').mark('disable-confirm'))
+
+    dialog.on('hide', _dismiss)
+    dialog.open()
+
+
+def _notify_failure(message: str, exc: Exception) -> None:
+    """Notifies a failed host mutation, preferring the subprocess's own reason.
+
+    `CalledProcessError.__str__` is the argv and the exit status rather than the reason, so a
+    `systemctl` failure reads as "returned non-zero exit status 1" unless `stderr` is used.
+    `getattr` rather than `exc.stderr` because `@platform.requires('dietpi')` raises
+    `RuntimeError`, which has no `stderr`; reading it directly would raise `AttributeError`
+    inside the handler on every dev-box toggle.
+
+    Parameters
+    ----------
+    message: `str`
+        What was being attempted.
+    exc: `Exception`
+        The exception raised.
+    """
+    detail = (getattr(exc, 'stderr', '') or str(exc)).strip()
+    ui.notify(f'{message}: {detail}', type='negative', position='top-right')
+
+
+class _Assignment(NamedTuple):
+    """A `class` that represents one player's stream assignment, projected for its card.
+
+    Built once per render by `_assignment`, which is pure: every Snapcast read it needs is
+    already in hand, so a card never issues I/O of its own.
+
+    Attributes
+    ----------
+    stream_id: `str`
+        The stream the player's group is listening to, or `''` when Snapserver did not say.
+    destinations: `dict[str, str]`
+        The move destinations, mapping source id -> display label: the current stream first,
+        then the enabled set in catalog order. A `dict` rather than a `list` because a move
+        renders the label and sends the id to `Group.SetStream`; the two differ (`Spotify` vs.
+        `Spotify Connect`), and sending the label mis-routes with no error.
+    siblings: `int`
+        The other connected players sharing this player's group. Always `0` for anything Audera
+        creates; non-zero only where Snapweb merged clients into one group.
+    """
+
+    stream_id: str
+    destinations: dict[str, str]
+    siblings: int
+
+
+def _group_streams(page: 'Page') -> dict[str, str]:
+    """Returns the stream id each Snapcast group is listening to, or `{}` when unreachable.
+
+    Snapcast's model is client ∈ group, group -> stream, and `get_clients()` drops the group's
+    `stream_id`, so the Players tab needs this second read to report assignment. Read once per
+    render and passed down, never per card.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    """
+    try:
+        return {group.id: group.stream_id for group in _snapserver(page.settings).get_groups()}
+    except Exception:
+        # The same handling as `_stream_status`: an unreachable Snapserver leaves every
+        # assignment unknown, which still renders a valid, enabled move control.
+        return {}
+
+
+def _assignment(
+    client: Player,
+    clients: list[Player],
+    streams: dict[str, str],
+    enabled: list[str],
+) -> _Assignment:
+    """Returns one player's `_Assignment`. Pure; every input is already fetched.
+
+    Parameters
+    ----------
+    client: `audera.models.player.Player`
+        The Snapcast client being rendered.
+    clients: `list[audera.models.player.Player]`
+        Every Snapcast client, from `get_clients()`.
+    streams: `dict[str, str]`
+        The stream id per group id, from `_group_streams`.
+    enabled: `list[str]`
+        The enabled source ids, from `_enabled_ids`.
+    """
+    stream_id = streams.get(client.group_id, '') if client.group_id else ''
+
+    # The current stream leads, so a group parked on a stream outside the enabled set (mid
+    # choreography, or an id left behind by a removed catalog entry) still has its own value
+    # among the options. A `ui.select` whose value is absent from its options renders blank,
+    # which reads as "unassigned" rather than "assigned to something unlisted".
+    destinations = {stream_id: _label(stream_id)} if stream_id else {}
+    for id in enabled:
+        destinations.setdefault(id, _label(id))
+
+    # Connected only, matching the tab's own contents, so the caption does not name a player
+    # that appears nowhere on screen.
+    siblings = sum(1 for other in clients if other.connected and other.id != client.id and other.group_id == client.group_id)
+    return _Assignment(stream_id, destinations, siblings if client.group_id else 0)
+
+
+def _stream_caption(siblings: int) -> str:
+    """Returns the stream control's caption, naming the players a move would affect.
+
+    Shared by both groupings so the wording cannot drift. Audera never merges clients into a
+    group, so `siblings` is non-zero only where Snapweb did; moving one player then moves all of
+    them, which the label states.
+
+    Parameters
+    ----------
+    siblings: `int`
+        The other connected players sharing this player's group.
+    """
+    if siblings == 0:
+        return 'Stream'
+    return f'Stream (shared with {siblings} other player{"" if siblings == 1 else "s"})'
+
+
+def _stream_state(stream_id: str, status: dict[str, str]) -> tuple[str, str]:
+    """Returns a stream header's status `(text, classes)`, or `('', '')` for the unassigned
+    section.
+
+    The last two rungs of the Sources chip ladder. `_source_status` also answers "is it enabled"
+    and "is setup done", which this tab cannot act on, so the two are not shared.
+
+    Parameters
+    ----------
+    stream_id: `str`
+        The section's stream id, or `''` for the unassigned section.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    if not stream_id:
+        # Nothing is running at unassigned, so there is no status word to report.
+        return '', ''
+    if stream_id in status:
+        state = status[stream_id]
+        return state, 'text-sm text-green-500' if state == 'playing' else 'text-sm text-gray-500'
+    return 'not running', 'text-sm text-red-500'
+
+
+def _stream_tint(source_id: str, status: dict[str, str]) -> str:
+    """Returns the assignment chip's colour classes: a text colour and a 10 % tint of the same
+    hue.
+
+    `_stream_state`'s three rungs in the chip's own idiom, plus a fourth for the unassigned case,
+    which the by-player layout can render and a section header cannot. The tint makes liveness
+    readable down a stack of cards without a second word on every row, and is held to 10 % because
+    it is the UI's first filled inline element.
+
+    Spelled out rather than derived from `_stream_state`'s class string, which would couple the
+    chip to the spelling of a colour token; `test_players_tab_chip_tint_tracks_the_status` holds
+    the two in agreement.
+
+    Parameters
+    ----------
+    source_id: `str`
+        The stream the player's group is listening to, or `''` when Snapserver did not say.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    if not source_id:
+        # Nothing is running at unassigned, and red would report a fault where there is none.
+        return 'text-gray-500 bg-gray-500/10'
+    if source_id not in status:
+        return 'text-red-500 bg-red-500/10'
+    if status[source_id] == 'playing':
+        return 'text-green-500 bg-green-500/10'
+    return 'text-gray-500 bg-gray-500/10'
+
+
+def _stream_summary(source_id: str, status: dict[str, str]) -> str:
+    """Returns the assignment chip's tooltip: the status word its tint stands for.
+
+    Colour on its own does not report the status, and the chip spends its one line of text on the
+    stream's label, so the word behind the tint is reachable only from a tooltip.
+
+    Parameters
+    ----------
+    source_id: `str`
+        The stream the player's group is listening to, or `''` when Snapserver did not say.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    if not source_id:
+        return _UNASSIGNED_MESSAGE
+    text, _ = _stream_state(source_id, status)
+    return f'{_label(source_id)} — {text}'
+
+
+def _move_destinations(assignment: _Assignment) -> dict[str, str]:
+    """Returns a move menu's rows: every destination but the one the player is already on.
+
+    The current stream is omitted because the section the card sits in, or by player the chip
+    doing the opening, already names it.
+
+    Parameters
+    ----------
+    assignment: `audera.ui.streamer.pages.index._Assignment`
+        The client's stream assignment, from `_assignment`.
+    """
+    return {id: label for id, label in assignment.destinations.items() if id != assignment.stream_id}
+
+
+def _move_refusal(client: Player, destinations: dict[str, str], status: dict[str, str]) -> str:
+    """Returns why a move trigger must be disabled, or `''` when the move may be offered.
+
+    Both triggers refuse on the same two grounds, so the grounds live here and only the rendering
+    (a header-row button, or the chip in the card body) is per-layout.
+
+    Parameters
+    ----------
+    client: `audera.models.player.Player`
+        The Snapcast client whose group would be moved.
+    destinations: `dict[str, str]`
+        The menu's rows, from `_move_destinations`.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    if not client.group_id:
+        # `set_group_stream('', …)` is an RPC with no target.
+        return _NO_GROUP_MESSAGE
+    if not any(_attachable(id, status) for id in destinations):
+        # The test is for an attachable destination rather than any destination: a menu of nothing
+        # but greyed rows offers no move, and reporting that on the trigger saves opening it.
+        return _NO_DESTINATION_MESSAGE
+    return ''
+
+
+def _sections(
+    connected_clients: list[Player],
+    assignments: dict[str, _Assignment],
+    enabled: list[str],
+) -> dict[str, list[Player]]:
+    """Returns the by-stream layout's sections, mapping stream id -> its connected players.
+
+    Seeded from `enabled`, the source ids naming the streams Audera asked Snapserver to run, so
+    an empty stream keeps its header. It is then extended per player via `setdefault`, so no
+    connected player can be dropped by the layout: a group parked on a stream outside that set
+    gets its own section. Dict insertion order is the rendering order: the enabled ids in catalog
+    order, then any stream a group is actually parked on, then `''`.
+
+    Parameters
+    ----------
+    connected_clients: `list[audera.models.player.Player]`
+        The connected Snapcast clients.
+    assignments: `dict[str, audera.ui.streamer.pages.index._Assignment]`
+        Each client's stream assignment, keyed by client id.
+    enabled: `list[str]`
+        The enabled source ids, from `_enabled_ids`.
+    """
+    sections: dict[str, list[Player]] = {id: [] for id in enabled}
+    for client in connected_clients:
+        sections.setdefault(assignments[client.id].stream_id, []).append(client)
+    return sections
+
+
+def _clients(page: 'Page') -> list[Player]:
+    """Returns every Snapcast client, or `[]` when Snapserver is unreachable.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    """
+    try:
+        return _snapserver(page.settings).get_clients()
+    except Exception:
+        return []
+
+
+# The ceiling on one round of the Players tab's reads. It exists for NiceGUI's sake rather than
+# Snapcast's: an `async` page builder that has not returned by `response_timeout` (3 s, and this
+# page takes the default) is cancelled and its client deleted, so overrunning renders no page at
+# all. Both clients carry a 5 s `open_timeout` of their own, which is longer than the whole page is
+# allowed to take and is counted per connect rather than per render. There are two rounds below, so
+# this bounds the tab at 2 s. A round that overruns degrades to the same empty result an
+# unreachable host produces, which renders `No Snapcast clients found.`
+#
+# `asyncio.wait_for` cancels the await rather than the worker thread, which keeps blocking on its
+# own socket until `open_timeout` fires, leaving an orphaned thread that nothing waits on.
+_READ_TIMEOUT: float = 1.0
+
+_T = TypeVar('_T')
+
+
+async def _bounded(awaitable: Awaitable[_T], default: _T) -> _T:
+    """Awaits `awaitable` under `_READ_TIMEOUT`, returning `default` if it overruns or raises.
+
+    Parameters
+    ----------
+    awaitable: `Awaitable`
+        The read, or gathered group of reads, to bound.
+    default: `Any`
+        What the caller renders when the reads do not arrive in time.
+    """
+    try:
+        return await asyncio.wait_for(awaitable, _READ_TIMEOUT)
+    except Exception:
+        return default
+
+
+async def _volumes(clients: list[Player]) -> dict[str, int | None]:
+    """Returns each client's CamillaDSP volume as a percent, keyed by client id, or `None` where
+    the daemon could not be read.
+
+    One connect per client, and the only read in this tab that does not go to Snapserver:
+    CamillaDSP runs on the player, so this fans out across as many hosts as there are cards.
+
+    A failed read is reported as `None` rather than as a number. It used to fall back to
+    `DEFAULT_PERCENT_VOLUME`, which renders as a slider sitting at 25%, indistinguishable from a
+    player genuinely set to 25%, and dragging from that seed writes an edit relative to a volume
+    the player never held.
+
+    Parameters
+    ----------
+    clients: `list[audera.models.player.Player]`
+        The connected players to read, in card order.
+    """
+
+    async def _one(client: Player) -> int | None:
+        try:
+            return await asyncio.to_thread(_camilladsp(client.host).get_percent_volume)
+        except Exception:
+            return None
+
+    return dict(zip([c.id for c in clients], await asyncio.gather(*(_one(c) for c in clients))))
+
+
+async def build_players_tab(page: 'Page') -> None:
+    """Renders the Players tab: lists Snapcast clients with per-client volume, mute/enable, and
+    stream-assignment controls, under the selected `player_grouping`.
+
+    Called by `Page._build_players_tab`, the `@ui.refreshable` method that owns the refresh
+    target (so refreshes are keyed per `Page` instance).
+
+    Every read happens here, once, and is passed down: three Snapcast RPCs (`get_clients()` for
+    the cards, `get_groups()` for what each one is listening to, and `get_stream_status()` for
+    whether those streams are live) plus one CamillaDSP read per player for its volume. A card
+    never reads anything of its own.
+
+    The status read is unconditional rather than by-stream only, because liveness gates attachment
+    as well as the header's status word: a source Snapserver is not feeding is not a destination
+    either grouping may offer. If the 10 s poll shows up in a profile, the agreed remedy is one new
+    client method returning clients and groups together.
+
+    Every one of those reads is a blocking websocket connect, so all of them go off-thread and run
+    concurrently, under `_READ_TIMEOUT` per round. Both clients connect with a 5 s `open_timeout`,
+    and this coroutine runs on the event loop that serves every session, so a single unreachable
+    host used to hold the whole UI and the ten-second poll re-entered the same wait. Within a round
+    nothing waits on anything else, so n players plus three RPCs cost one timeout rather than their
+    sum.
+
+    Two rounds rather than one, with `get_clients()` alone in the first, so that a device with
+    nothing connected does not pay for the other three: the early-out below depends on reading the
+    client list first.
+
+    Going off-thread makes the builder interruptible, and an `async` `@ui.refreshable` is not
+    re-entrant (see `Page._players_generation`). Each build therefore stamps itself before its
+    first `await` and returns at every resumption point where a newer one has since started, so the
+    superseded build renders nothing instead of appending a second copy of every card. The stamps
+    are taken before the first suspension and background tasks start in creation order, so the
+    newest request always holds the highest. Returning early also drops the reads the superseded
+    build had not yet made.
+    """
+    generation = page._players_generation = page._players_generation + 1
+
+    clients = await _bounded(asyncio.to_thread(_clients, page), [])
+    if generation != page._players_generation:
+        return
 
     connected_clients = [c for c in clients if c.connected]
     if not connected_clients:
         ui.label('No Snapcast clients found.').classes('text-gray-500')
         return
 
+    streams, status, volumes = await _bounded(
+        asyncio.gather(
+            asyncio.to_thread(_group_streams, page),
+            asyncio.to_thread(_stream_status, page),
+            _volumes(connected_clients),
+        ),
+        ({}, {}, {}),
+    )
+    if generation != page._players_generation:
+        return
+
+    # Restated against the card list, so an overrun of the round above, which returns no volumes at
+    # all, still renders every card. An absent id is `None`, the same value a failed read reports,
+    # so the round's own timeout degrades like an unreachable daemon rather than substituting a
+    # value for every player at once.
+    volumes = {c.id: volumes.get(c.id) for c in connected_clients}
+
     # Named after the feature-flag constant so flag-gated UI is obvious to the reader.
+    FF_GROUPING_BY_STREAM = features.flag_enabled(page.settings, features.PLAYER_GROUPING_KEY, features.FF_GROUPING_BY_STREAM)
+    enabled = _enabled_ids()
+    assignments = {c.id: _assignment(c, clients, streams, enabled) for c in connected_clients}
+
+    if not FF_GROUPING_BY_STREAM:
+        for client in connected_clients:
+            _build_player_card(page, client, assignments[client.id], status, volumes[client.id], by_stream=False)
+        return
+
+    for stream_id, members in _sections(connected_clients, assignments, enabled).items():
+        _build_stream_section(page, stream_id, members, assignments, status, volumes)
+
+
+def _build_stream_section(
+    page: 'Page',
+    stream_id: str,
+    members: list[Player],
+    assignments: dict[str, _Assignment],
+    status: dict[str, str],
+    volumes: dict[str, int | None],
+) -> None:
+    """Renders one stream's header and the cards of the players listening to it.
+
+    Empty streams are shown rather than hidden: an enabled source with nothing pointed at it is a
+    state the operator needs to see, and it is also a destination the move menu names.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    stream_id: `str`
+        The section's stream id, or `''` for the unassigned section.
+    members: `list[audera.models.player.Player]`
+        The connected players listening to the stream.
+    assignments: `dict[str, audera.ui.streamer.pages.index._Assignment]`
+        Each client's stream assignment, keyed by client id.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    volumes: `dict[str, int]`
+        Each client's CamillaDSP percent volume, keyed by client id, from `_volumes`. `None`
+        where the daemon could not be read.
+    """
+    section_id = stream_id or _UNASSIGNED_SECTION
+    with ui.column().classes('w-full gap-2 mb-4'):
+        with ui.row().classes('items-center gap-3 w-full'):
+            (
+                ui.label(_label(stream_id) if stream_id else _UNASSIGNED_LABEL)
+                .classes('font-medium')
+                .mark(f'stream-header stream-header-{section_id}')
+            )
+            text, classes = _stream_state(stream_id, status)
+            if text:
+                ui.label(text).classes(classes).mark(f'stream-status-{section_id}')
+            (
+                ui.label(f'{len(members)} player{"" if len(members) == 1 else "s"}')
+                .classes('text-sm text-gray-500')
+                .mark(f'stream-count-{section_id}')
+            )
+
+        if not members:
+            with ui.card().classes('w-full mb-2'):
+                ui.label('No players assigned').classes('text-gray-500').mark(f'stream-empty-{section_id}')
+            return
+
+        for client in members:
+            _build_player_card(page, client, assignments[client.id], status, volumes[client.id], by_stream=True)
+
+
+def _build_player_card(
+    page: 'Page',
+    client: Player,
+    assignment: _Assignment,
+    status: dict[str, str],
+    volume: int | None,
+    by_stream: bool,
+) -> None:
+    """Renders one player's card, identical under both groupings but for its assignment
+    affordance.
+
+    `by_stream` is consulted at two points, each one line delegating to a named builder: the header
+    row takes the move button, the card body takes the stream chip. Both open the same menu.
+    Everything else (name, mute checkbox or enable switch, DSP and settings buttons, the
+    `minimized` short-circuit, the volume row) is single-copy.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    client: `audera.models.player.Player`
+        The Snapcast client being rendered.
+    assignment: `audera.ui.streamer.pages.index._Assignment`
+        The client's stream assignment, from `_assignment`.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`. Alongside `assignment`
+        rather than inside it, because the assignment affordance needs the word itself to explain a
+        destination it refuses, not only the `_attachable` verdict derived from it.
+    volume: `int`
+        This client's CamillaDSP percent volume, from `_volumes`, seeding the slider. `None`
+        where the daemon could not be read, which renders the slider disabled and unlabelled.
+    by_stream: `bool`
+        Whether the card sits under a stream header. The chip and the move button are two triggers
+        for one menu, and never both at once.
+    """
+    # Named after the feature-flag constant so flag-gated UI is obvious to the reader. Resolved
+    # here rather than passed in: this card is its only reader.
     FF_DISABLED_VS_MUTE = features.flag_enabled(page.settings, features.PLAYER_SELECTION_KEY, features.FF_DISABLED_VS_MUTE)
+    minimized = FF_DISABLED_VS_MUTE and client.muted
 
-    for client in connected_clients:
-        minimized = FF_DISABLED_VS_MUTE and client.muted
-        with ui.card().classes('w-full mb-2'):
-            mute_cb = None
-            with ui.row().classes('items-center justify-between w-full'):
-                with ui.row().classes('items-center gap-2'):
-                    if FF_DISABLED_VS_MUTE:
-                        ui.switch(value=not client.muted, on_change=lambda e, c=client: _on_enabled_change(page, c, e.value))
-                    # A disabled player is grayed out to reinforce the "disabled" state.
-                    name_label = ui.label(client.name).classes('font-medium')
-                    if minimized:
-                        name_label.classes('text-gray-400')
-                with ui.row().classes('items-center gap-2'):
-                    if not FF_DISABLED_VS_MUTE:
-                        mute_cb = ui.checkbox(
-                            'Mute', value=client.muted, on_change=lambda e, c=client: _on_mute_change(page, c.id, e.value)
-                        )
-                    # DSP first (left), then settings (right), both plain material icons. An icon reads
-                    # as clickable on its own (like the gear), and dropping the bordered circle avoids
-                    # the sub-pixel oval it rendered at some viewport widths. As two icon buttons with
-                    # identical props they are the same size by construction — no pixel pinning needed.
-                    # `sym_o_airwave` (a Material Symbol — hence the `sym_o_` prefix) reads as sound
-                    # waves, fitting the DSP page.
-                    dsp_btn = (
-                        ui.button(on_click=lambda c=client: ui.navigate.to(f'/player/{c.id}/dsp'))
-                        .props('icon=sym_o_airwave flat dense round size=sm')
-                        .mark('player-dsp')
+    # The `source-card` marker pair, applied to players: the shared one lets a test subtract or
+    # count the whole tab, the per-client one addresses a single card.
+    with ui.card().classes('w-full mb-2').mark(f'player-card player-card-{client.id}'):
+        mute_cb = None
+        with ui.row().classes('items-center justify-between w-full'):
+            with ui.row().classes('items-center gap-2'):
+                if FF_DISABLED_VS_MUTE:
+                    # Marked so a test can address this switch alone: the Sources tab renders one
+                    # per catalogued source, and `user.find(kind=ui.switch)` clicks every match.
+                    ui.switch(value=not client.muted, on_change=lambda e: _on_enabled_change(page, client, e.value)).mark(
+                        f'player-toggle-{client.id}'
                     )
-                    # A disabled player has no live pipeline to edit, so gray out its DSP button too.
-                    if minimized:
-                        dsp_btn.set_enabled(False)
-                    settings_btn = (
-                        ui.button(on_click=lambda c=client: _open_settings_dialog(page, c))
-                        .props('icon=settings flat dense round size=sm')
-                        .mark('player-settings')
+                # A disabled player is grayed out to reinforce the "disabled" state.
+                name_label = ui.label(client.name).classes('font-medium')
+                if minimized:
+                    name_label.classes('text-gray-400')
+            with ui.row().classes('items-center gap-2'):
+                if not FF_DISABLED_VS_MUTE:
+                    mute_cb = ui.checkbox(
+                        'Mute', value=client.muted, on_change=lambda e: _on_mute_change(page, client.id, e.value)
                     )
-                    # Disable the settings button for a disabled player, matching the intent of "disable".
-                    if minimized:
-                        settings_btn.set_enabled(False)
+                # DSP first (left), then settings (right), both plain material icons. An icon reads
+                # as clickable on its own (like the gear), and dropping the bordered circle avoids
+                # the sub-pixel oval it rendered at some viewport widths. As two icon buttons with
+                # identical props they are the same size by construction — no pixel pinning needed.
+                # `sym_o_airwave` (a Material Symbol — hence the `sym_o_` prefix) reads as sound
+                # waves, fitting the DSP page.
+                # Two markers: the shared one addresses the control on every card, the per-client
+                # one a single card. `UserInteraction.click()` fires on every match, and
+                # `Element.mark()` splits on whitespace while `ElementFilter` matches any one
+                # marker, so carrying both keeps lookups by the shared name working.
+                if by_stream:
+                    _build_move_button(page, client, assignment, status, minimized)
+                dsp_btn = (
+                    ui.button(on_click=lambda: ui.navigate.to(f'/player/{client.id}/dsp'))
+                    .props('icon=sym_o_airwave flat dense round size=sm')
+                    .mark(f'player-dsp player-dsp-{client.id}')
+                )
+                # A disabled player has no live pipeline to edit, so gray out its DSP button too.
+                if minimized:
+                    dsp_btn.set_enabled(False)
+                settings_btn = (
+                    ui.button(on_click=lambda: _open_settings_dialog(page, client))
+                    .props('icon=settings flat dense round size=sm')
+                    .mark(f'player-settings player-settings-{client.id}')
+                )
+                # Disable the settings button for a disabled player, matching the intent of "disable".
+                if minimized:
+                    settings_btn.set_enabled(False)
 
-            if minimized:
-                continue
+        if minimized:
+            return
 
-            with ui.row(wrap=False).classes('items-center gap-4 w-full'):
-                host = client.host
-                try:
-                    init_vol = _camilladsp(host).get_percent_volume()
-                except Exception:
-                    init_vol = CamillaDSPClient.DEFAULT_PERCENT_VOLUME
-                slider = _build_volume_controls(page, client.id, init_vol, client.host)
-                if mute_cb is not None:
-                    slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
+        if not by_stream:
+            _build_stream_chip(page, client, assignment, status)
+
+        with ui.row(wrap=False).classes('items-center gap-4 w-full'):
+            slider = _build_volume_controls(page, client.id, volume, client.host)
+            # Not bound when the volume is unknown: `bind_enabled_from` would re-enable the slider
+            # as soon as the player reads unmuted, undoing the `set_enabled(False)`
+            # `_build_volume_controls` applied because there is no position to drag from.
+            if mute_cb is not None and volume is not None:
+                slider.bind_enabled_from(mute_cb, 'value', backward=lambda v: not v)
+
+
+def _build_stream_chip(page: 'Page', client: Player, assignment: _Assignment, status: dict[str, str]) -> None:
+    """Renders the `Stream ( AirPlay 2 ⌄ )` row, the by-player grouping's assignment affordance.
+
+    A body row, below the `minimized` short-circuit: an assignment control on a player the
+    operator switched off drops along with the volume slider.
+
+    The chip opens the same menu the by-stream layout opens, rather than a `ui.select` of its own,
+    so the two layouts differ only in their trigger. A select over a `dict[id, label]` also cannot
+    grey one option: it either offers a dead destination or hides it. The chip's tint carries the
+    current stream's liveness and its tooltip states it in words.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    client: `audera.models.player.Player`
+        The Snapcast client being rendered.
+    assignment: `audera.ui.streamer.pages.index._Assignment`
+        The client's stream assignment, from `_assignment`.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    """
+    tint = _stream_tint(assignment.stream_id, status)
+    refusal = _move_refusal(client, _move_destinations(assignment), status)
+
+    async def _on_move(source_id: str) -> None:
+        # By player the card does not move, so the tab is not re-laid-out: a refresh would reseed
+        # every volume slider from CamillaDSP and cancel a live drag on another card. The chip
+        # repaints itself instead, and only on success, because a failure refreshes the whole tab
+        # and these elements are gone by the time this resumes.
+        nonlocal tint
+        if not await _on_stream_change(page, client, source_id, refresh=False):
+            return
+        text.set_text(_label(source_id))
+        moved = _stream_tint(source_id, status)
+        # Removed by name rather than replaced wholesale, so the chip's shape classes survive.
+        chip.classes(remove=tint, add=moved)
+        tint = moved
+        tip.set_text(_stream_summary(source_id, status))
+
+    with ui.row(wrap=False).classes('items-center gap-4 w-full'):
+        (
+            ui.label(_stream_caption(assignment.siblings))
+            .classes('text-xs text-gray-500 shrink-0 whitespace-nowrap')
+            .mark(f'player-stream-label-{client.id}')
+        )
+        # A `ui.button` rather than the bare `div` the visual asks for: it lets the refusal below
+        # use `set_enabled(False)` rather than a hand-rolled pointer-events class, and it matches
+        # the by-stream trigger. `color=None` because the default `'primary'` renders as Quasar's own
+        # `text-primary`, which sits on the same element as the tint's text colour at equal
+        # specificity and wins on stylesheet order, rendering the chip grey-navy on a green ground.
+        chip = (
+            ui.button(color=None)
+            .props('flat dense no-caps')
+            .classes(f'rounded-full px-3 py-1 {tint}')
+            .mark(f'player-stream player-stream-{client.id}')
+        )
+        with chip:
+            with ui.row(wrap=False).classes('items-center gap-1'):
+                text = (
+                    ui.label(_label(assignment.stream_id) if assignment.stream_id else _UNASSIGNED_LABEL)
+                    .classes('text-sm')
+                    .mark(f'player-stream-value-{client.id}')
+                )
+                ui.icon('expand_more').classes('text-base')
+            # Constructed rather than `chip.tooltip(…)`, which appends another tooltip on every
+            # call and so cannot be updated in place after a move.
+            tip = ui.tooltip(refusal or _stream_summary(assignment.stream_id, status))
+            _build_move_menu(page, client, assignment, status, _on_move)
+
+    if refusal:
+        chip.set_enabled(False)
+
+
+def _build_move_button(
+    page: 'Page',
+    client: Player,
+    assignment: _Assignment,
+    status: dict[str, str],
+    minimized: bool,
+) -> None:
+    """Renders the move button, the by-stream grouping's assignment affordance.
+
+    A header-row button, beside its DSP and settings neighbours, so a `minimized` card keeps it
+    (disabled) rather than dropping it as the by-player layout drops its body-row chip: a
+    switched-off player is still assigned, and its card still appears under its stream header.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    client: `audera.models.player.Player`
+        The Snapcast client being rendered.
+    assignment: `audera.ui.streamer.pages.index._Assignment`
+        The client's stream assignment, from `_assignment`.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    minimized: `bool`
+        Whether the card is the disabled-mode minimized variant.
+    """
+    with ui.button().props('icon=swap_horiz flat dense round size=sm').mark(f'player-move player-move-{client.id}') as move_btn:
+        # By stream a card's position is its assignment, so a move that did not re-lay-out would
+        # leave it under the wrong header for up to 10 s. The only difference from the chip's
+        # trigger.
+        _build_move_menu(page, client, assignment, status, lambda id: _on_stream_change(page, client, id, refresh=True))
+
+    if minimized:
+        move_btn.set_enabled(False)
+        return
+    refusal = _move_refusal(client, _move_destinations(assignment), status)
+    if refusal:
+        move_btn.set_enabled(False)
+        move_btn.tooltip(refusal)
+
+
+def _build_move_menu(
+    page: 'Page',
+    client: Player,
+    assignment: _Assignment,
+    status: dict[str, str],
+    on_move: Callable[[str], object],
+) -> None:
+    """Renders the move menu, inside whichever element opens it.
+
+    One menu for both groupings, so their destinations, their wording, and their poll latch cannot
+    drift. No confirmation step: the move is a single live RPC and is reversible by another, where
+    the Sources tab's disable dialog is followed by a conf write and a service restart.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    client: `audera.models.player.Player`
+        The Snapcast client whose group the menu would move.
+    assignment: `audera.ui.streamer.pages.index._Assignment`
+        The client's stream assignment, from `_assignment`.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    on_move: `Callable[[str], object]`
+        What a row does with the destination it was clicked for. Awaited by NiceGUI's own event
+        dispatch, so a coroutine function belongs here. This is the only argument the two triggers
+        do not share.
+    """
+    with ui.menu() as menu:
+        # `ui.label` rather than `ui.item`: the caption is not clickable, and `ui.item` inside a
+        # menu reads as clickable.
+        ui.label(_stream_caption(assignment.siblings)).classes('px-4 py-2 text-xs text-gray-500')
+        for id, label in _move_destinations(assignment).items():
+            _build_move_menu_item(client, id, label, status, on_move)
+
+    # The menu's own open state, so the 10 s poll cannot destroy an open menu mid-interaction.
+    # One event covers both open and close, where the select this replaced needed Quasar's
+    # `popup-show`/`popup-hide` pair. Every path that refreshes must clear the flag first: if it
+    # is left latched by an element the refresh deleted, the poll stays frozen for the life of
+    # the page.
+    menu.on_value_change(lambda e: setattr(page, '_dialog_open', bool(e.value)))
+
+
+def _build_move_menu_item(
+    client: Player,
+    source_id: str,
+    label: str,
+    status: dict[str, str],
+    on_move: Callable[[str], object],
+) -> None:
+    """Renders one destination row of a move menu.
+
+    A source Snapserver is not feeding is rendered disabled beside its own status word rather than
+    dropped, so the menu always lists every enabled source and a row reading `not running` states
+    why it cannot be picked. The row carries no click handler, so the refusal does not rest on
+    `set_enabled(False)` being honoured by whatever dispatches the event.
+
+    Parameters
+    ----------
+    client: `audera.models.player.Player`
+        The Snapcast client whose group the row would move.
+    source_id: `str`
+        The destination source id.
+    label: `str`
+        The destination's display label.
+    status: `dict[str, str]`
+        Snapserver's status word per stream id, from `_stream_status`.
+    on_move: `Callable[[str], object]`
+        What the row does with `source_id` when clicked, from `_build_move_menu`.
+    """
+    if _attachable(source_id, status):
+        ui.menu_item(label, on_click=lambda: on_move(source_id)).mark(f'player-move-{client.id}-{source_id}')
+        return
+
+    with ui.menu_item().mark(f'player-move-{client.id}-{source_id}') as item:
+        with ui.row(wrap=False).classes('items-center justify-between gap-4 w-full'):
+            ui.label(label)
+            text, classes = _stream_state(source_id, status)
+            ui.label(text).classes(classes).mark(f'player-move-status-{client.id}-{source_id}')
+    item.set_enabled(False)
+
+
+async def _on_stream_change(page: 'Page', client: Player, stream_id: str, refresh: bool) -> bool:
+    """Moves a player's group onto `stream_id`, and returns whether the move landed.
+
+    Snapcast owns the assignment, persisting group membership and `stream_id` in its own
+    `server.json`, so this writes through to Snapserver and Audera keeps no replica.
+
+    Parameters
+    ----------
+    page: `audera.ui.streamer.pages.Page`
+        An instance of the streamer dashboard app.
+    client: `audera.models.player.Player`
+        The Snapcast client whose group is being moved.
+    stream_id: `str`
+        The stream to move the group onto.
+    refresh: `bool`
+        Whether to re-lay-out the tab afterwards. Decided by the caller, per grouping: by stream, a
+        card's position is its assignment, so it must re-render; by player the card stays put and
+        repaints its own chip, and a refresh would reseed every volume slider from CamillaDSP,
+        cancelling a live drag on a different card. `_on_mute_change` does not refresh for the same
+        reason. The 10 s poll confirms the move either way.
+
+    Returns
+    -------
+    `bool`
+        Whether the move landed. `False` also means the tab has already been refreshed, so a caller
+        that repaints in place must not touch its own elements afterwards, which have been deleted.
+    """
+    # Cleared before anything that can refresh, never after.
+    page._dialog_open = False
+    try:
+        await asyncio.to_thread(_snapserver(page.settings).set_group_stream, client.group_id, stream_id)
+    except Exception as exc:
+        # Refresh regardless of the grouping, so the control returns to the assignment in effect.
+        _notify_failure(f'Could not move {client.name}', exc)
+        page._build_players_tab.refresh()
+        return False
+
+    ui.notify(f'{client.name} moved to {_label(stream_id)}', type='positive', position='top-right')
+    if refresh:
+        page._build_players_tab.refresh()
+    return True
 
 
 async def _on_mute_change(page: 'Page', client_id: str, muted: bool) -> None:
@@ -260,10 +1595,11 @@ def _open_settings_dialog(page: 'Page', client) -> None:
             ).classes('bg-gray-800 text-white')
 
         ui.separator().classes('mt-4 mb-2')
+        # No group id: it is an opaque uuid that changes over time, and the stream it was used to
+        # identify is already shown on the card itself.
         with ui.column().classes('text-xs text-gray-500 gap-1'):
             ui.label(f'ID      {client.id}')
             ui.label(f'Host    {client.host}')
-            ui.label(f'Group   {client.group_id or "—"}')
 
         with ui.row().classes('justify-between w-full mt-4'):
 
@@ -307,7 +1643,7 @@ def _reset_snap_volume(page: 'Page', client, vol_label=None) -> None:
 def _build_volume_controls(
     page: 'Page',
     client_id: str,
-    initial_volume: float,
+    initial_volume: float | None,
     client_host: str = '',
 ) -> ui.slider:
     """Renders a volume icon, slider, and live value label (routed through CamillaDSP).
@@ -326,6 +1662,11 @@ def _build_volume_controls(
     mode), never on lossy zero-rounding, so a mid-range edit never silently mutes the
     client on the next refresh. The seed is step-aligned to the integer percent slider
     so the periodic refresh does not fire a phantom `update:model-value`.
+
+    An `initial_volume` of `None` means the daemon could not be read. The slider then
+    renders disabled at the floor with `—` for its value, and the caller leaves the Mute
+    binding off it, so the control reports no position and accepts no drag relative to one.
+    See `_volumes` for why no number is substituted.
 
     Returns the `ui.slider` element so the caller can bind its enabled state to the
     Mute checkbox built alongside it in the card header.
@@ -351,15 +1692,31 @@ def _build_volume_controls(
             pass
         await _persist_and_sync(percent)
 
-    ui.icon('volume_up').classes('text-gray-400')
-    slider = ui.slider(min=0, max=100, step=1, value=int(round(initial_volume)), on_change=_on_volume_percent).classes('grow')
+    unknown = initial_volume is None
+
+    ui.icon('volume_off' if unknown else 'volume_up').classes('text-gray-400')
+    slider = (
+        ui.slider(min=0, max=100, step=1, value=0 if unknown else int(round(initial_volume)), on_change=_on_volume_percent)
+        .classes('grow')
+        .mark(f'player-volume player-volume-{client_id}')
+    )
+    if unknown:
+        slider.set_enabled(False)
     # Fixed width + right-align keeps the slider length constant as the label text
     # changes digit count (e.g. -9.0 dB -> -10.0 dB), so the handle doesn't shift.
     value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap text-right w-16')
-    if FF_VOLUME_PERC_OR_DB:
-        value_label.bind_text_from(slider, 'value', backward=lambda v: f'{camilla.percent_to_db(v):.1f} dB')
-    else:
-        value_label.bind_text_from(slider, 'value', backward=lambda v: f'{int(v)}%')
+
+    def _text(value: float) -> str:
+        """Formats the slider's position, or returns `—` when the volume is unknown."""
+        if unknown:
+            return '—'
+        if FF_VOLUME_PERC_OR_DB:
+            return f'{camilla.percent_to_db(value):.1f} dB'
+        return f'{int(value)}%'
+
+    # Bound rather than set even when the volume is unknown, so the label tracks a live drag once a
+    # reading arrives.
+    value_label.bind_text_from(slider, 'value', backward=_text)
 
     return slider
 

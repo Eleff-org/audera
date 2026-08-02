@@ -61,11 +61,15 @@ class Feature:
 
 
 PLAYER_SELECTION_KEY = 'player_selection'
+PLAYER_GROUPING_KEY = 'player_grouping'
 VOLUME_KEY = 'volume'
 DSP_BAND_EDITOR_KEY = 'dsp_band_editor'
 
 FF_DISABLED_VS_MUTE = 'disabled'
 FF_VOLUME_PERC_OR_DB = 'db'
+
+FF_GROUPING_BY_PLAYER = 'player'
+FF_GROUPING_BY_STREAM = 'stream'
 
 FF_DSP_BAND_EDITOR_FULL = 'full'
 FF_DSP_BAND_EDITOR_EXPAND = 'expand'
@@ -76,6 +80,13 @@ FEATURES: list[Feature] = [
         PLAYER_SELECTION_KEY,
         'Player Selection',
         (Option('mute', 'Mute checkbox'), Option('disabled', 'Disabled toggle')),
+    ),
+    # Adjacent to Player Selection, which controls a player card's appearance; this controls
+    # where the cards are placed.
+    Feature(
+        PLAYER_GROUPING_KEY,
+        'Player Grouping',
+        (Option(FF_GROUPING_BY_PLAYER, 'By player'), Option(FF_GROUPING_BY_STREAM, 'By stream')),
     ),
     Feature(
         VOLUME_KEY,

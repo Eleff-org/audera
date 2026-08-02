@@ -1,0 +1,13 @@
+[Unit]
+# Stands in for the unit DietPi's `shairport-sync-airplay2` package installs. The device gets this
+# from apt, out of a DietPi-only repo, so Audera never writes it and it lives here rather than in
+# `lib/streamer.sh`'s `write_streamer_units()`. Its `activate_streamer_units()` enables and starts
+# it, so it has to exist before provisioning runs.
+Description=Not Quite PTP
+
+[Service]
+ExecStart=/usr/local/bin/nqptp
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

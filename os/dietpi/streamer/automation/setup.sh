@@ -20,17 +20,31 @@ source /tmp/audera_config_lib.sh
 curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/common.sh" -o /tmp/audera_common_lib.sh
 source /tmp/audera_common_lib.sh
 
+# Fetch and load the streamer-only install/setup helpers
+curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/streamer.sh" -o /tmp/audera_streamer_lib.sh
+source /tmp/audera_streamer_lib.sh
+
 # Variables
 GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
 CAMILLADSP_VERSION="3.0.1"
-CAMILLADSP_ARCHIVE="camilladsp-linux-aarch64.tar.gz"
-CAMILLADSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CAMILLADSP_VERSION}/${CAMILLADSP_ARCHIVE}"
 CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
 CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
 CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 
 SNAPSERVER_CONFIG="/etc/snapserver.conf"
+SNAPSERVER_HOME="/var/lib/snapserver"
+# Must match the `datadir` the rendered snapserver.conf states. Snapserver writes `server.json`
+# here, holding the player names, volumes, latencies, groups, and stream assignments Audera
+# does not store.
+SNAPSERVER_DATADIR="/var/lib/snapserver"
 ASOUND_CONFIG="/etc/asound.conf"
+
+GO_LIBRESPOT_VERSION="0.7.4"
+GO_LIBRESPOT_ARCHIVE="go-librespot_linux_arm64.tar.gz"
+GO_LIBRESPOT_URL="https://github.com/devgianlu/go-librespot/releases/download/v${GO_LIBRESPOT_VERSION}/${GO_LIBRESPOT_ARCHIVE}"
+# go-librespot finds this directory by expanding $HOME, which the snapserver unit sets to
+# SNAPSERVER_HOME, so the path is derived from SNAPSERVER_HOME.
+GO_LIBRESPOT_CONFIG_DIR="$SNAPSERVER_HOME/.config/go-librespot"
 
 
 # Start console logging
@@ -43,6 +57,18 @@ echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GI
 
 # Ensure the script is running as root
 require_root
+
+# Ensure the DietPi apt repository is present
+#   `shairport-sync-airplay2` only exists there. Debian trixie's own `shairport-sync 4.3.7-1`
+#   is built without `--with-airplay-2`, so an install that falls back to it ships AirPlay 1,
+#   which pairs and plays.
+echo
+echo ">>> Verifying the DietPi apt repository"
+if [ ! -f /etc/apt/sources.list.d/dietpi.list ]; then
+    echo -e "[  ${RED}FAIL${RESET}  ] Missing {/etc/apt/sources.list.d/dietpi.list}; shairport-sync-airplay2 is unavailable"
+    exit 1
+fi
+echo -e "[  ${GREEN}OK${RESET}  ] DietPi apt repository verified"
 
 # Install build packages
 echo
@@ -59,15 +85,35 @@ apt-get install -y \
     avahi-utils \
     nginx \
     openssl \
-    snapserver \
+    snapserver=0.31.0-1 \
     snapclient \
+    shairport-sync-airplay2=4.3.7-dietpi2 \
     python3.13 \
     python3-dev \
     build-essential \
+    libsensors5 \
     jq && \
+apt-mark hold snapserver shairport-sync-airplay2 && \
 apt-get clean && \
 rm -rf /var/lib/apt/lists/*
 echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
+
+# Neutralize the packaged shairport-sync daemon
+#
+#   Snapserver forks its own `/usr/local/bin/shairport-sync` for the `airplay://` source. A
+#   standalone daemon competing for RTSP :7000 makes snapserver's forked instance bump its
+#   port on every retry and lose its metadata pipe while audio still plays, so nothing
+#   surfaces it. Masking the unit leaves the binary alone; snapserver executes it directly,
+#   so AirPlay still works. The `apt-mark hold` above covers the upgrade case, where the
+#   postinst unmasks and then restarts.
+#
+#   `nqptp` is left running. The same .deb enabled and started it, and AirPlay is the default
+#   source, so it must hold UDP 319/320 before snapserver forks the binary.
+echo
+echo ">>> Neutralizing the packaged shairport-sync daemon"
+systemctl disable --now shairport-sync
+systemctl mask shairport-sync
+echo -e "[  ${GREEN}OK${RESET}  ] shairport-sync daemon neutralized"
 
 # Load ALSA loopback module (needed for CamillaDSP ↔ Snapclient audio path)
 # index=7 keeps the loopback off hw:0 so physical card indices are stable
@@ -111,6 +157,18 @@ tar -xjf /tmp/plexamp.tar.bz2 -C /opt/
 rm /tmp/plexamp.tar.bz2
 echo -e "[  ${GREEN}OK${RESET}  ] PlexAmp headless installed successfully"
 
+# Install go-librespot
+#
+#   go-librespot has no apt package, so the release-asset URL is the pin. The tarball is flat,
+#   holding the binary and a README at the root, so a single named member extracts into place.
+echo
+echo ">>> Installing go-librespot v${GO_LIBRESPOT_VERSION}"
+wget --show-progress "$GO_LIBRESPOT_URL" -O "/tmp/${GO_LIBRESPOT_ARCHIVE}"
+tar -xzf "/tmp/${GO_LIBRESPOT_ARCHIVE}" -C /usr/local/bin go-librespot
+chmod +x /usr/local/bin/go-librespot
+rm "/tmp/${GO_LIBRESPOT_ARCHIVE}"
+echo -e "[  ${GREEN}OK${RESET}  ] go-librespot installed successfully"
+
 # Install audera CLI
 echo
 echo ">>> Installing audera"
@@ -120,9 +178,59 @@ echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 # Write Snapserver configuration
 echo
 echo ">>> Creating the Snapserver configuration"
-audera streamer conf snapserver.conf > "$SNAPSERVER_CONFIG"
-chmod 644 "$SNAPSERVER_CONFIG"
+#   Rendered to a sibling file and moved into place. `>` truncates the destination before
+#   `execve`, so a render that exits non-zero — a `sources.json` naming no catalogued source makes
+#   it raise — would leave a zero-byte conf and a Snapserver that will not start, on a device
+#   whose previous conf was fine. `set -e` aborts the run before the `mv`.
+audera streamer conf snapserver.conf > "${SNAPSERVER_CONFIG}.tmp"
+chmod 644 "${SNAPSERVER_CONFIG}.tmp"
+mv "${SNAPSERVER_CONFIG}.tmp" "$SNAPSERVER_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] Snapserver configured successfully"
+
+# Write the go-librespot configuration
+#
+#   Rendered once at provision time and not re-rendered, since snapserver forks and reaps
+#   go-librespot itself, so nothing here changes when the Spotify source is toggled. The
+#   directory holds the zeroconf credentials that let a re-enable skip re-pairing. No flag
+#   points go-librespot at it; it derives `$HOME/.config/go-librespot` on its own, and the
+#   snapserver unit's `Environment=HOME` is what makes that path correct.
+echo
+echo ">>> Creating the go-librespot configuration"
+mkdir -p "$GO_LIBRESPOT_CONFIG_DIR"
+audera streamer conf go-librespot.yml > "$GO_LIBRESPOT_CONFIG_DIR/config.yml"
+chmod 644 "$GO_LIBRESPOT_CONFIG_DIR/config.yml"
+echo -e "[  ${GREEN}OK${RESET}  ] go-librespot configured successfully"
+
+# Carry an existing server.json to the datadir the conf now pins
+#
+#   Two legacy locations, either of which a device may hold depending on when it was last
+#   provisioned: `/root/.config/snapserver/` from before the unit set $HOME ($HOME unset, so
+#   snapserver fell back to root's passwd entry) and `$SNAPSERVER_HOME/.config/snapserver/`
+#   from a device provisioned with $HOME set while `datadir` was still empty.
+#
+#   The `-e` check on the destination prevents an overwrite: a reprovision of a device already
+#   on the pinned path must not take a stale copy from a legacy location. The loop tries the
+#   newest layout first and stops at the first match.
+echo
+echo ">>> Migrating any existing snapserver state"
+if [ -e "$SNAPSERVER_DATADIR/server.json" ]; then
+    echo -e "[  ${GREEN}OK${RESET}  ] snapserver state already in place, left untouched"
+else
+    mkdir -p "$SNAPSERVER_DATADIR"
+    MIGRATED=""
+    for legacy in "$SNAPSERVER_HOME/.config/snapserver/server.json" /root/.config/snapserver/server.json; do
+        if [ -f "$legacy" ]; then
+            cp "$legacy" "$SNAPSERVER_DATADIR/server.json"
+            MIGRATED="$legacy"
+            break
+        fi
+    done
+    if [ -n "$MIGRATED" ]; then
+        echo -e "[  ${GREEN}OK${RESET}  ] snapserver state migrated from ${MIGRATED}"
+    else
+        echo -e "[  ${GREEN}OK${RESET}  ] No prior snapserver state to migrate"
+    fi
+fi
 
 # Write CamillaDSP configuration
 echo
@@ -135,112 +243,15 @@ echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
 # Create plexamp-mdns helper
 echo
 echo ">>> Creating plexamp-mdns helper"
-cat > /usr/local/bin/plexamp-mdns.sh <<'EOF'
-#!/bin/bash
-exec avahi-publish -a -R plexamp.local $(hostname -I | awk '{print $1}')
-EOF
-chmod +x /usr/local/bin/plexamp-mdns.sh
+write_plexamp_mdns_helper
 echo -e "[  ${GREEN}OK${RESET}  ] plexamp-mdns helper created"
 
 # Install systemd service units
 echo
 echo ">>> Installing systemd service units"
 
-# snapserver service
-cat > /etc/systemd/system/snapserver.service <<EOF
-[Unit]
-Description=Snapcast server
-After=network.target sound.target
-
-[Service]
-ExecStart=/usr/bin/snapserver -c $SNAPSERVER_CONFIG
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# snapclient service — outputs to ALSA loopback; CamillaDSP reads from the paired device
-cat > /etc/systemd/system/snapclient.service <<EOF
-[Unit]
-Description=Snapcast client
-Wants=avahi-daemon.service
-After=network-online.target time-sync.target sound.target avahi-daemon.service snapserver.service
-
-[Service]
-ExecStart=/usr/bin/snapclient --host 127.0.0.1 --soundcard hw:Loopback,0 --sampleformat 48000:32:*
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# camilladsp service — captures from ALSA loopback, plays to physical DAC (hw:0)
-write_camilladsp_service "$CAMILLADSP_CONFIG" "$CAMILLADSP_STATEFILE"
-
-# Create PlexAmp data directories
-mkdir -p /root/.local/share/Plexamp/Offline
-mkdir -p /root/.local/share/Plexamp/Settings
-mkdir -p /root/.cache/Plexamp/log
-
-# Pre-configure PlexAmp audio device to route through snapfifo pipe
-echo -n "Splexamp_output" > "/root/.local/share/Plexamp/Settings/%40Plexamp%3Asettings%3AaudioDeviceUuid"
-
-# plexamp service
-cat > /etc/systemd/system/plexamp.service <<'EOF'
-[Unit]
-Description=PlexAmp Headless
-After=network-online.target nss-lookup.target
-Wants=network-online.target nss-lookup.target
-
-[Service]
-Environment=HOME=/root
-WorkingDirectory=/opt/plexamp
-ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do getent hosts plex.tv > /dev/null 2>&1 && break || sleep 2; done'
-ExecStart=/bin/bash -c 'export CLIENT_NAME=Audera; exec /usr/bin/node /opt/plexamp/js/index.js'
-Restart=on-failure
-RestartSec=10
-KillSignal=SIGINT
-TimeoutStopSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# plexamp-mdns service
-cat > /etc/systemd/system/plexamp-mdns.service <<'EOF'
-[Unit]
-Description=Publish plexamp.local mDNS hostname
-After=avahi-daemon.service network-online.target
-Requires=avahi-daemon.service
-
-[Service]
-ExecStart=/usr/local/bin/plexamp-mdns.sh
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# audera-streamer service — long-running NiceGUI UI
-cat > /etc/systemd/system/audera-streamer.service <<'EOF'
-[Unit]
-Description=Audera streamer
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-ExecStart=/usr/local/bin/audera streamer start
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable snapserver snapclient camilladsp plexamp plexamp-mdns audera-streamer
-systemctl start snapserver snapclient camilladsp plexamp plexamp-mdns audera-streamer
+write_streamer_units "$SNAPSERVER_HOME" "$SNAPSERVER_CONFIG" "$CAMILLADSP_CONFIG" "$CAMILLADSP_STATEFILE"
+activate_streamer_units
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Purge ifupdown

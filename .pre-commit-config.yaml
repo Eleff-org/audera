@@ -21,3 +21,22 @@ repos:
         language: system
         types: [python]
         require_serial: false
+
+      # The device is installed by shell, so a shell fault is a device that does not come up, and
+      # bash reports most of them at the line that runs rather than at the line that is wrong.
+      #
+      # `shellcheck-py` rather than the system binary or the upstream docker hook: it is a wheel, so
+      # `uvx` resolves it the same way on a developer's machine and on a runner, with no apt or
+      # Docker prerequisite.
+      #
+      # Pinned to `warning`, because every `info` finding in `os/dietpi/` is deliberate: the setup
+      # scripts `source` libraries they curl to `/tmp` at runtime (SC1091), the logo prints literal
+      # backslashes (SC2028), and `provision.sh` sends single-quoted commands that are meant to
+      # expand on the device rather than on the client (SC2016, SC2029). A hook nobody can get to
+      # zero is a hook people learn to skip.
+      - id: shellcheck
+        name: shellcheck
+        entry: uvx --from shellcheck-py shellcheck --severity=warning
+        language: system
+        types: [shell]
+        require_serial: false

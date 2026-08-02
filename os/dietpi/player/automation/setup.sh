@@ -23,8 +23,6 @@ source /tmp/audera_common_lib.sh
 # Variables
 GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
 CAMILLADSP_VERSION="3.0.1"
-CAMILLADSP_ARCHIVE="camilladsp-linux-aarch64.tar.gz"
-CAMILLADSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CAMILLADSP_VERSION}/${CAMILLADSP_ARCHIVE}"
 CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
 CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
 CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"

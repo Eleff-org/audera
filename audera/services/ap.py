@@ -5,6 +5,7 @@ import subprocess
 import time
 from typing import Literal
 
+from audera import io
 from audera.services import netifaces, platform
 
 
@@ -82,12 +83,18 @@ class AccessPoint:
         # Re-configure dnsmasq each time the access-point is started because the
         #   player identity may change overtime.
 
-        with open('/etc/NetworkManager/dnsmasq.conf', 'w') as f:
-            f.write(f'interface={self.ap_interface}\n')
-            f.write('dhcp-range=10.42.0.10,10.42.0.100,12h\n')
-            f.write('dhcp-option=3,10.42.0.1\n')
-            f.write('dhcp-option=6,10.42.0.1\n')
-            f.write(f'address=/{self.url}/10.42.0.1')
+        io.write_text(
+            '/etc/NetworkManager/dnsmasq.conf',
+            '\n'.join(
+                [
+                    f'interface={self.ap_interface}',
+                    'dhcp-range=10.42.0.10,10.42.0.100,12h',
+                    'dhcp-option=3,10.42.0.1',
+                    'dhcp-option=6,10.42.0.1',
+                    f'address=/{self.url}/10.42.0.1',
+                ]
+            ),
+        )
 
         # Restart network-manager
         subprocess.run(['systemctl', 'restart', 'NetworkManager'], check=True)

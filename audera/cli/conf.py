@@ -2,11 +2,17 @@
 
 This module is the single source of truth for the configuration files that
 ``audera {streamer,player} conf <filename>`` emits. Keeping them in code (rather
-than as data files) lets the CamillaDSP playback format be parameterized while
-the remaining files stay byte-for-byte stable.
+than as data files) lets the CamillaDSP playback format and the Snapserver source
+list be parameterized while the remaining files stay byte-for-byte stable.
 """
 
-from typing import Literal
+from typing import Literal, Sequence
+
+from audera.domains.sources import default_source, source_lines
+
+# The Snapserver configuration's target path. Provisioning writes it through a shell redirect;
+# the Sources tab re-renders it when a source is toggled.
+SNAPSERVER_CONF: str = '/etc/snapserver.conf'
 
 
 def render_camilladsp(playback_format: Literal['S16LE', 'S32LE'] = 'S32LE') -> str:
@@ -77,15 +83,49 @@ pipeline: []
 """
 
 
-def render_snapserver() -> str:
+def render_snapserver(enabled: Sequence[str]) -> str:
     """Renders the Snapserver configuration file.
+
+    Required rather than defaulted to the bootstrap set, which makes this a pure renderer: its
+    output depends on its argument alone and it cannot read the recorded set on its own.
+    `commands.py` passes `sources_dal.get_enabled()`, which is the seam where a device's own
+    record — and its degradation to `DEFAULT_ENABLED` — is decided.
+
+    Parameters
+    ----------
+    enabled : `Sequence[str]`
+        The enabled source ids. An empty sequence is rejected. Order and duplicates are ignored,
+        and the rendered order is always the catalog's.
 
     Returns
     -------
     `str`
         The rendered Snapserver configuration.
+
+    Raises
+    ------
+    `ValueError`
+        When no catalogued source is enabled. Snapserver dereferences a null default stream at
+        the first client connect, so a zero-stream configuration crashes it and is not emitted.
+        There is no fallback to the bootstrap set, which would let the data-access layer and
+        `/etc/snapserver.conf` disagree.
     """
-    return r"""
+    ids = list(enabled)
+
+    # Guard on the rendered lines rather than on `ids`, so an enabled set naming only
+    # uncatalogued sources is caught alongside an empty one.
+    lines = source_lines(ids)
+    if not lines:
+        raise ValueError(f'At least one catalogued audio source must be enabled, got {ids!r}.')
+
+    sources = '\n'.join(lines)
+    # Derived here rather than accepted as a parameter, so no caller can name a default that
+    # no rendered source provides; Snapserver mis-routes that without reporting an error.
+    default = default_source(ids)
+
+    # `rf` rather than `r`: any future brace in the literal below raises a `ValueError` at call
+    # time.
+    return rf"""
 
 ###############################################################################
 #     ______                                                                  #
@@ -130,7 +170,16 @@ threads = -1
 # if empty, data dir will be
 #  - "/var/lib/snapserver/" when running as daemon
 #  - "$HOME/.config/snapserver/" when not running as daemon
-#datadir =
+#
+# Set explicitly rather than left empty. `server.json` is where Snapcast persists what Audera
+# does not store: client names, volumes, latencies, group membership, and each group's
+# `stream_id`. The unit runs in the foreground rather than with `-d`, so an empty value takes
+# the `$HOME` branch, and provisioning sets a `HOME` on that unit for go-librespot. Leaving
+# this empty would couple the persisted player configuration to an environment variable chosen
+# for an unrelated backend; changing that variable makes snapserver start from an empty state
+# file, with every player renamed back to its MAC. The value below is upstream's own daemon
+# default, stated here so the unit's environment cannot change it.
+datadir = /var/lib/snapserver/
 
 # enable mDNS to publish services
 #mdns_enabled = true
@@ -276,11 +325,11 @@ port = 1705
 # tcp client: tcp://<server IP, e.g. 127.0.0.1>:<port>?name=<name>&mode=client
 # alsa: alsa:///?name=<name>&device=<alsa device>[&send_silence=false][&idle_threshold=100][&silence_threshold_percent=0.0]
 # meta: meta:///<name of source#1>/<name of source#2>/.../<name of source#N>?name=<name>
-source = pipe:///tmp/snapfifo?name=PlexAmp&sampleformat=48000:16:2&mode=create
+{sources}
 
 # The name of the default source for new clients to connect to
 # Otherwise defaults to first non-meta source
-# default_source = default
+default_source = {default}
 
 # Plugin directory, containing scripts, referred by "controlscript"
 #plugin_dir = /usr/share/snapserver/plug-ins
@@ -335,6 +384,70 @@ source = pipe:///tmp/snapfifo?name=PlexAmp&sampleformat=48000:16:2&mode=create
 #filter = *:info
 #
 ###############################################################################
+"""
+
+
+def render_go_librespot() -> str:
+    """Renders the go-librespot (Spotify Connect) configuration file.
+
+    Rendered once at provision time into `/var/lib/snapserver/.config/go-librespot`. Nothing
+    passes that path to go-librespot; go-librespot derives it from `$HOME`, which provisioning
+    sets on Snapserver's unit through a drop-in. The content is static, so nothing here changes
+    when the source is enabled or disabled.
+
+    Returns
+    -------
+    `str`
+        The rendered go-librespot configuration.
+    """
+    return r"""---
+device_name: Audera
+device_type: speaker
+
+# Spotify's highest tier. The pipe below is lossless from here on, so this is the
+# ceiling for the Spotify source.
+bitrate: 320
+
+# Snapserver reads the child process's stdout, so the pipe backend writes there.
+# `s16le` must agree with the Spotify source URI's `sampleformat=44100:16:2` in
+# audera/domains/sources/catalog.py. go-librespot states the format, snapserver
+# states the rate and channels, and neither validates the other. A mismatch produces
+# a byte-misaligned stream, which is audible distortion rather than an error.
+audio_backend: pipe
+audio_output_pipe: /dev/stdout
+audio_output_pipe_format: s16le
+
+# Loudness levelling, per song rather than per album, so every track reaches Snapserver
+# at the same loudness. Snapcast's documented `+6.0` pregain is not adopted, because the
+# DSP editor's auto-protected pre-amp computes clip-safe headroom from the EQ bands alone
+# and does not account for gain applied upstream of it.
+normalisation_disabled: false
+normalisation_use_album_gain: false
+normalisation_pregain: 0.0
+
+# Both of the next two default to `false` upstream. Zeroconf is how the speaker is
+# discovered on the network, and persisting the credentials it receives lets a disabled
+# source be re-enabled without re-pairing from a phone.
+zeroconf_enabled: true
+
+# Registers the `_spotify-connect._tcp` service through the running avahi-daemon over D-Bus
+# instead of go-librespot's own mDNS responder, which is the `builtin` default. There is no
+# auto-detection; `zeroconf/zeroconf.go:67` branches on this key alone. Upstream's guidance
+# is that `builtin` is for hosts with no avahi, and that avahi is the choice "to avoid port
+# conflicts". This host runs avahi: AirPlay needs it, `plexamp-mdns` publishes through it,
+# and `audera.local` is its hostname. Chosen on that guidance, not on an observed conflict.
+zeroconf_backend: avahi
+
+credentials:
+  type: zeroconf
+  zeroconf:
+    persist_credentials: true
+
+# go-librespot's HTTP API. Its only consumer would be now-playing metadata, which is out
+# of scope for beta.1 and requires snapserver >= 0.34's bundled meta_go-librespot.py. It
+# stays off until something reads it, to avoid an unused listening socket.
+server:
+  enabled: false
 """
 
 

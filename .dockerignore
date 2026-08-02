@@ -1,0 +1,29 @@
+# The build context for `tests/docker/systemd/Dockerfile` is the repo root, because that is the
+# only context reaching all four things the image needs: the shared stubs under
+# `tests/docker/snapserver/`, `pyproject.toml` + `uv.lock` (the lock is the only place the
+# `camilladsp-plot` git rev is pinned), the code under test, and the two `os/dietpi/lib/` files
+# provisioning sources, since provisioning is that suite's fixture.
+#
+# The other two Dockerfiles build from their own directories, so Docker never consults this file
+# for them: it reads the `.dockerignore` at the context root, and neither of those has one.
+#
+# Deny everything, then re-include, so a file added at the root later stays out of the image until
+# somebody names it. `**` rather than `*`, since `*` does not match across `/`.
+**
+
+!pyproject.toml
+!uv.lock
+!README.md
+
+!audera
+!audera/**
+!tests
+!tests/**
+!os/dietpi/lib/common.sh
+!os/dietpi/lib/streamer.sh
+
+# Re-excluded after the re-inclusions, since a later pattern wins. These byte caches are built
+# against the host's interpreter and would otherwise be included by `tests/**` and `audera/**`.
+**/__pycache__
+**/*.pyc
+**/.pytest_cache

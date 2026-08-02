@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import List
 
 from pydantic import BaseModel, Field
@@ -40,11 +39,6 @@ class Player(BaseModel):
     group_id: str = ''
     name: str = Field(default='', exclude=True)
     latency_ms: int = Field(default=0, ge=-500, le=500, exclude=True)
-
-    @classmethod
-    def from_dict(cls, dict_object: dict) -> 'Player':
-        """Returns a `Player` object from a `dict`."""
-        return cls.model_validate(dict_object)
 
     def __eq__(self, compare) -> bool:
         """Returns `True` when compare is an instance of self, excluding `name`."""
@@ -90,23 +84,3 @@ class Group(BaseModel):
     stream_id: str = ''
     muted: bool = False
     volume: int = 100
-
-    @classmethod
-    def from_dict(cls, dict_object: dict) -> 'Group':
-        """Returns a `Group` object from a `dict`."""
-        return cls.model_validate(dict_object)
-
-    def to_dict(self) -> dict:
-        """Returns a `Group` object as a `dict`."""
-        return {
-            'id': self.id,
-            'name': self.name,
-            'client_ids': self.client_ids,
-            'stream_id': self.stream_id,
-            'muted': self.muted,
-            'volume': self.volume,
-        }
-
-    def __repr__(self) -> str:
-        """Returns a `Group` object as a json-formatted `str`."""
-        return json.dumps(self.to_dict(), indent=2)

@@ -73,3 +73,10 @@ indent-style = "space"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 main_file = ""
+
+# The systemd lane is opt-in: it builds an image and boots a privileged container, which takes
+# minutes and needs a Docker daemon that can run systemd as PID 1. `-m` stores a single value, so
+# `-m systemd` on the command line overrides this rather than appending to it. `uv run pytest -m
+# systemd` is the whole lane and a bare `uv run pytest` is everything else.
+addopts = "-m 'not systemd'"
+markers = ["systemd: requires real systemd as PID 1, in a privileged container"]

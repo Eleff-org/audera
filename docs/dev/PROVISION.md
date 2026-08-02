@@ -53,20 +53,5 @@ Run the script from the project root using Git's bundled bash.
 | `-a, --audio-device` | | Configure `dtoverlay` for the attached audio device: `hdmi`, `digiamp-plus`, `dac-plus`, `hifiberry-dac-plus`. Unset leaves the existing `dtoverlay` untouched. `hdmi` additionally uses firmware-KMS (`dtoverlay=vc4-fkms-v3d`) so the legacy `hdmi_*` settings apply, and renders the CamillaDSP playback format as `S16LE` (many HDMI sinks reject `S32LE`). |
 | `--no-reboot` | | Skip final reboot; leaves device running for inspection |
 | `--wipe-networks` | | Delete all NetworkManager connections before reboot (triggers WiFi wizard on next boot) |
-| `--check` | | After reboot, poll until device is reachable then verify systemd services |
-| `--check-timeout` | `120` | Seconds to wait for the device to come back after reboot |
 | `-l, --log` | | Tee session output to a local file |
 | `--dry-run` | | Print the remote command without executing |
-
-## Post-provisioning check
-
-Pass `--check` to have the script wait for the device to come back after reboot and verify that all expected systemd services are active:
-
-```powershell
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1 --check
-```
-
-Services verified per device type:
-
-- **Streamer:** `snapserver`, `snapclient`, `camilladsp`, `nginx`, `avahi-daemon`
-- **Player:** `snapclient`, `camilladsp`

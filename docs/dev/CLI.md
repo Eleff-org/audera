@@ -21,8 +21,17 @@ Available files:
 | `snapserver.conf` | `/etc/snapserver.conf` |
 | `camilladsp.yml` | `/etc/camilladsp/config.yml` |
 | `asound.conf` | `/etc/asound.conf` (appended) |
+| `go-librespot.yml` | `/var/lib/snapserver/.config/go-librespot/config.yml` |
 
 `--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require. See ADR 003.
+
+`snapserver.conf` is rendered from `~/.audera/sources.json` (`dal.sources.get_enabled()`), falling back to the bootstrap set (`dal.sources.DEFAULT_ENABLED`) when nothing has been recorded. The file survives a reflash, so a reprovision that emitted the bootstrap set would ship a conf naming a stream the operator had turned off, and Snapserver would reassign every group onto it at the first client connect.
+
+```bash
+audera streamer units (--enabled | --disabled)
+```
+
+Prints the systemd units of the enabled audio sources, or of every other catalogued source, one per line in catalog order. Provisioning enables and starts the first list and disables the second, so the unit state of a reprovisioned device follows the same recorded set the conf does. Deriving both lists here is what keeps `os/dietpi/lib/streamer.sh`'s `activate_streamer_units` from naming a source. A source whose backend Snapserver forks itself has no units and appears in neither list, so either may be empty.
 
 ## Player
 
