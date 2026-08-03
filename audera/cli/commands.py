@@ -75,11 +75,9 @@ def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE']) -> Non
         sys.stdout.write(conf.render_camilladsp(playback_format))
     elif filename == 'snapserver.conf':
         # The recorded enabled set, not `DEFAULT_ENABLED`. `~/.audera/sources.json` survives a
-        # reprovision, so rendering the bootstrap default here would ship a conf naming AirPlay to
-        # a device whose operator runs PlexAmp: the Sources tab would keep reporting PlexAmp
-        # enabled while Snapserver reassigned every group off the stream it no longer serves.
-        # `get_enabled()` degrades an unrecorded set to `DEFAULT_ENABLED`, so a fresh flash still
-        # renders what it always did.
+        # reprovision, so rendering the bootstrap default would ship a conf naming AirPlay to a
+        # device running PlexAmp, and Snapserver would reassign every group off the stream it no
+        # longer serves. `get_enabled()` degrades an unrecorded set to `DEFAULT_ENABLED`.
         sys.stdout.write(conf.render_snapserver(sources_dal.get_enabled()))
     elif filename == 'go-librespot.yml':
         sys.stdout.write(conf.render_go_librespot())
@@ -119,12 +117,10 @@ def streamer_units(disabled: bool = False, **_) -> None:
     """Prints the systemd units of the recorded audio sources to stdout, one per line.
 
     The complement, `--disabled`, is every other catalogued source's units. Provisioning enables
-    one list and disables the other, so between them they leave no catalogued unit in whatever
-    state the last image left it.
+    one list and disables the other, so between them no catalogued unit is left in whatever state
+    the last image left it.
 
-    Nothing is printed when the selected list is empty, which is what a device running only
-    sources whose backend Snapserver forks looks like. The shell loops over the output, so an
-    empty list is an empty loop and needs no special case.
+    Nothing is printed when the selected list is empty, which the shell handles as an empty loop.
 
     Parameters
     ----------

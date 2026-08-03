@@ -71,9 +71,8 @@ def snapserver_image():
 def _snapserver_container(image: str, tmp_path_factory, snapserver_conf: str, name: str):
     """Boots a snapserver container against `snapserver_conf` and yields its (host, port).
 
-    The conf is mounted read-only at `/etc/snapserver.conf`, so the container tests whether
-    snapserver accepts what `render_snapserver()` emits. A conf it rejects never reaches the
-    HTTP wait.
+    The conf is mounted read-only at `/etc/snapserver.conf`. A conf snapserver rejects never
+    reaches the HTTP wait.
     """
     from testcontainers.core.container import DockerContainer
 
@@ -103,9 +102,9 @@ def snapserver_container(snapserver_image, tmp_path_factory):
 def snapserver_container_all_sources(snapserver_image, tmp_path_factory):
     """A snapserver booted from a conf with every catalogued source enabled.
 
-    Session-scoped, so this costs one extra boot per run rather than one per test. The
-    container's stub source binaries make the `process://` and `airplay://` streams start, so
-    the tests under it cover conf acceptance and stream registration.
+    Session-scoped, so it costs one extra boot per run rather than one per test. The container's
+    stub source binaries make the `process://` and `airplay://` streams start, so tests under it
+    cover conf acceptance and stream registration.
     """
     from audera.cli import conf
     from audera.domains.sources import CATALOG

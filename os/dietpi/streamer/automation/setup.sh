@@ -34,16 +34,16 @@ CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 SNAPSERVER_CONFIG="/etc/snapserver.conf"
 SNAPSERVER_HOME="/var/lib/snapserver"
 # Must match the `datadir` the rendered snapserver.conf states. Snapserver writes `server.json`
-# here, holding the player names, volumes, latencies, groups, and stream assignments Audera
-# does not store.
+# here, holding the player names, volumes, latencies, groups, and stream assignments Audera does
+# not store.
 SNAPSERVER_DATADIR="/var/lib/snapserver"
 ASOUND_CONFIG="/etc/asound.conf"
 
 GO_LIBRESPOT_VERSION="0.7.4"
 GO_LIBRESPOT_ARCHIVE="go-librespot_linux_arm64.tar.gz"
 GO_LIBRESPOT_URL="https://github.com/devgianlu/go-librespot/releases/download/v${GO_LIBRESPOT_VERSION}/${GO_LIBRESPOT_ARCHIVE}"
-# go-librespot finds this directory by expanding $HOME, which the snapserver unit sets to
-# SNAPSERVER_HOME, so the path is derived from SNAPSERVER_HOME.
+# Derived from SNAPSERVER_HOME: go-librespot finds this directory by expanding $HOME, which the
+# snapserver unit sets to SNAPSERVER_HOME.
 GO_LIBRESPOT_CONFIG_DIR="$SNAPSERVER_HOME/.config/go-librespot"
 
 
@@ -59,9 +59,8 @@ echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GI
 require_root
 
 # Ensure the DietPi apt repository is present
-#   `shairport-sync-airplay2` only exists there. Debian trixie's own `shairport-sync 4.3.7-1`
-#   is built without `--with-airplay-2`, so an install that falls back to it ships AirPlay 1,
-#   which pairs and plays.
+#   `shairport-sync-airplay2` only exists there. Debian trixie's own `shairport-sync 4.3.7-1` is
+#   built without `--with-airplay-2`, so falling back to it silently ships AirPlay 1.
 echo
 echo ">>> Verifying the DietPi apt repository"
 if [ ! -f /etc/apt/sources.list.d/dietpi.list ]; then
@@ -101,14 +100,11 @@ echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 # Neutralize the packaged shairport-sync daemon
 #
 #   Snapserver forks its own `/usr/local/bin/shairport-sync` for the `airplay://` source. A
-#   standalone daemon competing for RTSP :7000 makes snapserver's forked instance bump its
-#   port on every retry and lose its metadata pipe while audio still plays, so nothing
-#   surfaces it. Masking the unit leaves the binary alone; snapserver executes it directly,
-#   so AirPlay still works. The `apt-mark hold` above covers the upgrade case, where the
-#   postinst unmasks and then restarts.
+#   standalone daemon competing for RTSP :7000 makes the forked instance bump its port on every
+#   retry and lose its metadata pipe. Masking the unit leaves the binary alone, so AirPlay still
+#   works; the `apt-mark hold` above stops the postinst from unmasking it on upgrade.
 #
-#   `nqptp` is left running. The same .deb enabled and started it, and AirPlay is the default
-#   source, so it must hold UDP 319/320 before snapserver forks the binary.
+#   `nqptp` is left running: it must hold UDP 319/320 before snapserver forks the binary.
 echo
 echo ">>> Neutralizing the packaged shairport-sync daemon"
 systemctl disable --now shairport-sync
@@ -159,8 +155,8 @@ echo -e "[  ${GREEN}OK${RESET}  ] PlexAmp headless installed successfully"
 
 # Install go-librespot
 #
-#   go-librespot has no apt package, so the release-asset URL is the pin. The tarball is flat,
-#   holding the binary and a README at the root, so a single named member extracts into place.
+#   No apt package exists, so the release-asset URL is the pin. The tarball is flat, so a single
+#   named member extracts into place.
 echo
 echo ">>> Installing go-librespot v${GO_LIBRESPOT_VERSION}"
 wget --show-progress "$GO_LIBRESPOT_URL" -O "/tmp/${GO_LIBRESPOT_ARCHIVE}"
@@ -179,9 +175,8 @@ echo -e "[  ${GREEN}OK${RESET}  ] audera installed successfully"
 echo
 echo ">>> Creating the Snapserver configuration"
 #   Rendered to a sibling file and moved into place. `>` truncates the destination before
-#   `execve`, so a render that exits non-zero — a `sources.json` naming no catalogued source makes
-#   it raise — would leave a zero-byte conf and a Snapserver that will not start, on a device
-#   whose previous conf was fine. `set -e` aborts the run before the `mv`.
+#   `execve`, so a render that exits non-zero would leave a zero-byte conf and a Snapserver that
+#   will not start. `set -e` aborts the run before the `mv`.
 audera streamer conf snapserver.conf > "${SNAPSERVER_CONFIG}.tmp"
 chmod 644 "${SNAPSERVER_CONFIG}.tmp"
 mv "${SNAPSERVER_CONFIG}.tmp" "$SNAPSERVER_CONFIG"
@@ -189,11 +184,10 @@ echo -e "[  ${GREEN}OK${RESET}  ] Snapserver configured successfully"
 
 # Write the go-librespot configuration
 #
-#   Rendered once at provision time and not re-rendered, since snapserver forks and reaps
-#   go-librespot itself, so nothing here changes when the Spotify source is toggled. The
-#   directory holds the zeroconf credentials that let a re-enable skip re-pairing. No flag
-#   points go-librespot at it; it derives `$HOME/.config/go-librespot` on its own, and the
-#   snapserver unit's `Environment=HOME` is what makes that path correct.
+#   Rendered once at provision time; toggling the Spotify source does not re-render it, and the
+#   directory holds the zeroconf credentials that let a re-enable skip re-pairing. No flag points
+#   go-librespot at it — it derives `$HOME/.config/go-librespot`, which the snapserver unit's
+#   `Environment=HOME` makes correct.
 echo
 echo ">>> Creating the go-librespot configuration"
 mkdir -p "$GO_LIBRESPOT_CONFIG_DIR"
@@ -203,14 +197,13 @@ echo -e "[  ${GREEN}OK${RESET}  ] go-librespot configured successfully"
 
 # Carry an existing server.json to the datadir the conf now pins
 #
-#   Two legacy locations, either of which a device may hold depending on when it was last
-#   provisioned: `/root/.config/snapserver/` from before the unit set $HOME ($HOME unset, so
-#   snapserver fell back to root's passwd entry) and `$SNAPSERVER_HOME/.config/snapserver/`
-#   from a device provisioned with $HOME set while `datadir` was still empty.
+#   Two legacy locations, depending on when the device was last provisioned:
+#   `/root/.config/snapserver/` from before the unit set $HOME, and
+#   `$SNAPSERVER_HOME/.config/snapserver/` from a device provisioned with $HOME set while
+#   `datadir` was still empty. The loop tries the newer layout first.
 #
-#   The `-e` check on the destination prevents an overwrite: a reprovision of a device already
-#   on the pinned path must not take a stale copy from a legacy location. The loop tries the
-#   newest layout first and stops at the first match.
+#   The `-e` check on the destination prevents an overwrite: a device already on the pinned path
+#   must not take a stale copy from a legacy location.
 echo
 echo ">>> Migrating any existing snapserver state"
 if [ -e "$SNAPSERVER_DATADIR/server.json" ]; then

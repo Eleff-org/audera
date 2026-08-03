@@ -1,11 +1,9 @@
 """How a settings file resolves against the feature registry.
 
-Only the resolution rules are asserted here. What each option *renders* is the Settings tab's
-behaviour and belongs with the page; restating the registry's shape — its option counts, its
-option values, that the default is the first option — puts the answer in a second place, where
-editing `FEATURES` breaks a test that teaches nothing.
+Only the resolution rules are asserted here. What each option renders belongs with the Settings
+tab, and the registry's shape is not restated.
 
-Every case below is a settings file that already exists on a device: `default_selections()` runs
+Every case below is a settings file that already exists on a device. `default_selections()` runs
 only when `settings.json` is first created, so a file written before a feature existed carries no
 key for it, and a file written before an option was renamed carries a value nothing matches.
 """
@@ -28,8 +26,8 @@ def test_selected_falls_back_to_the_default_when_nothing_is_persisted():
 
 
 def test_selected_falls_back_to_the_default_when_another_feature_is_persisted():
-    # A settings file carrying one feature's key and not another's, which is what every device
-    # upgraded across a release that added a feature has.
+    # A settings file carrying one feature's key and not another's, as on any device upgraded
+    # across a release that added a feature.
     settings = _settings(features={'volume': 'db'})
     assert features.selected(settings, features.PLAYER_SELECTION_KEY) == 'mute'
 
@@ -41,6 +39,6 @@ def test_player_grouping_resolves_to_by_player_when_the_key_predates_the_feature
 
 def test_option_resolves_an_unmatched_value_to_the_default():
     # `selected()` returns whatever is persisted, so a retired option value reaches the registry
-    # intact; `option()` is where it stops being able to render nothing.
+    # intact and `option()` is what maps it back onto a renderable option.
     feature = features.get_feature(features.PLAYER_SELECTION_KEY)
     assert feature.option('does_not_exist') == feature.default

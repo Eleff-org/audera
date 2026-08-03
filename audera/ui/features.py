@@ -81,8 +81,7 @@ FEATURES: list[Feature] = [
         'Player Selection',
         (Option('mute', 'Mute checkbox'), Option('disabled', 'Disabled toggle')),
     ),
-    # Adjacent to Player Selection, which controls a player card's appearance; this controls
-    # where the cards are placed.
+    # Player Selection controls a card's appearance; this controls where the cards are placed.
     Feature(
         PLAYER_GROUPING_KEY,
         'Player Grouping',

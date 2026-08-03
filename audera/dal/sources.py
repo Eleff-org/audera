@@ -6,14 +6,14 @@
 source absent from the list is disabled, so adding a catalog entry needs no migration.
 
 `setup` is the durable record of a source's one-time setup, today only `{'complete': true}` for a
-claimed PlexAmp. The live probes that detect setup are what the operator's device does *now* — a
-disabled unit reads as unclaimed — so provisioning, which stops the unit, would otherwise re-ask
-for a claim that already happened. The record is discarded when the source is disabled.
+claimed PlexAmp. The live probes report what the device does now, so a stopped unit reads as
+unclaimed and provisioning would otherwise re-ask for a claim that already happened. The record
+is discarded when the source is disabled.
 
 An absent `enabled` key means nothing has been recorded yet, and `get_enabled()` falls back to
 `DEFAULT_ENABLED`. `is_recorded()` and `adopt()` exist for the one caller that must tell those
-two apart, `ui.streamer.pages.index.adopt_running_sources`. The key rather than the file is what
-is tested, since a setup record can create the file before any enabled set is recorded.
+two apart, `ui.streamer.pages.index.adopt_running_sources`. They test the key rather than the
+file, since a setup record can create the file before any enabled set is recorded.
 """
 
 import json
@@ -30,10 +30,9 @@ FILE_NAME: str = 'sources.json'
 # DAL keeps its standard-library-plus-`dal.path` imports. `tests/dal/test_sources.py` asserts
 # every id here is catalogued and renders cleanly.
 #
-# AirPlay is the only source that plays audio as soon as the image boots; it needs no account,
-# claim flow, or app-side pairing. It is a bootstrap default and nothing more: provisioning
-# renders the conf and the systemd unit state from `get_enabled()`, so this constant is what a
-# device with no recorded set gets, not a value that overwrites a recording.
+# AirPlay is the only source that plays with no account, claim flow, or app-side pairing.
+# Provisioning renders the conf and the systemd unit state from `get_enabled()`, so this is what
+# a device with no recorded set gets; it never overwrites a recording.
 DEFAULT_ENABLED: tuple[str, ...] = ('AirPlay',)
 
 
@@ -41,8 +40,7 @@ def is_recorded() -> bool:
     """Returns whether an enabled set has been written to disk.
 
     `get_enabled()` cannot answer this, since it degrades an unrecorded set to `DEFAULT_ENABLED`,
-    which is indistinguishable from a device whose operator left AirPlay as the only enabled
-    source.
+    which is indistinguishable from a recorded set naming only AirPlay.
     """
     return 'enabled' in _document().get('sources', {})
 
@@ -57,9 +55,9 @@ def adopt(ids: list[str]) -> bool:
     """Records `ids` as the enabled set only when nothing has been recorded yet, and returns
     whether the write happened.
 
-    Two cases are refused. An already-recorded set is the operator's own intent and takes
-    precedence over anything inferred from the server. An empty `ids` indicates a failed
-    observation; recording it would break the "at least one source stays enabled" invariant.
+    Refuses an already-recorded set, which is the operator's own intent, and an empty `ids`, which
+    indicates a failed observation and would break the "at least one source stays enabled"
+    invariant.
 
     Parameters
     ----------
@@ -75,8 +73,8 @@ def adopt(ids: list[str]) -> bool:
 def set_enabled(id: str, enabled: bool) -> list[str]:
     """Enables or disables a source and returns the new set of enabled source ids.
 
-    The new set is returned so callers render from the value they just wrote rather than
-    reading the configuration file back.
+    The new set is returned so callers render from the value just written rather than reading the
+    configuration file back.
 
     Parameters
     ----------
@@ -123,8 +121,8 @@ def set_setup_complete(id: str, complete: bool) -> None:
 def clear_setup(id: str) -> None:
     """Discards a source's recorded setup state.
 
-    Disabling a source is the one thing that discards its record: the operator has said they no
-    longer want the source, and whatever they set up may not survive to the next enable.
+    Called when a source is disabled, since whatever was set up may not survive to the next
+    enable.
 
     Parameters
     ----------

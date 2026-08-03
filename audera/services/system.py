@@ -4,14 +4,11 @@ import subprocess
 
 from audera.services import logging, platform
 
-# A `systemctl` verb that has not returned in 15 seconds is hung, so a longer bound would only
-# surface the hang later.
+# Bounds every call. A `systemctl` verb that has not returned in 15 seconds is hung.
 TIMEOUT: float = 15
 
-# Capturing output keeps systemd's own failure line, the `See "journalctl -xeu <unit>" for
-# details.` pointer, off the parent's stderr, and `CalledProcessError.__str__` carries only the
-# argv and the exit status, never `stderr`. Logging it here keeps it in the `audera-streamer`
-# journal, where a caller that renders the exception alone would not put it.
+# `CalledProcessError.__str__` carries the argv and the exit status but never `stderr`, so a
+# failure's reason is logged here, into the `audera-streamer` journal.
 LOGGER = logging.logger(name=__name__)
 
 
@@ -19,10 +16,7 @@ LOGGER = logging.logger(name=__name__)
 def systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     """Runs `systemctl` with `args` and returns the completed process.
 
-    The `CompletedProcess` is returned so callers can inspect `returncode` and `stdout`.
-    `check` defaults to `True` so a failed unit operation raises
-    `subprocess.CalledProcessError` at the call site that ordered it. Output is always
-    captured, since `is_active()` needs `stdout`.
+    Output is always captured, since `is_active()` reads `stdout`.
 
     Parameters
     ----------

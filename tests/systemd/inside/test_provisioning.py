@@ -1,22 +1,22 @@
 """What a flash installs, read back off the manager that has to load it.
 
-Runs inside the privileged systemd container. The other modules here treat provisioning as setup and
-assert on what happens next; this one asserts on provisioning itself, removing the artifacts first and
-watching `os/dietpi/lib/streamer.sh` put them back, so its subject is the shell rather than the Python.
+Runs inside the privileged systemd container. The other modules treat provisioning as setup and assert
+on what happens next; this one removes the artifacts first and watches `os/dietpi/lib/streamer.sh` put
+them back, so its subject is the shell rather than the Python.
 
 The unit state mirroring `dal.sources.DEFAULT_ENABLED` is recorded as an obligation in `AGENTS.md`,
-`dal/sources.py` and `os/dietpi/AGENTS.md`. A device that shipped with a `snapserver.conf` naming AirPlay
-and `nqptp` left disabled would present as a working streamer with a silent stream, and the divergence
-would be invisible on the Sources tab, which reads the enabled set rather than the unit.
+`dal/sources.py` and `os/dietpi/AGENTS.md`. A device that shipped with a `snapserver.conf` naming
+AirPlay and `nqptp` left disabled would present as a working streamer with a silent stream, invisibly
+on the Sources tab, which reads the enabled set rather than the unit.
 
 Two other claims cover the extraction's regression risks. `write_streamer_units` moved heredocs out of
 `setup.sh`'s top level into a function with locals, so an unquoted heredoc that no longer interpolates
-writes a unit with a literal `$snapserver_home` in it, and `plexamp.service`'s quoted heredoc has to keep
-the opposite property.
+writes a unit with a literal `$snapserver_home` in it, and `plexamp.service`'s quoted heredoc has to
+keep the opposite property.
 
-This module covers the artifacts rather than the flash. Not the apt block, the pins, the DietPi repo, the
-three-layer `shairport-sync` neutralization, `dietpi.txt`, or the reboot tail; those are still verified by
-flashing a device.
+This module covers the artifacts rather than the flash. Not the apt block, the pins, the DietPi repo,
+the three-layer `shairport-sync` neutralization, `dietpi.txt`, or the reboot tail; those are still
+verified by flashing a device.
 """
 
 import os
@@ -65,9 +65,9 @@ _TIMEOUT: float = 15
 def _systemctl(*args: str) -> subprocess.CompletedProcess:
     """Runs `systemctl` for the fixture's own bookkeeping, tolerating any exit status.
 
-    `check=False` throughout, because this is called to deprovision: every verb it issues is aimed at a unit
-    that may already be stopped, already disabled, or already gone, and each of those exits non-zero while
-    being the state the fixture wants.
+    `check=False` throughout, because this is called to deprovision: every verb it issues is aimed at a
+    unit that may already be stopped, disabled, or gone, each of which exits non-zero while being the
+    state the fixture wants.
     """
     return subprocess.run(['systemctl', *args], capture_output=True, text=True, timeout=_TIMEOUT, check=False)
 
@@ -75,13 +75,12 @@ def _systemctl(*args: str) -> subprocess.CompletedProcess:
 def _deprovision() -> None:
     """Removes every artifact provisioning installs, so its installation is observed rather than assumed.
 
-    Stop precedes disable precedes unlink, and the order must not be changed. `disable` unlinks the wants
+    Stop precedes disable precedes unlink, and the order must not be changed: `disable` unlinks the wants
     symlink and leaves a running process alone, and unlinking a unit file out from under a running unit
-    orphans its process with no unit left to stop it by, which is the leak the rest of this lane exists to
-    catch.
+    orphans its process with no unit left to stop it by.
 
-    `nqptp`'s unit file is not removed. It comes from apt on the device and from the image here, so removing
-    it would test a state no flash produces; only the drop-in Audera writes goes.
+    `nqptp`'s unit file is not removed. It comes from apt on the device and from the image here, so
+    removing it would test a state no flash produces; only the drop-in Audera writes goes.
     """
     units = sorted({*WRITTEN_UNITS, *SOURCE_UNITS})
     _systemctl('stop', *units)
@@ -100,13 +99,12 @@ def _deprovision() -> None:
 def freshly_provisioned(audera_home) -> Iterator[None]:
     """Deprovisions and then reprovisions, so each test reads artifacts this test's flash wrote.
 
-    This module does not use the package's `provisioned` fixture. That one re-runs `provision()` over
-    whatever the previous test left, which is the right baseline for a module asserting on behaviour and the
-    wrong one for a module asserting on installation: a unit file left over from an earlier test would
-    satisfy every assertion below without the writer having run.
+    This module does not use the package's `provisioned` fixture, which re-runs `provision()` over
+    whatever the previous test left: a unit file left over from an earlier test would satisfy every
+    assertion below without the writer having run.
 
-    Nothing is restored on teardown. Every module in this lane provisions for itself and the driver runs each
-    in its own `docker exec`, so the next module reprovisions a container this one leaves unprovisioned.
+    Nothing is restored on teardown. Every module in this lane provisions for itself and the driver runs
+    each in its own `docker exec`.
     """
     _deprovision()
     provision()
@@ -118,10 +116,11 @@ def freshly_provisioned(audera_home) -> Iterator[None]:
 def recorded_home(tmp_path, monkeypatch) -> str:
     """Points the data-access layer and the provisioning shell at one `~/.audera`, and returns the `HOME`.
 
-    `activate_streamer_units` reads the recorded set by shelling out to `audera streamer units`, which is a
-    process of its own and resolves `~/.audera` from its environment. The `audera_home` fixture monkeypatches
-    a module attribute, which reaches this process only, so a test that recorded a set through the data-access
-    layer and provisioned would watch the shell read the container's empty home and pass for the wrong reason.
+    `activate_streamer_units` reads the recorded set by shelling out to `audera streamer units`, a process
+    of its own that resolves `~/.audera` from its environment. The `audera_home` fixture monkeypatches a
+    module attribute, which reaches this process only, so a test that recorded a set through the
+    data-access layer and provisioned would watch the shell read the container's empty home and pass for
+    the wrong reason.
     """
     home = tmp_path / 'home'
     (home / '.audera').mkdir(parents=True)
@@ -147,16 +146,15 @@ def _unit_text(unit: str) -> str:
 
 @pytest.mark.parametrize('unit', sorted({*WRITTEN_UNITS, *SOURCE_UNITS}))
 def test_provisioning_installs_a_unit_systemd_can_load(unit: str):
-    """Installed and parseable, which are separate claims and fail differently.
+    """Every unit is installed, parseable, and loaded from the path its owner writes.
 
     A heredoc that writes a syntactically invalid unit leaves a file on disk and `LoadState=error`, and
-    nothing on the device reports it: `systemctl enable` on an unparseable unit fails, but
-    `activate_streamer_units` enables in batches, so one bad unit takes the whole line down and `setup.sh`
-    aborts a flash for a reason that names the batch rather than the unit.
+    nothing on the device reports it: `activate_streamer_units` enables in batches, so one bad unit takes
+    the whole line down and `setup.sh` aborts a flash naming the batch rather than the unit.
 
-    Ownership is asserted alongside. A unit under `/etc/systemd/system/` is Audera's and overrides the
-    packaged one; a unit systemd loads from `/usr/lib/` is apt's, and a file Audera wrote there would be
-    replaced by the next upgrade with nothing reporting the loss. `FragmentPath` distinguishes the two.
+    A unit under `/etc/systemd/system/` is Audera's and overrides the packaged one; a unit systemd loads
+    from `/usr/lib/` is apt's, and a file Audera wrote there would be replaced by the next upgrade with
+    nothing reporting the loss. `FragmentPath` distinguishes the two.
     """
     state = unit_state(unit)
     assert state['LoadState'] == 'loaded', f'{unit} did not load: {state}'
@@ -172,10 +170,10 @@ def test_provisioning_installs_a_unit_systemd_can_load(unit: str):
 def test_infrastructure_is_enabled_and_running(unit: str):
     """Infrastructure units are both enabled and started, unconditionally.
 
-    Derived from the writer rather than listed, so the set is whatever provisioning installs and no source
-    claims, the definition `os/dietpi/AGENTS.md` uses. A unit added to `write_streamer_units` for a source
-    without being added to `CATALOG` therefore lands in this parameterization and is asserted running, which
-    a source unit is not.
+    Derived from the writer rather than listed, so the set is whatever provisioning installs and no
+    source claims, the definition `os/dietpi/AGENTS.md` uses. A unit added to `write_streamer_units` for
+    a source without being added to `CATALOG` therefore lands here and is asserted running, which a
+    source unit is not.
     """
     state = unit_state(unit)
     assert state['UnitFileState'] == 'enabled', f'{unit} was not enabled: {state}'
@@ -186,20 +184,19 @@ def test_infrastructure_is_enabled_and_running(unit: str):
 def test_the_provisioned_unit_state_mirrors_default_enabled(source):
     """With nothing recorded, the provisioned unit state mirrors `dal.sources.DEFAULT_ENABLED`.
 
-    `DEFAULT_ENABLED` is the enabled set a device with no `sources.json` behaves as, and provisioning has to
-    put systemd in the state that set implies: enabled and started for a source in it, installed and
+    `DEFAULT_ENABLED` is the enabled set a device with no `sources.json` behaves as, and provisioning has
+    to put systemd in the state that set implies: enabled and started for a source in it, installed and
     explicitly disabled for one out of it. `activate_streamer_units` names no source, so this is the
-    bootstrap default reaching systemd through `audera streamer units`, which is the same fallback
-    `get_enabled()` hands the conf.
+    bootstrap default reaching systemd through `audera streamer units`, the same fallback `get_enabled()`
+    hands the conf.
 
-    Both directions of a break are silent. A source in the enabled set whose units are left disabled ships
-    a `snapserver.conf` naming a stream no backend feeds, and the Sources tab reports it enabled because it
-    reads the enabled set rather than the unit. A source out of the set whose units are left running ships a
-    backend competing for a port with nothing in the conf naming it.
+    Both directions of a break are silent. A source in the enabled set whose units are left disabled
+    ships a `snapserver.conf` naming a stream no backend feeds, and the Sources tab reports it enabled
+    because it reads the enabled set rather than the unit. A source out of the set whose units are left
+    running ships a backend competing for a port with nothing in the conf naming it.
 
-    Parameterized over the sources that have units. Spotify has none by design, since Snapserver forks and
-    reaps its backend, so there is no unit state for it to mirror; `test_index.py` covers that path at the
-    fork, where it is observable.
+    Parameterized over the sources that have units. Spotify has none by design, since Snapserver forks
+    and reaps its backend; `test_index.py` covers that path at the fork.
     """
     enabled = source.id in sources_dal.DEFAULT_ENABLED
 
@@ -216,17 +213,17 @@ def test_the_provisioned_unit_state_mirrors_default_enabled(source):
 def test_provisioning_follows_a_recorded_enabled_set(recorded_home):
     """A reprovision leaves the operator's recorded sources running, rather than the bootstrap default.
 
-    `~/.audera/sources.json` survives a flash — `setup.sh` writes `/etc`, `/var/lib` and unit files only —
-    so a reprovision that rendered `DEFAULT_ENABLED` would strand a device whose operator runs PlexAmp: the
-    conf would name AirPlay, Snapserver would reassign every group to it at the first client connect, the
-    Sources tab would go on reporting PlexAmp enabled, and `plexamp` would be disabled, which the claim
-    probe reads as a device that needs claiming again.
+    `~/.audera/sources.json` survives a flash, since `setup.sh` writes `/etc`, `/var/lib` and unit files
+    only, so a reprovision that rendered `DEFAULT_ENABLED` would strand a device whose operator runs
+    PlexAmp: the conf would name AirPlay, Snapserver would reassign every group to it at the first client
+    connect, the Sources tab would go on reporting PlexAmp enabled, and `plexamp` would be disabled,
+    which the claim probe reads as a device that needs claiming again.
 
-    Both halves are asserted from one recorded set, because either alone is still a broken device: a conf
-    naming a stream whose backend is disabled is silence, and a running backend with nothing in the conf
-    naming it is a process no stream reads.
+    The conf and the unit state are asserted together, since either alone is still a broken device: a
+    stream whose backend is disabled plays nothing, and a running backend no conf names is a process no
+    stream reads.
 
-    AirPlay is asserted off in the same pass. `nqptp` is what a fresh flash leaves enabled, so a
+    AirPlay is asserted off in the same pass, because `nqptp` is what a fresh flash leaves enabled and a
     provisioning step that only ever added would pass on the enabled half while leaving the previous
     image's sources running.
     """
@@ -248,12 +245,11 @@ def test_provisioning_follows_a_recorded_enabled_set(recorded_home):
 
 
 def test_provisioning_seeds_no_enabled_set():
-    """The absent `sources.json` that keeps the data-access layer and the rendered conf in agreement.
+    """Provisioning records no enabled set, so `sources.json` is still absent afterwards.
 
-    `setup.sh` writes `/etc/*`, `/var/lib/*` and unit files only, which is what makes the mirror above
-    coherent: with no file to seed, `get_enabled()` degrades to `DEFAULT_ENABLED`, the same constant the conf
-    was rendered from and the same one the units were moved to match, so three layers agree without any
-    Audera code having run.
+    `setup.sh` writes `/etc/*`, `/var/lib/*` and unit files only. With no file to seed, `get_enabled()`
+    degrades to `DEFAULT_ENABLED`, the same constant the conf was rendered from and the units were moved
+    to match.
 
     Seeding the file would break `index.adopt_running_sources`, which tells an unrecorded device from one
     whose operator chose exactly `DEFAULT_ENABLED` by the file's absence alone.
@@ -277,13 +273,13 @@ def test_the_unquoted_heredocs_still_interpolate_after_the_extraction(unit: str,
     into locals, and a quoting mistake made during that move writes a unit containing the literal
     `$snapserver_home`.
 
-    systemd loads such a unit without complaint, since it is valid syntax, and the failure surfaces as a
-    snapserver that starts and immediately exits for want of a config file at a path named
-    `$snapserver_config`, one journal line on a device nobody is watching during a flash.
+    systemd loads such a unit without complaint, since it is valid syntax, and the failure surfaces only in
+    the journal, as a snapserver that starts and immediately exits for want of a config file at a path
+    named `$snapserver_config`.
 
-    Asserting the values are present is not enough on its own, since a unit could carry both the expanded
-    value and an unexpanded reference. No `$` may survive anywhere in these two files, which they satisfy
-    today: neither carries an environment variable reference or a comment containing one.
+    Presence of the values is not sufficient on its own, since a unit could carry both the expanded value
+    and an unexpanded reference, so no `$` may survive anywhere in these two files. Neither carries an
+    environment variable reference or a comment containing one today.
     """
     text = _unit_text(unit)
 
@@ -295,23 +291,18 @@ def test_the_unquoted_heredocs_still_interpolate_after_the_extraction(unit: str,
 def test_plexamps_heredoc_keeps_the_shell_it_must_not_expand():
     """The quoted heredoc keeps the shell it must not expand.
 
-    `plexamp.service`'s `ExecStartPre` retries a DNS lookup for `plex.tv` thirty times, and the loop that
-    does it has to reach the unit file as text: `$(seq 1 30)` is for the shell systemd starts rather than for
-    the shell that wrote the file. Its heredoc is therefore `<<'EOF'` while the two above it are not.
+    `plexamp.service`'s `ExecStartPre` retries a DNS lookup for `plex.tv` thirty times, and `$(seq 1 30)`
+    has to reach the unit file as text, for the shell systemd starts rather than for the shell that wrote
+    the file. Its heredoc is therefore `<<'EOF'` while the two above it are not.
 
     Unquoted, the writer runs `seq` at flash time and pastes its thirty newline-separated lines into the
     unit, so `ExecStartPre=` ends at `for i in 1` and the remaining twenty-nine become directives named `2`
     through `30`. Measured: systemd rejects that with `LoadState=bad-setting`, but only in the journal.
     `activate_streamer_units` disables `plexamp`, and `disable` on an unparseable unit still exits zero, so
-    the flash completes clean and the fault surfaces later as a claim flow that never leaves
-    `setup required`.
+    the flash completes clean and the fault surfaces later as a claim flow stuck at `setup required`.
 
-    `$i` is not asserted despite being the obvious partner literal, because the loop body never references
-    the variable and there is no `$i` in the unit to survive.
-
-    Both directions are asserted: the substitution is present, and the text `seq` would have produced is
-    not. The manager's own parse is asserted beside the file's bytes, since the parse decides what the shell
-    receives; systemd splits `ExecStartPre` into argv, and the literal has to survive that split intact.
+    Both the file's bytes and the manager's parse are asserted, since the parse decides what the shell
+    receives: systemd splits `ExecStartPre` into argv and the literal has to survive that split intact.
     """
     text = _unit_text('plexamp')
     assert '$(seq 1 30)' in text, f'the retry loop was expanded when the unit was written: {text}'
@@ -332,12 +323,11 @@ def test_the_mdns_helper_the_unit_names_is_installed_and_executable():
 
     `write_plexamp_mdns_helper` moved into the library with the units because
     `index._enable_source(PlexAmp)` runs `enable --now plexamp-mdns`, and a host carrying the unit but not
-    its `ExecStart` target fails the step this lane drives: the unit starts,
-    `/usr/local/bin/plexamp-mdns.sh` is not there, systemd reports `status=203/EXEC`, and `plexamp.local` is
-    never published.
+    its `ExecStart` target fails that step: the unit starts, `/usr/local/bin/plexamp-mdns.sh` is not there,
+    systemd reports `status=203/EXEC`, and `plexamp.local` is never published.
 
     The path is read out of the unit rather than restated, since a helper installed somewhere the unit does
-    not name is the same failure as no helper at all.
+    not name fails the same way as no helper at all.
     """
     exec_start = unit_state('plexamp-mdns')['ExecStart']
     assert _MDNS_HELPER in exec_start, f'the unit names a different helper: {exec_start}'
@@ -351,8 +341,8 @@ def test_nqptps_stop_budget_is_a_drop_in_apt_cannot_replace():
 
     `nqptp` needs the same stop budget as the units Audera writes: toggling AirPlay off is
     `systemctl disable --now nqptp` through the seam, so it is the one unit whose stop an operator triggers
-    directly. Its unit file belongs to DietPi's `shairport-sync-airplay2` package, and apt replaces the files
-    it owns, so a budget written into the unit would be one upgrade away from being gone.
+    directly. Its unit file belongs to DietPi's `shairport-sync-airplay2` package, and apt replaces the
+    files it owns, so a budget written into the unit would be lost at the next upgrade.
 
     Both halves are asserted: the drop-in is where `write_streamer_units` writes it, and there is no
     `/etc/systemd/system/nqptp.service` beside it. `test_index.py` asserts the value systemd ends up with;

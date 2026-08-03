@@ -1,14 +1,13 @@
 """What the systemd seam's arguments produce, read off the real manager.
 
 Runs inside the privileged systemd container, and it is the only coverage `audera.services.system`
-has. The seam's whole purpose is effect, so a test that patched `subprocess.run` and compared the
-argv would assert the seam calls itself the way it calls itself; `tests/services/test_platform.py`
-keeps the one claim that needs no manager, the `@platform.requires('dietpi')` gate that stops any of
-this running on a developer's machine.
+has. The seam exists for its effects, so a test that patched `subprocess.run` and compared the argv
+would assert nothing; `tests/services/test_platform.py` keeps the one claim that needs no manager,
+the `@platform.requires('dietpi')` gate that stops any of this running on a developer's machine.
 
-The effects: that `start` and `stop` move the unit's state and reap its process, that `is_active`
-answers False for the two failure shapes systemd exits non-zero for, that a failed unit's reason is
-logged rather than swallowed, and that `daemon-reload` is what makes a drop-in take effect.
+Covers that `start` and `stop` move the unit's state and reap its process, that `is_active` answers
+False for the two failure shapes systemd exits non-zero for, that a failed unit's reason is logged
+rather than swallowed, and that `daemon-reload` is what makes a drop-in take effect.
 
 The units are the container's own stubs from `/usr/lib/systemd/system/` rather than anything
 provisioning writes, which keeps this module independent of the order the driver runs the others in:
@@ -28,9 +27,9 @@ from tests.systemd.inside.conftest import await_no_new_zombies, await_pids, stil
 # timeout is.
 IDLE_UNIT = 'avahi-daemon'
 
-# `Type=oneshot`, `ExecStart=/bin/false`, `Restart=no`, so it settles in `failed` and stays there. The
-# seam's `CalledProcessError` path is driven by systemd refusing the job on its own terms rather than
-# by a stub raising on command.
+# `Type=oneshot`, `ExecStart=/bin/false`, `Restart=no`, so it settles in `failed` and stays there,
+# which drives the seam's `CalledProcessError` path off systemd rather than off a stub raising on
+# command.
 FAILING_UNIT = 'audera-test-failing'
 
 UNIT_DIR = Path('/etc/systemd/system')
@@ -40,9 +39,9 @@ UNIT_DIR = Path('/etc/systemd/system')
 def idle_unit():
     """Yields `IDLE_UNIT` inactive, and leaves it inactive.
 
-    Normalised before the test as well as after it. `plexamp-mdns.service` declares
-    `Requires=avahi-daemon.service`, so another module in this container may have started it, and
-    `start` against an already-active unit is a no-op that would make the state assertions vacuous.
+    Normalised before the test as well as after it: `plexamp-mdns.service` declares
+    `Requires=avahi-daemon.service`, so another module may have started it, and `start` against an
+    already-active unit is a no-op that would make the state assertions vacuous.
     """
     subprocess.run(['systemctl', 'stop', IDLE_UNIT], capture_output=True, timeout=15, check=False)
     subprocess.run(['systemctl', 'reset-failed', IDLE_UNIT], capture_output=True, timeout=15, check=False)
@@ -57,9 +56,8 @@ def idle_unit():
 def failing_unit():
     """Yields `FAILING_UNIT`, and clears its failed state afterwards.
 
-    A unit left `failed` keeps the manager `degraded`, and `tests/systemd/inside/test_platform.py`
-    accepts `degraded` only because `systemd-modules-load` cannot load modules in a container. Leaving
-    more failures behind would make that allowance cover this module's litter too.
+    A unit left `failed` keeps the manager `degraded`, which `tests/systemd/inside/test_platform.py`
+    accepts only because `systemd-modules-load` cannot load modules in a container.
     """
     yield FAILING_UNIT
 
@@ -69,7 +67,7 @@ def failing_unit():
 def test_start_and_stop_move_the_units_state(idle_unit):
     """`start` and `stop` move the unit through the manager's own state.
 
-    `ActiveState`, `SubState` and `MainPID` together, because each alone is satisfiable without the
+    `ActiveState`, `SubState` and `MainPID` together, since each alone is satisfiable without the
     others: a unit can be `active` with no process if its type is wrong, and a live pid says nothing
     about what the manager believes it is supervising.
     """
@@ -99,11 +97,11 @@ def test_stop_leaves_no_process_and_no_zombie(idle_unit):
     matched, re-read after the stop.
 
     The snapshot is taken with `await_pids` rather than `pids_for`, since `start` returns once systemd
-    has forked and the command line is not readable yet. The stop side is not polled, because `stop`
+    has forked and the command line is not readable yet. The stop side is not polled, since `stop`
     waits for the process to die and a retry there would paper over the leak this asserts.
 
     Zombies are snapshotted rather than filtered because `comm` is capped at fifteen characters and a
-    defunct process has no command line left; the difference from a snapshot cannot be truncated away.
+    defunct process has no command line left.
     """
     system.systemctl('start', idle_unit)
 
@@ -121,8 +119,8 @@ def test_stop_leaves_no_process_and_no_zombie(idle_unit):
 def test_is_active_is_false_for_an_unknown_unit():
     """`systemctl is-active` exits 4 for a unit that does not exist.
 
-    Four rather than the three a stopped unit exits, and `is_active` must not distinguish them.
-    `_plexamp_state` and the Sources tab both read this as "not running", and an unknown unit is a
+    Four rather than the three a stopped unit exits, and `is_active` must not distinguish them:
+    `_plexamp_state` and the Sources tab both read either as "not running", and an unknown unit is a
     provisioning fault that surfaces where the unit is written. Pinned against the real manager because
     the exit status is systemd's.
     """
@@ -134,11 +132,10 @@ def test_is_active_is_false_for_an_unknown_unit():
 
 
 def test_is_active_is_false_for_a_genuinely_failed_unit(failing_unit):
-    """The `failed` branch, produced by systemd rather than fed in as a string.
+    """`is_active` reads `failed` as False, against a unit systemd really failed.
 
-    `is_active` reads `failed` as False, and a test that patched `systemctl is-active` to print it
-    would pin the comparison rather than that systemd emits that word for this state. Here the unit
-    really fails and the string comes from the manager.
+    A test that patched `systemctl is-active` to print `failed` would pin the comparison rather than
+    that systemd emits that word for this state.
     """
     with pytest.raises(subprocess.CalledProcessError):
         system.systemctl('start', failing_unit)
@@ -148,11 +145,12 @@ def test_is_active_is_false_for_a_genuinely_failed_unit(failing_unit):
 
 
 def test_a_failed_unit_logs_systemds_own_reason(failing_unit, caplog):
-    """Output is captured, so the reason reaches the log only if the seam writes it there.
+    """The seam logs systemd's own reason before re-raising.
 
     `CalledProcessError.__str__` carries the argv and the exit status and never `stderr`, so a caller
-    that renders the exception shows "returned non-zero exit status 1" and no cause. What the seam logs
-    has to be systemd's own line, including the `journalctl -xeu` pointer.
+    that renders the exception shows "returned non-zero exit status 1" and no cause. Output is
+    captured, so the reason reaches the log only if the seam writes it there, including the
+    `journalctl -xeu` pointer.
     """
     with caplog.at_level('ERROR'), pytest.raises(subprocess.CalledProcessError):
         system.systemctl('start', failing_unit)
@@ -163,10 +161,10 @@ def test_a_failed_unit_logs_systemds_own_reason(failing_unit, caplog):
 
 
 def test_check_false_returns_the_returncode_and_stdout_contract(failing_unit):
-    """The contract `services/ap.py` is slated to migrate onto, against a real non-zero exit.
+    """`check=False` returns a readable `returncode` and `stdout` instead of raising.
 
-    `ap.py` still shells out to `systemctl` itself and branches on `returncode`, so it needs a status it
-    can read and output it can parse, from a call that did not raise.
+    This is the contract `services/ap.py` is slated to migrate onto: it still shells out to `systemctl`
+    itself and branches on `returncode`.
     """
     with pytest.raises(subprocess.CalledProcessError):
         system.systemctl('start', failing_unit)
@@ -182,14 +180,14 @@ def test_a_drop_in_is_inert_until_daemon_reload(idle_unit):
 
     Every writer in Audera (`write_streamer_units`, `_restart_plexamp_with_claim`,
     `_remove_claim_override`) writes a file and then reloads, and off a real manager that reload is
-    indistinguishable from a no-op. Here dropping it has a consequence: the drop-in is on disk, systemd's answer for the property
-    it sets is unchanged, and only the reload moves it.
+    indistinguishable from a no-op. Here the drop-in is on disk, systemd's answer for the property it
+    sets is unchanged, and only the reload moves it.
 
     The unit has to be running for the reload to be observable. Systemd garbage-collects an inactive
-    unit nothing references, so it reloads from disk the next time anything asks about it, and a drop-in
-    written against a stopped unit appears to take effect with no reload at all. An active unit is
-    pinned in memory, which is the state every writer in Audera targets: `plexamp` is running when the
-    claim drop-in is written, and the streamer units are running when provisioning rewrites them.
+    unit nothing references, so it reloads from disk the next time anything asks about it and a drop-in
+    written against a stopped unit appears to take effect with no reload. An active unit is pinned in
+    memory, which is the state every writer in Audera targets: `plexamp` is running when the claim
+    drop-in is written, and the streamer units are running when provisioning rewrites them.
 
     `TimeoutStopSec` is the property under the drop-in because it is the one the timeout fix uses, and
     the manager's default for it is a value nothing else in this container sets.
@@ -213,9 +211,8 @@ def test_a_drop_in_is_inert_until_daemon_reload(idle_unit):
         assert unit_state(idle_unit)['TimeoutStopUSec'] == '3s'
         assert str(drop_in) in unit_state(idle_unit)['DropInPaths']
     finally:
-        # `test_platform.py` asserts this directory is empty of Audera units. A drop-in left here would
-        # not break that assertion, which globs `*.service`, but it would change the stop timeout for
-        # every module the driver runs after this one.
+        # A drop-in left here would not break `test_platform.py`'s assertion, which globs `*.service`,
+        # but it would change the stop timeout for every module the driver runs after this one.
         drop_in.unlink(missing_ok=True)
         if drop_in_dir.is_dir():
             drop_in_dir.rmdir()

@@ -1,9 +1,8 @@
 FROM debian:trixie-slim
 
-# Real systemd as PID 1. `systemctl enable --now` and `disable --now` have no observable effect
-# without a running manager, so the rest of the suite can only pin the seam's argv. The code under
-# test runs in here and a host-side driver `docker exec`s it, because a job-level `container:` on a
-# hosted runner overrides the entrypoint and systemd would never be PID 1.
+# Real systemd as PID 1, so `enable --now` and `disable --now` have observable effects. The code
+# under test runs in here and a host-side driver `docker exec`s it; a job-level `container:` on a
+# hosted runner overrides the entrypoint, which would keep systemd from being PID 1.
 ENV container=docker
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -12,14 +11,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 # `camilladsp-plot` git dependency, and `gcc`/`libc6-dev` because `netifaces` is sdist-only and
 # compiles at install time.
 #
-# `iproute2` is absent, so there is no `ss` in here. Probe a port with a Python socket connect, as
-# `_plex._plexamp_state` does; adding the package would give the tests a probe the code under test
-# does not have.
+# `iproute2` is deliberately absent, so there is no `ss`. Probe a port with a Python socket connect,
+# as `_plex._plexamp_state` does; the package would give the tests a probe the code under test does
+# not have.
 #
 # `snapserver=0.31.0-1` is what the device runs, as in `tests/docker/snapserver/Dockerfile`. The
 # behaviours under test here (`default_source` reassignment, backends re-forked on stdout EOF) are
-# version-specific, so an unpinned image would assert against a version the device does not run.
-# `snapclient` is pinned to the same version and moved aside below; the unit still runs a stub.
+# version-specific. `snapclient` is pinned to the same version and moved aside below; the unit still
+# runs a stub.
 RUN apt-get update -qq \
     && apt-get install -y \
        --no-install-recommends \
@@ -31,45 +30,43 @@ RUN apt-get update -qq \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The Debian package enables its own `snapserver.service` in `postinst`, which would start a
-# snapserver from the packaged conf at container boot, before provisioning writes Audera's unit
-# over it. The symlink is what `enable` means, so removing it disables the unit;
-# `streamer.sh`'s `activate_streamer_units()` recreates it.
+# snapserver from the packaged conf at container boot, before provisioning writes Audera's unit over
+# it. Removing the symlink disables the unit; `streamer.sh`'s `activate_streamer_units()` recreates
+# it.
 RUN rm -f /etc/systemd/system/multi-user.target.wants/snapserver.service
 
-# The real snapclient is moved off the path `snapclient.service` names, so the unit provisioning
-# writes still gets the idle stub copied below. Only `tests/systemd/inside/conftest.py`'s
-# `listening_player` runs this binary, and it runs it directly rather than under a unit.
+# The real snapclient is moved off the path `snapclient.service` names, so the provisioned unit gets
+# the idle stub copied below. Only `tests/systemd/inside/conftest.py`'s `listening_player` runs this
+# binary, directly rather than under a unit.
 #
-# The package's own unit is deleted along with its symlink, for the same reason snapserver's symlink
-# goes above: `/usr/lib/systemd/system/snapclient.service` would answer `systemctl show` for a unit
+# The package's own unit is deleted along with its symlink: `/usr/lib/systemd/system/
+# snapclient.service` would answer `systemctl show` for a unit
 # `tests/systemd/inside/test_provisioning.py` removes and expects to read as `not-found`.
 RUN mv /usr/bin/snapclient /usr/local/bin/snapclient-real \
     && rm -f /usr/lib/systemd/system/snapclient.service \
              /etc/systemd/system/multi-user.target.wants/snapclient.service
 
 # `platform.NAME` is computed at import from this file, via `dotenv.load_dotenv`. A real file makes
-# the `@platform.requires('dietpi')` gate pass without the `platform.NAME` patch every other test
-# in the suite uses. The version numbers are arbitrary; the key names and the shape are DietPi's.
+# the `@platform.requires('dietpi')` gate pass without a patch. The version numbers are arbitrary;
+# the key names and the shape are DietPi's.
 COPY tests/docker/systemd/dietpi.version /boot/dietpi/.version
 
-# Units the device gets from apt rather than from Audera, so they must exist before provisioning
-# can enable them. `nqptp.service` ships inside DietPi's `shairport-sync-airplay2`, which is in a
-# DietPi-only repo; `avahi-daemon.service` is `plexamp-mdns.service`'s `Requires=`, and a missing
-# `Requires=` fails the start of the unit under test rather than the dependency. Both go in
-# `/usr/lib/systemd/system/`, where a package would put them, which keeps `/etc/systemd/system/`
-# exclusively Audera's and lets a drop-in override them.
+# Units the device gets from apt rather than from Audera, so they must exist before provisioning can
+# enable them. `nqptp.service` ships inside DietPi's `shairport-sync-airplay2`, from a DietPi-only
+# repo; `avahi-daemon.service` is `plexamp-mdns.service`'s `Requires=`, and a missing `Requires=`
+# fails the start of the unit under test. Both go in `/usr/lib/systemd/system/`, where a package
+# would put them, which keeps `/etc/systemd/system/` exclusively Audera's and lets a drop-in
+# override them.
 COPY tests/docker/systemd/nqptp.service /usr/lib/systemd/system/nqptp.service
 COPY tests/docker/systemd/avahi-daemon.service /usr/lib/systemd/system/avahi-daemon.service
 
-# A unit that fails on its own terms, so the seam's `CalledProcessError` path is driven by
-# systemd's refusal rather than by a stub raising on command.
+# A unit that fails on its own terms, so the seam's `CalledProcessError` path is driven by systemd's
+# refusal.
 COPY tests/docker/systemd/audera-test-failing.service /usr/lib/systemd/system/audera-test-failing.service
 
 # Stubs at the paths the catalog's URIs and the provisioned units already name, so neither is
-# rewritten for the container.
-#
-# The two shared with `tests/docker/snapserver/` are copied from there rather than duplicated, so
-# the two suites cannot drift apart on the same contract.
+# rewritten for the container. The two shared with `tests/docker/snapserver/` are copied from there
+# rather than duplicated.
 COPY tests/docker/snapserver/go-librespot-stub.sh /usr/local/bin/go-librespot
 COPY tests/docker/snapserver/shairport-sync-stub.sh /usr/local/bin/shairport-sync
 
@@ -81,8 +78,8 @@ COPY tests/docker/systemd/idle-stub.sh /usr/local/bin/avahi-publish
 COPY tests/docker/systemd/idle-stub.sh /usr/bin/snapclient
 COPY tests/docker/systemd/idle-stub.sh /usr/local/bin/camilladsp
 
-# `audera` is half a stub: `streamer start` idles, and every other verb runs the installed CLI,
-# which `activate_streamer_units` reads to decide the unit state. See the script.
+# `audera` is half a stub: `streamer start` idles, every other verb runs the installed CLI, which
+# `activate_streamer_units` reads to decide the unit state. See the script.
 COPY tests/docker/systemd/audera-stub.sh /usr/local/bin/audera
 
 # Swapped into a unit's `ExecStart` by drop-in for the wedged-backend test only. It ignores
@@ -97,9 +94,9 @@ RUN chmod +x \
       /usr/local/bin/camilladsp /usr/local/bin/audera \
       /usr/local/bin/stubborn-backend /usr/bin/node
 
-# `plexamp.service` declares `WorkingDirectory=/opt/plexamp` and names `js/index.js`. systemd
-# refuses to start a unit whose `WorkingDirectory` is missing, so the tree exists even though the
-# stub at `/usr/bin/node` never reads the script.
+# systemd refuses to start a unit whose `WorkingDirectory` is missing, and `plexamp.service`
+# declares `WorkingDirectory=/opt/plexamp`, so the tree exists even though the stub at
+# `/usr/bin/node` never reads the script.
 RUN mkdir -p /opt/plexamp/js && : > /opt/plexamp/js/index.js
 
 COPY --from=ghcr.io/astral-sh/uv:0.10.7 /uv /uvx /usr/local/bin/
@@ -108,16 +105,14 @@ ENV HOME=/root
 WORKDIR /app
 
 # Dependencies before source, so editing a test rebuilds the last two layers rather than
-# recompiling `netifaces` and re-cloning `camilladsp-plot`. A bind mount would skip that too, but
-# the repo lives on a mapped drive here, which Docker Desktop mounts unreliably.
+# recompiling `netifaces` and re-cloning `camilladsp-plot`. A bind mount is not used because the
+# repo lives on a mapped drive, which Docker Desktop mounts unreliably.
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --all-extras --no-install-project
 
-# The two `os/dietpi/lib/` files the streamer's `setup.sh` sources are copied because provisioning is
-# the fixture here: the image ships no Audera unit files, and the extracted shell functions install
-# them, so the repo holds a single description of a provisioned device. `streamer.sh` holds those
-# three functions and `common.sh` the `write_camilladsp_service` one of them calls. Named one by one
-# rather than copying `lib/`, which would pull in `config.sh` silently; see `.dockerignore`.
+# Provisioning is the fixture here: the image ships no Audera unit files, and the shell functions in
+# `streamer.sh` (plus `common.sh`'s `write_camilladsp_service`, which one of them calls) install
+# them. Named one by one rather than copying `lib/`, which would pull in `config.sh` silently.
 COPY audera ./audera
 COPY tests ./tests
 COPY os/dietpi/lib/common.sh ./os/dietpi/lib/common.sh
@@ -127,18 +122,16 @@ COPY os/dietpi/lib/streamer.sh ./os/dietpi/lib/streamer.sh
 # module scope, so the UI import fails outright against a venv that only has the dependencies.
 RUN uv sync --frozen --all-extras
 
-# The repo-root `.env` names a real streamer on the developer's LAN and `pydantic-settings` reads
-# it from the working directory at import. The root `.dockerignore` keeps it out of the context,
-# and an `ENV` beats a `.env` entry if one reaches the image anyway, so the tests' reads cannot
-# land on somebody's hardware.
+# The repo-root `.env` names a real streamer on the developer's LAN and `pydantic-settings` reads it
+# from the working directory at import. The root `.dockerignore` keeps it out of the context, and an
+# `ENV` beats a `.env` entry that reaches the image anyway.
 ENV AUDERA_SNAPSERVER_HOST=127.0.0.1
 ENV AUDERA_PLEXAMP_HOST=127.0.0.1
 ENV AUDERA_SERVER_HOST=127.0.0.1
 
-# Read by `tests/systemd/conftest.py`, which makes `inside/` uncollectable unless it is set, so a
-# bare `uv run pytest -m systemd` at the repo root is the driver and the workflow needs no path
-# arguments. `docker exec` inherits the container's environment, so this reaches the inner pytest
-# without the driver passing it.
+# Read by `tests/systemd/conftest.py`, which makes `inside/` uncollectable unless it is set, so
+# `uv run pytest -m systemd` at the repo root runs the driver only. `docker exec` inherits the
+# container's environment, so this reaches the inner pytest without the driver passing it.
 ENV AUDERA_IN_SYSTEMD_CONTAINER=1
 
 ENTRYPOINT ["/lib/systemd/systemd"]

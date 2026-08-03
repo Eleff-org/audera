@@ -1,7 +1,6 @@
 [Unit]
 # `plexamp-mdns.service` declares `Requires=avahi-daemon.service`, and systemd refuses to start a
-# unit whose `Requires=` names something it cannot load. Without this stub, enabling PlexAmp would
-# fail on the dependency rather than on the step under test.
+# unit whose `Requires=` names something it cannot load, so enabling PlexAmp needs this stub present.
 #
 # It publishes nothing. `plexamp-mdns.service`'s own ExecStart runs the real helper script, whose
 # `avahi-publish` is separately stubbed.

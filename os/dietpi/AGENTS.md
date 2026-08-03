@@ -12,7 +12,7 @@ The DietPi provisioning layer: everything that runs on the device rather than in
 
 ## What is CI-exercisable
 
-`lib/streamer.sh`'s three functions are CI-exercisable, and nothing else here is except `common.sh`'s `write_camilladsp_service`, which `write_streamer_units` calls. `write_plexamp_mdns_helper`, `write_streamer_units` and `activate_streamer_units` were extracted out of `streamer/automation/setup.sh` so that a container could call them. `tests/systemd/inside/` boots real systemd as PID 1 in a privileged container that ships **zero** Audera unit files, and its fixture provisions by invoking exactly those three functions with the arguments `setup.sh` passes, so a provisioned device has a single description in this repository. `tests/systemd/inside/test_provisioning.py` then reads the result back off the manager that loaded it. Run it with `uv run pytest -m systemd -v`, which is opt-in and requires Docker.
+`lib/streamer.sh`'s three functions (`write_plexamp_mdns_helper`, `write_streamer_units`, `activate_streamer_units`) are CI-exercisable, as is `common.sh`'s `write_camilladsp_service`, which `write_streamer_units` calls. Nothing else here is. `tests/systemd/inside/` boots real systemd as PID 1 in a privileged container that ships **zero** Audera unit files, and its fixture provisions by invoking exactly those three functions with the arguments `setup.sh` passes, so a provisioned device has a single description in this repository. `tests/systemd/inside/test_provisioning.py` reads the result back off the manager that loaded it. Run it with `uv run pytest -m systemd -v` (opt-in, requires Docker).
 
 That covers the artifacts and their systemd state: every unit loads and is owned by the right package, the unit state mirrors `DEFAULT_ENABLED`, the unquoted heredocs still interpolate and `plexamp.service`'s quoted one still does not, the `nqptp` drop-in is merged, the mDNS helper the unit names exists and is executable, and nothing seeds `~/.audera`. `tests/os/test_provisioning.py` adds host-side guards with no container: `bash -n` over every `*.sh` under `os/`, globbed rather than listed so a script added later is parsed too, the condition-context trap below, that `setup.sh` no longer writes units itself, that the three streamer-only writers are in `lib/streamer.sh` and named nowhere in the `common.sh` a player sources, and that each `setup.sh` `curl`s every library whose functions it calls.
 
@@ -26,13 +26,13 @@ Everything else is still verified by flashing a device and checking it by hand: 
 
 ## Traps
 
-1. Do not reformat the last three lines of `setup.sh` (`echo … Restarting` / `sleep 5` / `reboot`). `provision.sh`'s `SED_STRIP` deletes them textually, by regex, to implement `--no-reboot` and `--wipe-networks`, so re-indenting, re-quoting, or rewording them reboots a device the operator asked to keep running for inspection.
+1. Do not reformat the last three lines of `setup.sh` (`echo … Restarting` / `sleep 5` / `reboot`). `provision.sh`'s `SED_STRIP` deletes them by regex to implement `--no-reboot` and `--wipe-networks`, so re-indenting, re-quoting, or rewording them reboots a device the operator asked to keep running.
 2. The apt block ends with `apt-get clean && rm -rf /var/lib/apt/lists/*`. Any package added later in the file needs its own `apt-get update`, which costs a minute on a Pi Zero 2 W and adds a second failure point. Add to the single install at the top instead.
-3. Call `lib/`'s functions as bare commands, never in condition context. `set -e` is suppressed inside a function invoked as the condition of an `if`, a `while`, or the left operand of `&&`, so `if write_streamer_units; then` keeps a script running past unit writes that failed, where the inline heredocs it replaced aborted. The trap is invisible at the call site, so `tests/os/test_provisioning.py` asserts it.
+3. Call `lib/`'s functions as bare commands, never in condition context. `set -e` is suppressed inside a function invoked as the condition of an `if`, a `while`, or the left operand of `&&`, so `if write_streamer_units; then` keeps a script running past unit writes that failed. The trap is invisible at the call site, so `tests/os/test_provisioning.py` asserts it.
 
 ## Pinning policy
 
-Each pin below exists to hold behaviour fixed. Unpinning one does not cause a crash; the device behaves differently and nothing reports the change.
+Unpinning any of these does not crash; the device behaves differently and nothing reports the change.
 
 | Pin | Where | What breaks if unpinned |
 | :--- | :--- | :--- |
@@ -46,13 +46,13 @@ Each pin below exists to hold behaviour fixed. Unpinning one does not cause a cr
 
 `shairport-sync-airplay2` comes from DietPi's own repo, so `setup.sh` asserts `/etc/apt/sources.list.d/dietpi.list` exists before the apt block. Debian trixie ships `shairport-sync 4.3.7-1`, built without `--with-airplay-2`. That build carries the same version string, supports AirPlay 1 only, and nothing downstream reports the difference. `nqptp` needs no apt entry of its own, since it is bundled inside the same `.deb`.
 
-The packaged daemon must not run, because snapserver forks its own `/usr/local/bin/shairport-sync` for the `airplay://` source and a second instance competing for RTSP :7000 makes snapserver's fork bump its port and lose its metadata pipe, with audio still playing and nothing reporting the fault. The neutralization is three layers, each covering a case the others do not:
+The packaged daemon must not run: snapserver forks its own `/usr/local/bin/shairport-sync` for the `airplay://` source, and a second instance competing for RTSP :7000 makes snapserver's fork bump its port and lose its metadata pipe, with audio still playing and nothing reporting the fault. The neutralization is three layers, each covering a case the others do not:
 
 1. `systemctl disable --now shairport-sync` — the postinst already enabled *and started* it.
 2. `systemctl mask shairport-sync` — blocks manual starts and dependency-pulled starts.
 3. `apt-mark hold shairport-sync-airplay2` — the only layer that survives an upgrade. The postinst unmasks and then restarts, so `mask` alone is not durable, and the hold prevents the upgrade that would undo it.
 
-Masking the unit does not break AirPlay, because snapserver executes the binary directly as a child process and `mask` only redirects the unit to `/dev/null`. `nqptp` is left enabled and running. It is AirPlay's `units` entry and must own UDP 319/320 before snapserver forks.
+Masking the unit does not break AirPlay, because snapserver executes the binary directly as a child process and `mask` only redirects the unit to `/dev/null`. `nqptp` is left enabled and running: it is AirPlay's `units` entry and must own UDP 319/320 before snapserver forks.
 
 ## Snapserver's forked backends inherit an empty environment
 
@@ -62,21 +62,21 @@ go-librespot is one such backend. It computes `--config_dir`'s default by callin
 
 Snapserver reads `$HOME` too. `datadir` defaults to `/var/lib/snapserver/` for a daemonized process and to `$HOME/.config/snapserver/` for a foreground one, and this unit is foreground. `server.json` holds the state Audera does not store (player names, volumes, latencies, group membership, and each group's `stream_id`), so setting `$HOME` without pinning `datadir` starts snapserver from an empty state file with every player renamed back to its MAC. The rendered conf therefore states `datadir = /var/lib/snapserver/` outright, and `setup.sh` migrates a `server.json` found at either legacy path (`/root/.config/snapserver/`, from before there was a `$HOME`, and `/var/lib/snapserver/.config/snapserver/`, from after it but before `datadir` was pinned). The migration never overwrites an existing file at the pinned path.
 
-Anything in this unit's environment is shared by snapserver and every backend it forks. A variable added for one is read by the other, and nothing reports the effect.
+Anything in this unit's environment is shared by snapserver and every backend it forks; a variable added for one is read by the other.
 
-Snapcast respawns a failed backend with no backoff. `wd_timeout=0` disables only the watchdog; the respawn comes from the stream's stdout reaching EOF, and there is no delay on the retry. A backend that exits immediately is re-forked roughly ten times a second and never reaped. The visible symptom is an accumulation of `<defunct>` children and a journal filling at hundreds of lines a minute, ending in PID exhaustion, while the Sources tab reports the source enabled and healthy.
+Snapcast respawns a failed backend with no backoff. `wd_timeout=0` disables only the watchdog; the respawn comes from the stream's stdout reaching EOF, with no delay on the retry. A backend that exits immediately is re-forked roughly ten times a second and never reaped, accumulating `<defunct>` children and filling the journal until PID exhaustion, while the Sources tab reports the source enabled and healthy.
 
-A `process://` source therefore keeps `log_stderr=true`. A forked backend has no unit and so no `journalctl -u`, and snapserver's capture of its stderr is the only record on the host of why it failed.
+A `process://` source therefore keeps `log_stderr=true`: a forked backend has no unit and so no `journalctl -u`, so snapserver's capture of its stderr is the only record on the host of why it failed.
 
 ## Enable vs. start, and the recorded source set
 
 `enable` sets a unit to start at boot, and `start` runs it now. Infrastructure (`snapserver`, `snapclient`, `camilladsp`, `audera-streamer`) gets both unconditionally.
 
-A catalogued source's units follow what the operator recorded. `~/.audera/sources.json` survives a flash, since this script writes only `/etc/*`, `/var/lib/*`, and unit files, so `activate_streamer_units` asks `audera streamer units --disabled` and `--enabled`, disables the first list `--now`, then enables and starts the second. The conf is rendered from the same record. It names no source and no unit, so a reprovision leaves the operator's sources running instead of reverting them, and the streams Snapserver serves and the units feeding them come from one answer. `--now` on the disable is what stops a backend a previous image left running; without it the flash's reboot would be the only thing that did.
+A catalogued source's units follow what the operator recorded. `~/.audera/sources.json` survives a flash, since this script writes only `/etc/*`, `/var/lib/*`, and unit files, so `activate_streamer_units` asks `audera streamer units --disabled` and `--enabled`, disables the first list `--now`, then enables and starts the second. The conf is rendered from the same record, and the shell names no source and no unit, so a reprovision leaves the operator's sources running instead of reverting them. `--now` on the disable is what stops a backend a previous image left running.
 
-With no file — a freshly flashed device — `get_enabled()` falls back to `audera.dal.sources.DEFAULT_ENABLED`, today `('AirPlay',)`. `nqptp` is enabled and started; `plexamp` and `plexamp-mdns` are installed but explicitly disabled, so the Sources tab can turn them on later. That is a fallback rather than a mirror: changing `DEFAULT_ENABLED`, or reordering `CATALOG` such that a different source leads, needs no change to the shell.
+With no file, on a freshly flashed device, `get_enabled()` falls back to `audera.dal.sources.DEFAULT_ENABLED`, today `('AirPlay',)`: `nqptp` is enabled and started; `plexamp` and `plexamp-mdns` are installed but explicitly disabled, so the Sources tab can turn them on later. Changing `DEFAULT_ENABLED`, or reordering `CATALOG` such that a different source leads, needs no change to the shell.
 
-`test_the_provisioned_unit_state_mirrors_default_enabled` covers the unrecorded case and `test_provisioning_follows_a_recorded_enabled_set` the recorded one. Both directions of a break are silent on the device. A source in the enabled set left disabled ships a `snapserver.conf` naming a stream nothing feeds, and the Sources tab reports it enabled because it reads the enabled set rather than the unit. A source left running that the conf does not name ships a backend competing for a port for no reason.
+`test_the_provisioned_unit_state_mirrors_default_enabled` covers the unrecorded case and `test_provisioning_follows_a_recorded_enabled_set` the recorded one. Both directions of a break are silent on the device: a source in the enabled set left disabled ships a `snapserver.conf` naming a stream nothing feeds, and a source left running that the conf does not name ships a backend competing for a port for no reason.
 
 Three orderings matter:
 
@@ -90,4 +90,4 @@ Three orderings matter:
 
 Seeding it would break `index.adopt_running_sources`, whose only way to tell an unrecorded device from one whose operator chose exactly `DEFAULT_ENABLED` is the file's absence. `test_provisioning_seeds_no_enabled_set` pins that.
 
-It is also the reason provisioning reads the file rather than the constant. A reprovision of a device that has one leaves it untouched, and adoption cannot heal a divergence it opens: `adopt` refuses once a set is recorded. Provisioning that rendered `DEFAULT_ENABLED` over an operator's PlexAmp therefore stranded the device — every group reassigned to AirPlay at the first client connect, the Sources tab still reporting PlexAmp enabled, and `plexamp` disabled, which the claim probe reads as needing a claim again. The claim is why `sources.json` also carries `setup`: a completed claim is recorded there and outranks the live probe, so a reprovision that stops the unit does not re-ask for it.
+It is also why provisioning reads the file rather than the constant. A reprovision of a device that has one leaves it untouched, and adoption cannot heal a divergence it opens, since `adopt` refuses once a set is recorded. Provisioning that rendered `DEFAULT_ENABLED` over an operator's PlexAmp strands the device: every group reassigned to AirPlay at the first client connect, the Sources tab still reporting PlexAmp enabled, and `plexamp` disabled, which the claim probe reads as needing a claim again. That claim is why `sources.json` also carries `setup`: a completed claim is recorded there and outranks the live probe, so a reprovision that stops the unit does not re-ask for it.

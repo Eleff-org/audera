@@ -1,8 +1,7 @@
 """Tests that a multi-source rendered configuration boots snapserver.
 
-The stub source binaries in the image make `process://` and `airplay://` start. These tests cover
-conf acceptance and stream registration. go-librespot's Spotify session and shairport-sync's
-option table need the real binaries on real hardware and are out of scope here.
+The stub source binaries in the image make `process://` and `airplay://` start, so these tests
+cover conf acceptance and stream registration only, not backend behaviour.
 """
 
 import pytest
@@ -18,8 +17,7 @@ def client(snapserver_container_all_sources):
 
 
 def test_snapserver_boots_with_every_source_enabled(client):
-    # A conf snapserver rejects never serves JSON-RPC, so a successful call means the rendered
-    # conf booted.
+    # A conf snapserver rejects never serves JSON-RPC, so a successful call means it booted.
     assert 'server' in client.get_status()
 
 
@@ -30,8 +28,8 @@ def test_every_catalogued_source_registers_as_a_stream(client):
 
 
 def test_clients_land_on_the_default_source(client):
-    # Checks that `default_source` is an accepted key on the pinned 0.31.0 and that its value
-    # resolves to a real stream rather than mis-routing.
+    # `default_source` is an accepted key on the pinned 0.31.0 and its value resolves to a real
+    # stream.
     expected = default_source([source.id for source in CATALOG])
     groups = client.get_groups()
     assert groups
@@ -39,12 +37,12 @@ def test_clients_land_on_the_default_source(client):
 
 
 def test_set_group_stream_reassigns_a_group(client):
-    # The container is session-scoped, so the move is undone before returning. Leaving it applied
-    # would make `test_clients_land_on_the_default_source` depend on running first.
+    # The container is session-scoped, so the move is undone before returning; otherwise
+    # `test_clients_land_on_the_default_source` would depend on running first.
     group = client.get_groups()[0]
     original = group.stream_id
 
-    # Any stream the group is not already on; a move onto the current stream would assert nothing.
+    # Any stream the group is not already on.
     destination = next(source.id for source in CATALOG if source.id != original)
 
     try:

@@ -3,17 +3,15 @@
 Runs inside the privileged systemd container the package's `conftest.py` boots.
 
 Every probe here observes the host through `subprocess.run` rather than through
-`audera.services.system`. The seam is what these modules test, so a probe built on it could be made
-to agree with a broken one: a `systemctl` that silently no-ops would leave every assertion reading
-the same nothing it wrote. `stream_status` reads Snapserver over its own client, which is not the
-seam under test, so an assertion can be about the streams the server is serving rather than the
-streams the UI believes it is serving.
+`audera.services.system`, which is the seam these modules test: a `systemctl` that silently no-ops
+would leave every assertion reading the same nothing it wrote. `stream_status` reads Snapserver over
+its own client, so an assertion is about the streams the server is serving rather than the streams
+the UI believes it is serving.
 
 Leak probes read `systemctl` and `ps`, never `/sys/fs/cgroup`. Docker Desktop on WSL2 is cgroup v1
-and GitHub-hosted runners are v2, so every path under `/sys/fs/cgroup` differs between the machine
-these tests are written on and the machine that gates them. `TasksCurrent` is unused for the same
-reason, since it depends on the pids controller being delegated, which is not guaranteed identically
-across the two.
+and GitHub-hosted runners are v2, so every path under `/sys/fs/cgroup` differs between the two.
+`TasksCurrent` is unused for the same reason: it depends on the pids controller being delegated,
+which is not guaranteed identically across them.
 """
 
 import asyncio
@@ -37,8 +35,7 @@ from audera.ui.streamer.pages import index
 from audera.ui.streamer.pages._clients import _load_settings
 
 # The properties `unit_state` reads, as one `systemctl show` call. Named explicitly rather than
-# taking the full property dump, which is around two hundred lines per unit and would put most of a
-# unit's default configuration into every failure message.
+# taking the full property dump, which is around two hundred lines per unit.
 _PROPERTIES = (
     'LoadState',
     'ActiveState',
@@ -55,9 +52,9 @@ _PROPERTIES = (
     'ActiveEnterTimestampMonotonic',
     'Environment',
     'ExecStart',
-    # The start rate limit `toggle.apply`'s `reset-failed` clears. Read per-unit rather than
-    # manager-wide even when a unit states neither, because `systemctl show` resolves the inherited
-    # default into the unit's own answer, which is the value that decides whether a toggle is refused.
+    # The start rate limit `toggle.apply`'s `reset-failed` clears. Read per-unit even when a unit
+    # states neither, because `systemctl show` resolves the inherited default into the unit's own
+    # answer, which is the value that decides whether a toggle is refused.
     'StartLimitBurst',
     'StartLimitIntervalUSec',
 )
@@ -101,10 +98,9 @@ _UNIT_WRITE = re.compile(r'cat > /etc/systemd/system/(\S+)\.service <<')
 def _written_units(path: str) -> tuple[str, ...]:
     """Returns the units one library file installs, and refuses to return none.
 
-    Per file rather than over the union: the union is non-empty as soon as either file matches, so a
-    check on it would have passed the day `streamer.sh` was split out of `common.sh` with the
-    derivation still pointed at `common.sh` alone — five of six units silently unasserted, and every
-    parameterization below shrinking to one case without failing.
+    Per file rather than over the union, since the union is non-empty as soon as either file matches:
+    a check on it would have passed the day `streamer.sh` was split out of `common.sh` with the
+    derivation still pointed at `common.sh` alone, leaving five of six units unasserted.
     """
     units = tuple(_UNIT_WRITE.findall(Path(path).read_text(encoding='utf-8')))
     if not units:
@@ -115,18 +111,17 @@ def _written_units(path: str) -> tuple[str, ...]:
 WRITTEN_UNITS = tuple(unit for path in _UNIT_WRITERS for unit in _written_units(path))
 
 # A unit written by both files has two descriptions, and the parameterizations below would run it
-# twice and pass. That is what an extraction copied rather than moved looks like from in here.
+# twice and pass. That is what an extraction copied rather than moved looks like.
 if len(set(WRITTEN_UNITS)) != len(WRITTEN_UNITS):
     raise RuntimeError(f'a unit is written by more than one library file, so it has two descriptions: {WRITTEN_UNITS}')
 
-# Provisioning installs six units, enables five and starts five, each of which is a round trip to
-# the manager. Generous, because the failure this bounds is a wedged `systemctl`, and giving up early
-# would report that as an unprovisioned device.
+# Provisioning installs six units, enables five and starts five, each a round trip to the manager.
+# Generous, because the failure this bounds is a wedged `systemctl`.
 _PROVISION_TIMEOUT: float = 120
 
-# How long to let a restarted Snapserver take to answer before the fixture calls it a failure. The
-# handler under test has its own, shorter budget in `index._READY_TIMEOUT`, left at its real value;
-# this one only has to be long enough that a slow container is not reported as a broken Snapserver.
+# How long to let a restarted Snapserver take to answer. The handler under test has its own, shorter
+# budget in `index._READY_TIMEOUT`, left at its real value; this one only has to be long enough that a
+# slow container is not reported as a broken Snapserver.
 _SNAPSERVER_TIMEOUT: float = 60
 
 
@@ -134,8 +129,8 @@ def _run(*args: str) -> str:
     """Runs a probe command and returns its stdout, ignoring the exit status.
 
     Every probe here answers a question whose negative case exits non-zero (`pgrep` exits 1 when
-    nothing matches, `systemctl show` exits non-zero for an unknown unit), so the status carries no
-    information the output does not.
+    nothing matches, `systemctl show` exits non-zero for an unknown unit), so the status carries
+    nothing the output does not.
     """
     return subprocess.run(args, capture_output=True, text=True, timeout=_TIMEOUT, check=False).stdout
 
@@ -147,8 +142,8 @@ def unit_state(unit: str) -> dict[str, str]:
     values for the rest, so a caller can assert on the unknown case without branching.
 
     `LoadState` says nothing about whether a unit is enabled, because `systemctl show` *loads* the
-    unit in order to answer: it reads `loaded` for any unit whose file exists, including one this
-    probe is the first thing to touch. `UnitFileState` is the meaningful probe for enablement.
+    unit in order to answer and reads `loaded` for any unit whose file exists. `UnitFileState` is the
+    probe for enablement.
     """
     properties = {}
     for line in _run('systemctl', 'show', unit, *(f'--property={p}' for p in _PROPERTIES)).splitlines():
@@ -161,17 +156,15 @@ def unit_state(unit: str) -> dict[str, str]:
 def await_unit_state(unit: str, active_state: str, timeout: float = 2) -> dict[str, str]:
     """Polls `unit_state` until `ActiveState` reads `active_state`, and returns the last reading.
 
-    A `systemctl` verb's exit status is not a barrier for the properties `systemctl show` answers with.
-    A job the manager refuses returns as soon as it is refused, while the unit's transition into
-    `failed` and the `Result` that explains why land a moment afterwards, so a `show` on the line after
-    a refused `restart` can still read the state the unit was in before it. It was measured here as
-    `test_index.py`'s `_wedge_start_limit` intermittently reporting a unit that was refused but not yet
-    `failed`.
+    A `systemctl` verb's exit status is not a barrier for the properties `systemctl show` answers
+    with. A refused job returns as soon as it is refused, while the unit's transition into `failed`
+    and the `Result` that explains why land a moment afterwards, so a `show` on the next line can read
+    the state the unit was in before. Measured as `test_index.py`'s `_wedge_start_limit`
+    intermittently reporting a unit that was refused but not yet `failed`.
 
-    Returns whatever it last read at the deadline, so the caller's own assertion reports the state it
-    got rather than this reporting a timeout. The budget is short deliberately: every caller is inside
-    a window it is racing (the start limit's trailing interval), so a state that is simply wrong has to
-    fail before the window it would be asserted in has closed.
+    Returns whatever it last read at the deadline, so the caller's assertion reports the state it got
+    rather than a timeout. The budget is short because every caller is racing the start limit's
+    trailing interval, so a wrong state has to fail before that window closes.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -186,8 +179,7 @@ def pids_for(pattern: str) -> dict[int, str]:
 
     `pgrep -af`, so the pattern is matched against the full command line rather than against `comm`,
     which the kernel caps at fifteen characters. The units and the catalog URIs name a path, and
-    `still_alive` compares against the same, so matching the whole line keeps the probe and the thing
-    it is probing described the same way.
+    `still_alive` compares against the same.
     """
     pids = {}
     for line in _run('pgrep', '-af', pattern).splitlines():
@@ -202,13 +194,12 @@ def await_pids(pattern: str, timeout: float = 5) -> dict[int, str]:
 
     `systemctl start` is not a barrier for the process table. Every unit Audera writes is the default
     `Type=simple`, and systemd calls such a unit active as soon as it has forked, before the child has
-    reached `execve`, so `/proc/<pid>/cmdline` is briefly still systemd's rather than the command it is
-    about to become. A `pids_for` issued on the line after a `start` therefore matches nothing,
-    intermittently, on a fast machine.
+    reached `execve`, so `/proc/<pid>/cmdline` is briefly still systemd's. A `pids_for` issued on the
+    line after a `start` therefore matches nothing, intermittently, on a fast machine.
 
     Only the transition into running needs this. `stop` is a barrier, since systemd waits for the
-    process to die before completing the job, so `still_alive` after a stop needs no poll and giving it
-    one would hide the leak it exists to find.
+    process to die before completing the job, and polling `still_alive` after a stop would hide the
+    leak it exists to find.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -222,8 +213,7 @@ def still_alive(before: dict[int, str]) -> dict[int, str]:
     """Returns the subset of `before` that is still running the same command.
 
     The command is re-read because these tests restart Snapserver, which frees a burst of pids the next
-    fork may reuse; a liveness check alone would report a recycled pid as a leak. A pid that now names
-    something else is evidence the original exited.
+    fork may reuse, and a liveness check alone would report a recycled pid as a leak.
     """
     alive = {}
     for pid, cmdline in before.items():
@@ -242,11 +232,10 @@ def zombies_for(pattern: str = '') -> list[str]:
     failed backend around ten times a second while the Sources tab reported the source healthy.
 
     A zombie has no command line left to read, so `ps` renders it as `[comm] <defunct>`, where `comm`
-    is the fifteen characters the kernel kept (the script's own basename for the shebang stubs, rather
-    than the interpreter's). `pattern` therefore only matches against a name short enough to survive
-    the cap; passing no pattern and asserting on the difference from a snapshot cannot be fooled by
-    truncation. `ppid` is in the row because the parent identifies the failure: a zombie under
-    snapserver's MainPID is the reported failure, and one under pid 1 is systemd reaping.
+    is the fifteen characters the kernel kept. `pattern` therefore only matches a name short enough to
+    survive the cap; passing no pattern and asserting on the difference from a snapshot cannot be
+    fooled by truncation. `ppid` is in the row because the parent identifies the failure: a zombie
+    under snapserver's MainPID is the reported failure, and one under pid 1 is systemd reaping.
     """
     rows = []
     for line in _run('ps', '-eo', 'stat=,ppid=,args=').splitlines():
@@ -259,15 +248,13 @@ def await_no_new_zombies(before: list[str], timeout: float = 5) -> list[str]:
     """Returns the zombie rows not in `before` that are still zombies after settling.
 
     A zombie is not a leak until it persists, and the tests here create transient ones through no
-    fault of the code under test: a Snapserver restart kills the stub backends, and each of those is a
-    shell script whose own `dd` child is defunct for the moment between its death and its parent's
-    `wait`. Comparing two `zombies_for()` snapshots caught that `[dd] <defunct>` roughly one run in
-    four, attributed to whichever handler happened to be under test.
+    fault of the code under test: a Snapserver restart kills the stub backends, and each is a shell
+    script whose own `dd` child is defunct between its death and its parent's `wait`. Comparing two
+    `zombies_for()` snapshots caught that `[dd] <defunct>` roughly one run in four.
 
     Polling does not weaken the assertion, since the failure this is aimed at is unbounded:
     `os/dietpi/AGENTS.md` records snapserver re-forking a failed backend around ten times a second and
-    reaping none of them, so the set is never empty and never the same twice. A parent that will never
-    `wait` does not start doing so inside five seconds.
+    reaping none of them, so the set is never empty and never the same twice.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -280,9 +267,8 @@ def await_no_new_zombies(before: list[str], timeout: float = 5) -> list[str]:
 def ppid_of(pid: int) -> int:
     """Returns `pid`'s parent, or `0` if it is not running.
 
-    The parent distinguishes two outcomes. A backend under Snapserver's `MainPID` is one Snapserver
-    forked, which is what "no unit" means for the Spotify source; the same process under pid 1 has been
-    orphaned, a different failure with a different fix.
+    A backend under Snapserver's `MainPID` is one Snapserver forked, which is what "no unit" means for
+    the Spotify source; the same process under pid 1 has been orphaned.
     """
     value = _run('ps', '-p', str(pid), '-o', 'ppid=').strip()
     return int(value) if value.isdigit() else 0
@@ -295,8 +281,8 @@ def process_tree(pid: int) -> dict[int, str]:
     the same set from the process table, which is identical under cgroup v1 and v2.
 
     A pattern match cannot stand in: `plexamp.service` starts `/bin/bash -c '… exec /usr/bin/node …'`,
-    so its `ExecStart` path is an interpreter half the container shares, while the process that would
-    leak is the node beneath it.
+    so its `ExecStart` path is an interpreter half the container shares, while the process that leaks
+    is the node beneath it.
     """
     commands: dict[int, str] = {}
     children: dict[int, list[int]] = {}
@@ -326,8 +312,8 @@ def await_process_tree(pid: int, timeout: float = 5) -> dict[int, str]:
     a moment and its payload a moment later. Snapshotting the tree of one and then asserting nothing
     survived the stop would say nothing about the process that matters.
 
-    Settling rather than counting, since the expected size is the unit's own business. Two consecutive
-    identical reads needs no per-unit expectation and is immediate for a unit that forks nothing.
+    Settles on two consecutive identical reads rather than counting, which needs no per-unit expected
+    size and is immediate for a unit that forks nothing.
     """
     deadline = time.monotonic() + timeout
     previous: dict[int, str] = {}
@@ -344,8 +330,8 @@ def await_process_tree(pid: int, timeout: float = 5) -> dict[int, str]:
 def stream_status() -> dict[str, str]:
     """Returns Snapserver's own status word per stream id, or `{}` when it is unreachable.
 
-    `index._stream_status` reads the same thing through `page.settings`, and the tests do not call it:
-    the assertion is about what the server is serving, so it must not be routed through the module
+    `index._stream_status` reads the same thing through `page.settings`, and the tests do not call it,
+    since the assertion is about what the server is serving and must not be routed through the module
     whose ordering is under test.
     """
     try:
@@ -367,11 +353,9 @@ def await_stream_status(timeout: float = _SNAPSERVER_TIMEOUT) -> dict[str, str]:
 def groups() -> list[Group]:
     """Returns Snapserver's own groups, or `[]` when it is unreachable.
 
-    `stream_status`' counterpart for the other half of the ownership split: Audera owns which sources
-    run, and Snapcast owns which stream a group listens to, persisted in its own `server.json`. A test
-    asserting where a listener ended up therefore has to ask the server, and asking it through
-    `index._reassign_groups`' own client would let a reassignment that never happened agree with a read
-    that never happened either.
+    `stream_status`' counterpart for the other half of the ownership split: Snapcast owns which stream
+    a group listens to, persisted in its own `server.json`, so a test asserting where a listener ended
+    up has to ask the server rather than `index._reassign_groups`' own client.
     """
     try:
         return SnapserverClient(host='127.0.0.1', port=audera.SNAPSERVER_PORT).get_groups()
@@ -382,9 +366,8 @@ def groups() -> list[Group]:
 def assign_group(group_id: str, stream_id: str) -> None:
     """Puts `group_id` on `stream_id`, as the Players tab's move control does.
 
-    Setup rather than a probe, and the one place here that writes through the same client the code
-    under test uses. A caller seeds and then reads back through `await_settled_group`, so a write that
-    did not land fails the seed instead of the assertion the test is about.
+    Setup rather than a probe. A caller seeds and then reads back through `await_settled_group`, so a
+    write that did not land fails the seed instead of the assertion the test is about.
     """
     SnapserverClient(host='127.0.0.1', port=audera.SNAPSERVER_PORT).set_group_stream(group_id, stream_id)
 
@@ -394,9 +377,8 @@ def await_settled_group(group_id: str, timeout: float = _SNAPSERVER_TIMEOUT) -> 
 
     Read at a settled point rather than immediately, because the reassignment Snapserver performs for
     itself happens at *client connect* (`catalog.py`'s rule 3): a group whose stream the conf no longer
-    provides keeps that stream in `server.json` until a client reconnects and is moved to
-    `default_source`. Every toggle restarts Snapserver, so a read taken before the client is back can
-    see the pre-restart value.
+    provides keeps that stream in `server.json` until a client reconnects. Every toggle restarts
+    Snapserver, so a read taken before the client is back can see the pre-restart value.
 
     Returns whatever it last saw when the deadline passes, so the assertion reports the stream rather
     than a timeout.
@@ -430,8 +412,8 @@ def sampling_main_pid(unit: str, interval: float = 0.01) -> Iterator[list[int]]:
     `test_a_second_toggle_waits_for_the_first` needs to distinguish two serialized choreographies from
     two that collapsed into one restart.
 
-    Zeros are dropped: `MainPID` reads `0` in the window between a unit's stop and its start, so keeping
-    them would make the sequence's length a function of how often the sampler landed mid-restart.
+    Zeros are dropped: `MainPID` reads `0` between a unit's stop and its start, so keeping them would
+    make the sequence's length a function of how often the sampler landed mid-restart.
 
     The interval has to stay well under the life of one Snapserver instance, which is a restart plus
     `index._await_snapserver`'s first successful poll, hundreds of milliseconds. `systemctl show` paces
@@ -463,22 +445,20 @@ def provision(home: str | None = None) -> None:
 
     The image ships no Audera unit file, so everything the modules here assert on is installed by the
     device's own `os/dietpi/lib/streamer.sh`, invoked with the arguments
-    `os/dietpi/streamer/automation/setup.sh` passes it. The repository therefore holds one description
-    of a provisioned device, the device's.
+    `os/dietpi/streamer/automation/setup.sh` passes it.
 
     `common.sh` is sourced alongside it, as `setup.sh` sources both: `write_streamer_units` calls its
-    `write_camilladsp_service`, which the player's setup calls too and which therefore stayed behind.
+    `write_camilladsp_service`, which the player's setup calls too.
 
     Three things happen in Python instead, since on the device they are `audera streamer conf`
     redirects rather than shell functions: the two configuration directories, the rendered
     `snapserver.conf`, and the rendered go-librespot and CamillaDSP configurations. The Snapserver
-    configuration is rendered from `get_enabled()`, which is what the CLI the device redirects renders
-    from, so the conf follows a recorded set here for the same reason it does there.
+    configuration is rendered from `get_enabled()`, as the CLI the device redirects renders it.
 
     Nothing writes `sources.json`, matching the device's behaviour: `get_enabled()` degrades an absent
-    file to `DEFAULT_ENABLED`, which keeps the enabled set and the conf provisioning just wrote in
-    agreement with no file to seed. A test that toggles a source creates the file itself, under the
-    `audera_home` the fixture points the data-access layer at.
+    file to `DEFAULT_ENABLED`, which keeps the enabled set and the conf in agreement with no file to
+    seed. A test that toggles a source creates the file itself, under the `audera_home` the fixture
+    points the data-access layer at.
 
     The three shell functions are invoked as bare commands, as `setup.sh` invokes them. `set -e` is
     suppressed inside a function called in condition context, so wrapping one in
@@ -524,26 +504,23 @@ def provision(home: str | None = None) -> None:
 def provisioned(audera_home) -> Iterator[None]:
     """Re-provisions the container, so each test starts from a freshly flashed device.
 
-    Not autouse in this `conftest.py`. `tests/systemd/inside/test_platform.py` asserts that
-    `/etc/systemd/system/` ships no Audera unit, so an autouse fixture here would write the units that
-    test exists to prove are absent. A module that wants this state says so with
-    `pytestmark = pytest.mark.usefixtures('provisioned')`.
+    Not autouse. `tests/systemd/inside/test_platform.py` asserts that `/etc/systemd/system/` ships no
+    Audera unit, so an autouse fixture here would write the units that test exists to prove are absent.
+    A module that wants this state says so with `pytestmark = pytest.mark.usefixtures('provisioned')`.
 
-    One step precedes `provision()` and two follow it, and none of the three is optional:
+    One step precedes `provision()` and two follow it:
 
     - Snapserver's start-limit counter is reset. `snapserver.service` takes the manager's
       `DefaultStartLimitBurst` of five starts per `DefaultStartLimitIntervalSec`, deliberately, since
       it also carries `Restart=on-failure` and the pathology `os/dietpi/AGENTS.md` records is a backend
-      re-forked at ten hertz. The reset covers this fixture's own restarts: it provisions, stops units,
-      and restarts Snapserver below, none of it through `toggle.apply`. The handler path needs no help
-      from here, because `toggle.apply` clears the same counters itself and
-      `test_a_toggle_revives_a_snapserver_the_start_limit_wedged` asserts that it does.
-    - The units of every source outside the enabled set are stopped by `activate_streamer_units` itself,
-      which disables them `--now`, so a previous test's `enable --now` does not survive into this one as
-      an active unit no source claims. Nothing here repeats that: a second stop would hide the day
+      re-forked at ten hertz. The reset covers this fixture's own restarts, none of which go through
+      `toggle.apply`; the handler path clears the same counters itself, which
+      `test_a_toggle_revives_a_snapserver_the_start_limit_wedged` asserts.
+    - The units of every source outside the enabled set are stopped by `activate_streamer_units`
+      itself, which disables them `--now`. Nothing here repeats that: a second stop would hide the day
       provisioning stopped doing it.
     - Snapserver is restarted. `activate_streamer_units` ends in `systemctl start snapserver`, which is
-      a no-op against the instance the previous test left running, and that instance is serving the conf
+      a no-op against the instance the previous test left running, and that instance serves the conf
       that test wrote rather than the baseline this fixture just rendered.
     """
     subprocess.run(['systemctl', 'reset-failed', 'snapserver'], capture_output=True, timeout=_TIMEOUT, check=False)
@@ -566,15 +543,14 @@ def listening_player(provisioned) -> Iterator[str]:
     Opt-in, and the only fixture here that runs a process no provisioned unit names. Every other
     module runs against the image's idle stub at `/usr/bin/snapclient`, because a real client under
     `snapclient.service` restart-loops against the `hw:Loopback,0` no container has and settles
-    `failed`. This runs the binary directly, with `--player stdout` discarded, so it is a participant
-    in the protocol and nothing else: no unit, no ALSA, and nothing for the leak probes to attribute.
+    `failed`. This runs the binary directly with `--player stdout` discarded, so it is a participant in
+    the protocol and nothing else: no unit, no ALSA, nothing for the leak probes to attribute.
 
-    It exists because a group is the one thing a client-less Snapserver cannot produce. Without it
-    `get_groups()` answers `[]`, so `index._reassign_groups` loops over nothing and every test that
-    passes a destination asserts only that no exception was raised.
+    A group is the one thing a client-less Snapserver cannot produce. Without it `get_groups()` answers
+    `[]`, so `index._reassign_groups` loops over nothing and every test that passes a destination
+    asserts only that no exception was raised.
 
-    `--player stdout` rather than `file`, matching `tests/docker/snapserver/entrypoint.sh`, so the two
-    images ask the same version of snapclient for the same thing.
+    `--player stdout` rather than `file`, matching `tests/docker/snapserver/entrypoint.sh`.
     """
     process = subprocess.Popen([SNAPCLIENT, '--host', '127.0.0.1', '--player', 'stdout'], stdout=subprocess.DEVNULL)
     try:
@@ -596,10 +572,10 @@ def listening_player(provisioned) -> Iterator[str]:
 def choreography_lock(monkeypatch) -> None:
     """Rebinds `index._CHOREOGRAPHY_LOCK` per test, as `index.py`'s own comment prescribes.
 
-    The lock is constructed at import and only binds an event loop on a contended acquire, so an
-    uncontended test needs nothing. `test_a_second_toggle_waits_for_the_first` contends on purpose,
-    binding the lock to that test's loop, which would fail every later test in the same module with
-    `got Future attached to a different loop`.
+    The lock is constructed at import and binds an event loop only on a contended acquire.
+    `test_a_second_toggle_waits_for_the_first` contends on purpose, binding the lock to that test's
+    loop, which would fail every later test in the module with `got Future attached to a different
+    loop`.
     """
     monkeypatch.setattr(index, '_CHOREOGRAPHY_LOCK', asyncio.Lock())
 
@@ -609,12 +585,12 @@ def notifications(monkeypatch) -> list[tuple[str, str]]:
     """Captures `ui.notify` as an ordered `[(message, type)]` list.
 
     `ui.notify` resolves `context.client` through NiceGUI's slot stack and raises outside a client, so
-    the handlers cannot be called without either this or a NiceGUI server. Standing one up here would
-    re-cover what `tests/ui/test_streamer.py`'s `user` fixture already covers.
+    the handlers cannot be called without either this or a NiceGUI server, which
+    `tests/ui/test_streamer.py`'s `user` fixture already covers.
 
     Ordered, because on two paths the report is the assertion: the refusal of the last enabled source is
-    only observable as a notification, and mutual exclusion under contention is observable as the absence
-    of interleaving in this list. Every test also asserts no `negative` entry, which surfaces a
+    only observable as a notification, and mutual exclusion under contention is observable as the
+    absence of interleaving in this list. Every test also asserts no `negative` entry, which surfaces a
     `systemctl` failure's own `stderr` in the failure message instead of a bare missing-process
     assertion.
     """
@@ -642,8 +618,7 @@ class _PageStub:
 
     Not the real `Page`: `Page.__init__` calls `index.adopt_running_sources`, which writes
     `sources.json` from the streams Snapserver is currently serving, so inside this container it would
-    record an enabled set from the previous test's conf before the current test's first line ran. It
-    also builds a `_client` nothing here reads.
+    record an enabled set from the previous test's conf before the current test's first line ran.
 
     `settings` is loaded exactly as `Page.__init__` loads it, so `snapserver_host` comes from the
     image's `AUDERA_SNAPSERVER_HOST` and reaches the real Snapserver on loopback.

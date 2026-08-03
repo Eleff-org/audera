@@ -17,18 +17,15 @@ class Page:
         self.settings = _load_settings()
         self._client = _snapserver(self.settings)
         self._dialog_open: bool = False
-        # The Players tab's build counter. An `async` `@ui.refreshable` is not re-entrant:
-        # `_execute_refresh` clears the container and then schedules the rebuild, so two
-        # refreshes landing in the same tick both clear (the second over an empty container)
-        # and then both append, rendering every element twice.
+        # The Players tab's build counter. An `async` `@ui.refreshable` is not re-entrant, so two
+        # refreshes in the same tick both clear and then both append, rendering every element twice.
         self._players_generation: int = 0
-        # Set while the PlexAmp claim flow is mid-OAuth. Refreshing the Sources tab deletes the
-        # flow's elements and cancels its timers, so a source toggle raised during a claim is
-        # refused.
+        # Set while the PlexAmp claim flow is mid-OAuth. A Sources tab refresh deletes the flow's
+        # elements and cancels its timers, so a source toggle raised during a claim is refused.
         self._claim_in_flight: bool = False
-        # A one-shot reconciliation of the enabled source set against the streams Snapserver is
-        # serving, so an in-place upgrade does not render a set that contradicts the device and
-        # then rewrite the conf from it. It no-ops once a set has been recorded.
+        # Reconciles the enabled source set against the streams Snapserver is serving, so an
+        # in-place upgrade does not rewrite the conf from a set that contradicts the device.
+        # No-ops once a set has been recorded.
         index.adopt_running_sources(self)
 
     def load(self) -> None:

@@ -5,13 +5,12 @@
 #   1. It binds :32500 only once it holds a claim token. A closed port is the only evidence of an
 #      unclaimed device, so `_plexamp_state` cannot read a file instead.
 #   2. It binds it late. systemd calls the unit active as soon as it forks node, well before node
-#      listens. `STARTUP_GRACE` covers that window and the `starting` chip reports it.
+#      listens; `STARTUP_GRACE` covers that window and the `starting` chip reports it.
 #
-# PLEXAMP_STUB_DELAY produces window 2 without patching `STARTUP_GRACE`, and it arrives by drop-in,
-# so a test that wants a `starting` window exercises the drop-in plus `daemon-reload` to get one.
+# PLEXAMP_STUB_DELAY produces window 2 without patching `STARTUP_GRACE`, and it arrives by drop-in.
 # PLEXAMP_CLAIM_TOKEN is the name `_plex._restart_plexamp_with_claim` writes.
 #
-# It models nothing else about PlexAmp: no Plex account, no library, no playback. It never reads
+# Nothing else about PlexAmp is modelled: no Plex account, no library, no playback. It never reads
 # /opt/plexamp/js/index.js.
 sleep "${PLEXAMP_STUB_DELAY:-0}"
 

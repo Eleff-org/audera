@@ -3,18 +3,12 @@
 Every configuration file Audera writes — `~/.audera/*.json`, `/etc/snapserver.conf`, the PlexAmp
 claim drop-in, the access point's dnsmasq conf — goes through `write_text()`.
 
-Opening a destination `'w'` truncates it before a single byte of the new content is written, so
-the destination is empty for the length of the write. Two things go wrong in that window. A
-concurrent reader gets a zero-byte file: the Sources tab's choreographies write `sources.json`
-through `asyncio.to_thread` while the Players tab reads the enabled set on every render,
-including the 10 s poll's, and a `JSONDecodeError` there fails the whole tab. And a raise from
-whatever produces the content leaves the truncation permanent: a zero-byte `/etc/snapserver.conf`
-is a Snapserver that will not start.
-
-`write_text()` closes both. It takes rendered content, so a caller cannot truncate a destination
-and only then discover that its content does not exist; and it writes a sibling temporary file
-and `os.replace`s it into place, which is atomic on both POSIX and Windows, so a reader sees
-either the old file or the new one and a failure leaves the old one.
+Opening a destination `'w'` truncates it before any of the new content is written, leaving a
+concurrent reader a zero-byte file and making a raise from whatever produces the content
+permanent. `write_text()` takes rendered content, so a caller cannot truncate a destination and
+only then discover its content does not exist, and it writes a sibling temporary file that it
+`os.replace`s into place, which is atomic on both POSIX and Windows, so a reader sees either the
+old file or the new one and a failure leaves the old one.
 """
 
 import os
@@ -24,12 +18,11 @@ from typing import Union
 def write_text(path: Union[str, os.PathLike], content: str, *, encoding: str = 'utf-8', mode: Union[int, None] = None) -> None:
     """Writes `content` to `path`, atomically, creating the parent directory as needed.
 
-    The temporary file is a sibling of the destination, since `os.replace` is only atomic within
-    a filesystem, and carries the process id, since two processes writing the same destination
-    would otherwise share one temporary name and each unlink the other's. It is `chmod`ed before
-    the replace rather than after, because `os.replace` carries the source's mode onto the
-    destination, and because a token written world-readable and narrowed a moment later was still
-    world-readable for that moment.
+    The temporary file is a sibling of the destination, since `os.replace` is only atomic within a
+    filesystem, and carries the process id, so two processes writing the same destination do not
+    share one temporary name. It is `chmod`ed before the replace, since `os.replace` carries the
+    source's mode onto the destination and narrowing afterwards leaves a window in which the
+    content is world-readable.
 
     Parameters
     ----------
@@ -52,8 +45,7 @@ def write_text(path: Union[str, os.PathLike], content: str, *, encoding: str = '
             os.chmod(temp_path, mode)
         os.replace(temp_path, path)
     finally:
-        # `os.replace` consumed the temporary file on the success path, so this only runs when
-        # the write, the `chmod`, or the replace itself raised. Leaving the litter behind would
-        # accumulate one file per failure beside every configuration file.
+        # `os.replace` consumed the temporary file on the success path, so this only runs after a
+        # failure, where it keeps one file per failure from accumulating beside the destination.
         if os.path.exists(temp_path):
             os.remove(temp_path)

@@ -7,12 +7,11 @@ from audera.services import platform, system
 
 @pytest.mark.parametrize('call', [lambda: system.systemctl('restart', 'snapserver'), lambda: system.is_active('plexamp')])
 def test_the_systemd_seam_raises_off_platform(monkeypatch, call):
-    """`@platform.requires('dietpi')` is what stops Audera mutating a developer's own machine.
+    """`@platform.requires('dietpi')` raises off-platform, so Audera cannot mutate a dev machine.
 
-    It is asserted here rather than in the container lane, which is always on-platform and so has
-    no way to reach this branch. `is_active` is covered alongside `systemctl` because it swallows
-    a `TimeoutExpired` and an `OSError` to report `False`; swallowing the gate's `RuntimeError`
-    too would report every unit on a dev box as inactive, which reads as a real answer.
+    Asserted here rather than in the container lane, which is always on-platform. `is_active` is
+    covered alongside `systemctl` because it swallows a `TimeoutExpired` and an `OSError` to report
+    `False`, and swallowing the gate's `RuntimeError` too would report every unit as inactive.
 
     `NAME` is read inside the decorator's wrapper at call time, so the late patch takes effect.
     """

@@ -10,8 +10,8 @@ jobs:
     name: Run real-systemd integration tests
     runs-on: ubuntu-latest
 
-    # A cold image build is around three minutes and the container boots systemd for real. The
-    # ceiling fails the job on a wedged container instead of holding a runner for six hours.
+    # A cold image build is around three minutes. The ceiling fails the job on a wedged container
+    # instead of holding a runner for six hours.
     timeout-minutes: 30
 
     steps:
@@ -32,12 +32,11 @@ jobs:
         run: uv sync --all-extras --frozen
 
       # No job-level `container:`. Actions overrides the entrypoint of a job container, so systemd
-      # would never be PID 1 and `--now` would have nothing to act on. The fixture issues its own
-      # `docker run` plus `docker exec`, which keeps the entrypoint.
+      # would never be PID 1. The fixture issues its own `docker run` plus `docker exec`, which keeps
+      # the entrypoint.
       #
       # The container runs `--privileged` with a read-write `/sys/fs/cgroup` so systemd can manage
-      # cgroups. The GitHub-hosted VM is discarded after the job; on a self-hosted runner this would
-      # grant container root on a machine that persists, so revisit it before moving the workflow
-      # onto one.
+      # cgroups. That is safe on a GitHub-hosted VM, which is discarded after the job; revisit it
+      # before moving the workflow onto a self-hosted runner.
       - name: Run systemd tests
         run: uv run pytest -m systemd -v

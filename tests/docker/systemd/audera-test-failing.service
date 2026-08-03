@@ -1,8 +1,7 @@
 [Unit]
 # A unit that fails on its own terms, so `system.systemctl`'s `CalledProcessError` path and
-# `system.is_active`'s genuinely-`failed` branch are driven by systemd's refusal rather than by a
-# stub raising on command. `Restart=no`, so it settles in `failed` and stays there for an assertion
-# to read.
+# `system.is_active`'s genuinely-`failed` branch are driven by systemd's refusal. `Restart=no`, so it
+# settles in `failed` and stays there for an assertion to read.
 Description=Audera test unit that always fails
 
 [Service]

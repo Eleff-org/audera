@@ -7,7 +7,7 @@
 
 The Audera audio pipeline passes through several format conversion points between PlexAmp and the physical DAC. Each point constrains the maximum audio quality that can be delivered, regardless of the source material's original resolution.
 
-The PlexAmp pipeline below is no longer the default path; a flashed device boots with AirPlay enabled (`dal.sources.DEFAULT_ENABLED`). The ceiling this ADR sets applies to every source: see *Per-source sample rates*, where every catalogued source lands at or below 16-bit / 48 kHz and snapserver resamples to the common stream format.
+The PlexAmp pipeline below is no longer the default path; a flashed device boots with AirPlay enabled (`dal.sources.DEFAULT_ENABLED`). The ceiling applies to every source; see *Per-source sample rates*.
 
 ## Pipeline summary
 
@@ -32,7 +32,7 @@ The ALSA `asound.conf` on the streamer converts all audio to `S16_LE` at 48000 H
 
 #### Per-source sample rates
 
-The pipeline above describes the PlexAmp source. Since the source catalog (`audera/domains/sources/catalog.py`) replaced the single hard-coded `source =` line, the stream rate varies per source:
+The pipeline above describes the PlexAmp source. The source catalog (`audera/domains/sources/catalog.py`) replaced the single hard-coded `source =` line, so the stream rate varies per source:
 
 | Source | `sampleformat` | Set by |
 |---|---|---|
@@ -40,7 +40,7 @@ The pipeline above describes the PlexAmp source. Since the source catalog (`aude
 | Spotify | `44100:16:2` | the catalog URI, matching go-librespot's fixed-rate pipe |
 | AirPlay | `44100:16:2` | snapserver; the `airplay://` wrapper rewrites the query and ignores any supplied value, so the catalog URI must not state one |
 
-Snapserver resamples each stream to the server default (`48000:16:2`) before encoding, and the playback chain stays 48 kHz throughout (ADR 003). The ceiling remains 16-bit / 48 kHz; the 44.1 kHz sources are upsampled to it.
+Snapserver resamples each stream to the server default (`48000:16:2`) before encoding, and the playback chain stays 48 kHz throughout (ADR 003). The 44.1 kHz sources are upsampled, so the ceiling remains 16-bit / 48 kHz.
 
 The downstream expansion from 16-bit to 32-bit (Snapclient `--sampleformat 48000:32:2`, CamillaDSP S32LE) is lossless zero-padding — it does not recover any information lost at the 16-bit conversion step and exists solely to satisfy CamillaDSP's minimum format requirements.
 

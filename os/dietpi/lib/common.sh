@@ -4,7 +4,7 @@
 # Sourced by player/automation/setup.sh and streamer/automation/setup.sh.
 
 # Color formatting
-# shellcheck disable=SC2034  # GREEN is read by the scripts that source this, not by this file
+# shellcheck disable=SC2034  # GREEN is read by scripts that source this file
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 RESET='\033[0m'
@@ -52,9 +52,7 @@ install_camilladsp() {
 
 # Writes the camilladsp systemd service unit, captures from ALSA loopback, plays to
 #   physical DAC (hw:0). Volume is persisted by the daemon via --statefile.
-#
-# TimeoutStopSec=5 as in `lib/streamer.sh`'s `write_streamer_units`, which calls this. The writer is
-#   shared with the player's setup, so the player's CamillaDSP gets the same budget.
+#   TimeoutStopSec=5 matches `lib/streamer.sh`'s `write_streamer_units`.
 write_camilladsp_service() {
     local config_path="$1"
     local statefile_path="$2"

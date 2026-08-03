@@ -13,13 +13,12 @@ from audera.dal import sources as sources_dal
 def _entrypoint() -> list[str]:
     """Returns the argv that runs the CLI, preferring the installed console script.
 
-    Probed rather than assumed: a `sys.executable` outside the project's virtual environment has no
-    `audera` beside it, and a moved environment leaves a shim that exists and fails. Existence is
-    therefore not the test; running `--help` is.
+    The script is probed with `--help` rather than checked for existence, since a moved environment
+    leaves a shim that exists and fails.
 
     The fallback imports `main` rather than running `python -m audera.cli.audera`, which imports
-    the module a second time under `__main__` and emits a `RuntimeWarning` on stderr that the two
-    exit-code tests below read.
+    the module a second time under `__main__` and emits a `RuntimeWarning` on stderr that the
+    exit-code tests read.
     """
     fallback = [sys.executable, '-c', 'from audera.cli.audera import main; main()']
     script = Path(sys.executable).with_name('audera.exe' if os.name == 'nt' else 'audera')
@@ -40,20 +39,17 @@ ENTRY = _entrypoint()
 def audera_cli(tmp_path, monkeypatch):
     """Runs the installed `audera` console script against an isolated home.
 
-    The CLI is what provisioning calls, so it is tested the way provisioning calls it: as a
-    process, through argparse, reading stdout. An in-process call can pass arguments argparse
-    forbids, and `audera streamer units` was asserted for years in a shape the shell cannot
-    produce.
+    Provisioning calls the CLI as a process, so it is tested that way, through argparse. An
+    in-process call can pass arguments argparse forbids.
 
-    Isolating the home takes both variables. `audera/dal/path.py` computes `HOME` from
-    `expanduser('~')` at import, so the child never sees `tests/conftest.py`'s monkeypatched
-    `PATH`; and `ntpath.expanduser` never reads `HOME`, it reads `USERPROFILE` and then
-    `HOMEDRIVE` + `HOMEPATH`. With `HOME` alone the child read the developer's own `~/.audera`
-    and reported their recorded sources, which is a test passing against the wrong device.
+    Isolating the home takes both `HOME` and `USERPROFILE`. `audera/dal/path.py` computes `HOME`
+    from `expanduser('~')` at import, so the child never sees `tests/conftest.py`'s monkeypatched
+    `PATH`, and `ntpath.expanduser` reads `USERPROFILE` and then `HOMEDRIVE` + `HOMEPATH`, never
+    `HOME`. With `HOME` alone the child read the developer's own `~/.audera`.
 
-    Tests seed that home through `dal.sources` — pointed at the same directory the child
-    resolves — rather than through `conftest.py`'s `audera_home`, whose monkeypatched module
-    attribute no other process can see.
+    Tests seed that home through `dal.sources`, pointed at the same directory the child resolves,
+    rather than through `conftest.py`'s `audera_home`, whose monkeypatched module attribute no
+    other process can see.
     """
     home = tmp_path / 'home'
     (home / '.audera').mkdir(parents=True)
@@ -64,8 +60,8 @@ def audera_cli(tmp_path, monkeypatch):
     env.pop('HOMEPATH', None)
 
     def run(*args: str) -> subprocess.CompletedProcess:
-        # `text=True` for its universal-newline translation. `sys.stdout.write` emits `\r\n` on
-        # Windows, which no comparison against a rendered string survives.
+        # `text=True` for its universal-newline translation, since `sys.stdout.write` emits `\r\n`
+        # on Windows.
         return subprocess.run([*ENTRY, *args], capture_output=True, text=True, env=env, timeout=60)
 
     return run

@@ -38,13 +38,10 @@ def _unreachable(self, *args, **kwargs):
 async def _settled(condition: Callable[[], bool], *, timeout: float = 5.0, interval: float = 0.01) -> None:
     """Yields to the event loop until `condition()` holds, or until `timeout` passes.
 
-    A click's handler and a `@ui.refreshable`'s rebuild are both tasks NiceGUI schedules rather
-    than work the caller awaits, so an assertion on the line after a click reads the pre-click
-    state. Polling waits for exactly as long as the handler takes, where a fixed pause is a guess
-    that is too short on a loaded runner and too long everywhere else.
+    NiceGUI schedules a click's handler and a `@ui.refreshable`'s rebuild as tasks the caller does
+    not await, so an assertion on the line after a click reads the pre-click state.
 
-    Returns rather than raises at the deadline, so the caller's own assertion reports what it read
-    instead of this reporting a timeout.
+    Returns rather than raises at the deadline, so the caller's own assertion reports what it read.
 
     Parameters
     ----------
@@ -52,9 +49,9 @@ async def _settled(condition: Callable[[], bool], *, timeout: float = 5.0, inter
         What the click is expected to have produced. Called on the event loop, so it must not
         block.
     timeout: `float`
-        How long to wait before giving up and letting the assertion fail.
+        How long to wait before giving up.
     interval: `float`
-        The retry interval. It bounds how long the poll overshoots by, not how long it waits.
+        The retry interval.
     """
     deadline = time.monotonic() + timeout
     while not condition():
@@ -66,11 +63,10 @@ async def _settled(condition: Callable[[], bool], *, timeout: float = 5.0, inter
 async def _stable(read: Callable[[], object], *, timeout: float = 5.0, interval: float = 0.01) -> object:
     """Returns `read()` once two consecutive readings agree, or the last one at the deadline.
 
-    `_settled`'s counterpart for an element *identity*, which a pending rebuild changes to a value
+    `_settled`'s counterpart for an element identity, which a pending rebuild changes to a value
     nothing can name in advance. `ui.timer` fires immediately by default, so the Players tab's poll
-    rebuilds it once on connect; an id taken before that rebuild names an element about to be
-    discarded, and a test measuring "was this element replaced" then fails on the poll rather than
-    on what it is about. The next fire is ten seconds out, so agreement here means quiet.
+    rebuilds it once on connect and an id taken before that rebuild names an element about to be
+    discarded. The next fire is ten seconds out, so agreement here means quiet.
 
     Parameters
     ----------
@@ -79,7 +75,7 @@ async def _stable(read: Callable[[], object], *, timeout: float = 5.0, interval:
     timeout: `float`
         How long to wait for two readings to agree.
     interval: `float`
-        The gap between readings, which is also what gives a scheduled rebuild room to run.
+        The gap between readings, which also gives a scheduled rebuild room to run.
     """
     deadline = time.monotonic() + timeout
     previous = read()
@@ -93,11 +89,10 @@ async def _stable(read: Callable[[], object], *, timeout: float = 5.0, interval:
 
 # Every snapserver fixture mocks the full read set a render performs: stream status always, and
 # CamillaDSP wherever a player is served, whether or not the test under it reads either. Both
-# clients connect with a 5 s `open_timeout` and both are reached synchronously from the render, so
-# an unmocked method opens a real socket on the event loop. `_stream_status` connects to
-# `settings.snapserver_host`, which a repo-root `.env` points at a real streamer, and
-# `_build_player_card` connects to the player's own host, `192.168.1.50`. On `192.168.1.0/24` the
-# connect waits out the full five seconds on an unanswered ARP, once per call site per render.
+# clients are reached synchronously from the render with a 5 s `open_timeout`, so an unmocked
+# method opens a real socket on the event loop and blocks for the full timeout once per call site
+# per render. `_stream_status` connects to `settings.snapserver_host`, which a repo-root `.env`
+# points at a real streamer, and `_build_player_card` connects to the player's own host.
 # `_stream_status` swallows the failure into `{}`, so the empty map these fixtures return matches
 # what the timeout would have produced.
 @pytest.fixture
@@ -110,9 +105,8 @@ def mock_snapserver_with_client(monkeypatch, mock_camilladsp, mock_stream_status
     player = Player(id='abc123', host='192.168.1.50', port=1704, connected=True, volume=80, name='Living Room')
 
     monkeypatch.setattr(SnapserverClient, 'get_clients', lambda self: [player])
-    # The Players tab reads `get_groups()` once per render; left unpatched, every render here
-    # would attempt a real websocket connect to localhost:1780. Raising leaves this player with
-    # no known stream, consistent with its empty `group_id`.
+    # Unpatched, every render would attempt a real websocket connect to localhost:1780. Raising
+    # leaves this player with no known stream, consistent with its empty `group_id`.
     monkeypatch.setattr(SnapserverClient, 'get_groups', _unreachable)
     return player
 
@@ -138,9 +132,9 @@ def _two_clients(*group_ids: str) -> list[Player]:
 def _mock_groups(monkeypatch, players: list[Player], groups: list[Group]) -> list[tuple[str, str]]:
     """Serves `players` and `groups`, and writes a move through to `groups`.
 
-    Returns the ordered `(group_id, stream_id)` move log. Writing through lets a test apply a
-    move and re-render: under the by-stream grouping the card's position is its assignment, so a
-    read-only `set_group_stream` mock would re-render the card where it started.
+    Returns the ordered `(group_id, stream_id)` move log. Under the by-stream grouping the card's
+    position is its assignment, so a read-only `set_group_stream` mock would re-render the card
+    where it started.
     """
     moves: list[tuple[str, str]] = []
 
@@ -217,10 +211,10 @@ def mock_camilladsp(monkeypatch):
 
 @pytest.fixture
 def mock_camilladsp_unreadable(monkeypatch, mock_camilladsp):
-    """Serves a player whose CamillaDSP daemon answers nothing.
+    """Serves a player whose CamillaDSP volume read fails.
 
-    Layered over `mock_camilladsp` rather than replacing it, since the snapserver fixtures depend
-    on the working mock. Only the volume read fails; the rest of the render's read set stays served.
+    Layered over `mock_camilladsp`, which the snapserver fixtures depend on, so the rest of the
+    render's read set stays served.
     """
 
     def _get_percent_volume(self) -> int:
@@ -320,8 +314,7 @@ async def test_players_tab_per_client_controls_are_addressable_individually(
 ):
     """A per-card control carries the client id as well as the shared marker.
 
-    `UserInteraction.click()` fires on every match, so a shared marker on a per-card control
-    would act on all cards once a second player exists.
+    `UserInteraction.click()` fires on every match, so a shared marker would act on every card.
     """
     Page().load()
     await user.open('/')
@@ -379,9 +372,8 @@ async def test_players_tab_disabled_experience_toggle_off_mutes_client(
     )
     Page().load()
     await user.open('/')
-    # Found by marker rather than by `kind=ui.switch`: the Sources tab renders one switch per
-    # catalogued source and `UserInteraction.click()` clicks every match, which would run the
-    # enable choreography.
+    # Found by marker rather than `kind=ui.switch`: `UserInteraction.click()` clicks every match,
+    # and the Sources tab renders one switch per catalogued source.
     user.find(marker='player-toggle-abc123').click()
     await _settled(lambda: mock_snapserver_volume.get('set_client_volume') is not None)
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, True)
@@ -411,8 +403,8 @@ async def test_players_tab_disabled_experience_toggle_on_unmutes_client(
 def snapserver_conf(tmp_path, monkeypatch):
     """Redirects the conf the Sources tab writes into `tmp_path`.
 
-    Patched on `audera.cli.conf`, the module `domains.sources.toggle` reads the constant from at
-    call time, so nothing here writes to the device's real `/etc/snapserver.conf`.
+    Patched on `audera.cli.conf`, which `domains.sources.toggle` reads the constant from at call
+    time, so nothing writes to the device's real `/etc/snapserver.conf`.
     """
     path = tmp_path / 'snapserver.conf'
     monkeypatch.setattr(conf, 'SNAPSERVER_CONF', str(path))
@@ -431,10 +423,8 @@ def mock_stream_status(monkeypatch):
 def mock_snapserver_listener(monkeypatch, mock_camilladsp, mock_stream_status):
     """One connected player, in group `g1`, listening to the `Spotify` stream.
 
-    Yields the group, and serves the move write-through as well as the reads, because a
-    reassignment is only observable as the group's own `stream_id`. Snapcast owns the assignment
-    and persists it, so a test asserting where a listener ended up reads it back from where the
-    page would rather than from a log of what the page called.
+    Returns the group, and serves the move write-through as well as the reads, so a test asserts
+    where a listener ended up by reading the group's own `stream_id` rather than a call log.
     """
     player = Player(id='abc123', host='192.168.1.50', port=1704, connected=True, volume=80, group_id='g1', name='Living Room')
     group = Group(id='g1', name='', client_ids=['abc123'], stream_id='Spotify')
@@ -450,18 +440,16 @@ def stub_systemctl(monkeypatch):
     A developer's machine has no systemd and `@platform.requires('dietpi')` raises at call time, so
     the seam is replaced with a no-op that reports success. Patched at `audera.services.system`,
     which keeps the gate out of the path without patching `platform.NAME` or `subprocess`.
-    `system.is_active` is left alone, since the seam for PlexAmp's state is
+    `system.is_active` is left alone, since PlexAmp's state comes from
     `streamer_plex._plexamp_state`, the level `index._SETUP_FLOWS` captured at import time.
 
     Everything either side of the seam runs for real, so the enabled set these tests read back and
-    the conf bytes they read off disk are the ones the page produced. What the seam's argv *does*
-    is asserted where it can be observed, in `tests/systemd/inside/test_index.py`, against real
-    units.
+    the conf bytes they read off disk are the ones the page produced. What the seam's argv does is
+    asserted in `tests/systemd/inside/test_index.py`, against real units.
 
-    `_READY_TIMEOUT` is set to zero: a `systemctl restart` that never reached a process leaves
-    nothing to become ready, so a test using this fixture would otherwise spend the readiness
-    budget waiting on a `mock_stream_status` that stays empty. The wait's own behaviour is asserted
-    by the tests that re-patch it.
+    `_READY_TIMEOUT` is set to zero: nothing was started, so a test using this fixture would
+    otherwise spend the readiness budget waiting on a `mock_stream_status` that stays empty. The
+    wait's own behaviour is asserted by the tests that re-patch it.
     """
     monkeypatch.setattr(index, '_READY_TIMEOUT', 0.0)
 
@@ -483,8 +471,7 @@ def _seed_sources(*ids: str) -> None:
 def _live(status: dict[str, str], *ids: str) -> None:
     """Marks `ids` as streams Snapserver is feeding, so they are attachable destinations.
 
-    Uses `'idle'` rather than `'playing'`, since a destination is normally idle at the moment it
-    is picked.
+    Uses `'idle'` rather than `'playing'`, since a destination is normally idle when picked.
 
     Parameters
     ----------
@@ -517,9 +504,8 @@ def _elements(user: User, **kwargs) -> list:
 def _only(user: User, kind: type[_ElementT], marker: str) -> _ElementT:
     """Returns the one element of `kind` carrying `marker`.
 
-    `kind` is passed even where the marker is already unique, because it narrows `user.find()`'s
-    return type from `ui.element` to the element's own class. Without it, every `.value` /
-    `.enabled` / `.options` read below is an unresolved attribute.
+    `kind` is passed even where the marker is already unique, since it narrows `user.find()`'s
+    return type from `ui.element` to the element's own class.
     """
     elements = user.find(kind=kind, marker=marker).elements
     assert len(elements) == 1
@@ -563,8 +549,8 @@ async def test_sources_tab_adopts_the_running_streams_on_first_load(
     """An in-place upgrade inherits a conf this code never recorded.
 
     Without adoption `get_enabled()` reports `DEFAULT_ENABLED` while Snapserver serves something
-    else, and the same page load renders `PlexAmp: disabled` here and `PlexAmp: playing` on the
-    Players tab.
+    else, so one page load renders `PlexAmp: disabled` here and `PlexAmp: playing` on the Players
+    tab.
     """
     monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'claimed')
     mock_stream_status['PlexAmp'] = 'playing'
@@ -599,12 +585,12 @@ async def test_sources_tab_adoption_precedes_the_next_conf_render(
 @pytest.mark.parametrize(
     ('streams', 'expected'),
     [
-        # An unreachable Snapserver, or one that raced the load and has not registered a stream
-        # yet. Recording `[]` would both freeze a wrong answer onto disk and render a
-        # zero-stream conf; leaving the file absent lets the next load retry.
+        # An unreachable Snapserver, or one that raced the load. Recording `[]` would freeze a
+        # wrong answer onto disk and render a zero-stream conf; leaving the file absent lets the
+        # next load retry.
         pytest.param({}, [], id='unreachable'),
-        # Pre-existing: `render_snapserver()` only ever emits `CATALOG` sources, so a
-        # hand-edited stream cannot survive any conf rewrite whether it is adopted or not.
+        # `render_snapserver()` only ever emits `CATALOG` sources, so a hand-edited stream cannot
+        # survive a conf rewrite whether it is adopted or not.
         pytest.param({'Ghost': 'playing'}, [], id='uncatalogued'),
         pytest.param({'Ghost': 'playing', 'PlexAmp': 'idle'}, ['PlexAmp'], id='partly-catalogued'),
     ],
@@ -636,20 +622,18 @@ async def test_sources_tab_adoption_never_overwrites_a_recorded_set(
     [
         pytest.param(('AirPlay',), 'inactive', {}, 'Spotify', 'disabled', id='not-enabled'),
         pytest.param(('AirPlay', 'PlexAmp'), 'unclaimed', {}, 'PlexAmp', 'setup required', id='setup-incomplete'),
-        # A unit systemd has started but that has not bound its port yet gets its own word.
-        # `setup required` would be wrong: nothing is required of the operator, and on a claimed
-        # device it is also false.
+        # A unit systemd has started but that has not bound its port yet gets its own word;
+        # `setup required` would be false on a claimed device.
         pytest.param(('AirPlay', 'PlexAmp'), 'starting', {}, 'PlexAmp', 'starting', id='setup-starting'),
-        # A unit that is not running at all shares `unclaimed`'s word, since both leave the
-        # operator the same next action — on a device that has never recorded a completed setup,
-        # which every row here is. Once one is recorded the ladder never reaches the probe; that is
+        # A unit that is not running shares `unclaimed`'s word, since both leave the operator the
+        # same next action. Every row here is a device with no recorded setup; once one is
+        # recorded the ladder never reaches the probe, which is
         # `test_sources_tab_a_recorded_setup_outranks_the_live_probe` below.
         pytest.param(('AirPlay', 'PlexAmp'), 'inactive', {}, 'PlexAmp', 'setup required', id='setup-inactive'),
         pytest.param(('AirPlay',), 'inactive', {'AirPlay': 'playing'}, 'AirPlay', 'playing', id='playing'),
         pytest.param(('AirPlay',), 'inactive', {'AirPlay': 'idle'}, 'AirPlay', 'idle', id='idle'),
-        # Snapserver's word for "the backend feeding this stream is not running", which is the
-        # same text step 1 renders for "the operator turned this source off". The collision comes
-        # from upstream's vocabulary.
+        # Snapserver's word for "the backend feeding this stream is not running", the same text
+        # step 1 renders for "the operator turned this source off".
         pytest.param(('AirPlay',), 'inactive', {'AirPlay': 'disabled'}, 'AirPlay', 'disabled', id='stream-disabled'),
         pytest.param(('AirPlay',), 'inactive', {}, 'AirPlay', 'not running', id='no-stream'),
     ],
@@ -678,10 +662,9 @@ async def test_sources_tab_chip_ladder(
 def test_plex_records_its_completion_against_the_catalogued_source():
     """The id the claim flow records under is the id the card reads back.
 
-    The two are looked up independently — `_plex` states the id, `index._setup_state` keys on
-    `source.id` — so a mismatch records a completion nothing ever reads and re-offers the claim
-    forever. `setup='plex_claim'` is what ties the flow to the entry, so it is read from there
-    rather than restated.
+    `_plex` states the id and `index._setup_state` keys on `source.id`, so a mismatch records a
+    completion nothing reads and re-offers the claim forever. `setup='plex_claim'` ties the flow
+    to the entry, so it is read from there rather than restated.
     """
     claims = [source for source in CATALOG if source.setup == 'plex_claim']
     assert [source.id for source in claims] == [streamer_plex.SOURCE_ID]
@@ -690,12 +673,11 @@ def test_plex_records_its_completion_against_the_catalogued_source():
 async def test_sources_tab_a_recorded_setup_outranks_the_live_probe(
     audera_home, mock_snapserver_empty, mock_stream_status, monkeypatch, user: User
 ):
-    """A claim that happened stays claimed, whatever the unit is doing right now.
+    """A recorded setup outranks the live probe, whatever the unit is doing.
 
-    The live probe answers what the device does at this instant, so a reprovision — which stops
-    PlexAmp's units — makes a claimed device read `setup required` and re-offers a claim flow the
-    operator already completed. The record is what the ladder consults first, and it is not
-    probe-derived, so the probe is not called at all.
+    The probe answers what the device does now, so a reprovision, which stops PlexAmp's units,
+    would make a claimed device read `setup required` and re-offer a completed claim flow. The
+    ladder consults the record first, so the probe is not called at all.
     """
     probes: list[int] = []
 
@@ -720,10 +702,8 @@ async def test_sources_tab_disabling_a_source_discards_its_setup_record(
 ):
     """Disabling is the one action that discards a setup record.
 
-    Kept across a disable, the record would outrank every probe on a re-enable months later, and
-    the card would report a source as set up without anything having checked. The seeded record
-    also proves the click reached the disable path rather than being refused by the last-source
-    guard.
+    Kept across a disable, the record would outrank every probe on a later re-enable and report a
+    source as set up without anything having checked.
     """
     _seed_sources('AirPlay', 'PlexAmp')
     sources_dal.set_setup_complete('PlexAmp', True)
@@ -753,9 +733,10 @@ async def test_sources_tab_unclaimed_plexamp_shows_setup_required_and_the_claim_
 async def test_sources_tab_claimed_plexamp_without_a_claim_conf_shows_its_stream_status(
     audera_home, mock_snapserver_empty, mock_stream_status, monkeypatch, tmp_path, user: User
 ):
-    """The claim drop-in is deleted on success and on timeout, so its absence is also the steady
-    state for a claimed device. A `PLEXAMP_CLAIM_CONF` file predicate would report every claimed
-    device as `setup required`; this pins that the chip is not derived from that file.
+    """The chip is not derived from `PLEXAMP_CLAIM_CONF`.
+
+    The drop-in is deleted on success and on timeout, so its absence is also the steady state for
+    a claimed device, and a file predicate would report every claimed device as `setup required`.
     """
     monkeypatch.setattr(streamer_plex, 'PLEXAMP_CLAIM_CONF', str(tmp_path / 'absent' / 'claim.conf'))
     monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'claimed')
@@ -788,10 +769,10 @@ async def test_sources_tab_starting_plexamp_offers_no_claim_button(
 async def test_sources_tab_starting_plexamp_repaints_once_the_port_opens(
     audera_home, mock_snapserver_empty, mock_stream_status, monkeypatch, user: User
 ):
-    """The starting panel's poll is the Sources tab's one exception to being unpolled.
+    """The starting panel polls; nothing else on the Sources tab does.
 
-    Nothing else refreshes this card, so without the poll a device that came up seconds after the
-    page loaded would read `starting` until the tab was left and re-entered.
+    Without it a device that came up after the page loaded would read `starting` until the tab was
+    left and re-entered.
     """
     _seed_sources('AirPlay', 'PlexAmp')
     mock_stream_status['PlexAmp'] = 'idle'
@@ -812,9 +793,8 @@ async def test_sources_tab_starting_plexamp_repaints_once_the_port_opens(
 def test_plexamp_active_seconds_measures_against_the_shared_monotonic_epoch(monkeypatch):
     """systemd's monotonic timestamps and `time.monotonic()` are both `CLOCK_MONOTONIC` on Linux.
 
-    They share the boot epoch, so the microsecond field subtracts directly and no timestamp is
-    parsed. `_active_seconds` reads the monotonic property rather than the wall-clock
-    `ActiveEnterTimestamp`.
+    They share the boot epoch, so the microsecond field subtracts directly. `_active_seconds`
+    reads the monotonic property rather than the wall-clock `ActiveEnterTimestamp`.
     """
     started = int((time.monotonic() - 10) * 1_000_000)
     monkeypatch.setattr(system, 'systemctl', lambda *args, check=True: subprocess.CompletedProcess(args, 0, f'{started}\n', ''))
@@ -859,10 +839,10 @@ def test_plexamp_active_seconds_withholds_a_reading_off_device(monkeypatch):
     ],
 )
 def test_plexamp_state_separates_starting_from_unclaimed_by_elapsed_time(monkeypatch, elapsed, expected):
-    """A closed 32500 is what both states look like; only the time since activation tells them apart.
+    """A closed port 32500 is what both states look like; the time since activation tells them apart.
 
-    The OS refuses a closed loopback port immediately rather than waiting out the probe's timeout,
-    which is what `_unreachable` stands in for here.
+    `_unreachable` stands in for the OS refusing a closed loopback port immediately rather than
+    waiting out the probe's timeout.
     """
     monkeypatch.setattr(system, 'is_active', lambda unit: True)
     monkeypatch.setattr(streamer_plex, 'socket', SimpleNamespace(create_connection=_unreachable))
@@ -892,9 +872,8 @@ async def test_sources_tab_render_does_not_probe_a_disabled_source(
     Page().load()
     await user.open('/')
     user.find('Sources').click()
-    # The chip ladder reaches the setup probe only at step 2, i.e. only for an enabled source.
-    # PlexAmp ships disabled, so a freshly flashed device renders this tab with no
-    # `systemctl is-active`.
+    # The chip ladder reaches the setup probe only for an enabled source. PlexAmp ships disabled,
+    # so a freshly flashed device renders this tab with no `systemctl is-active`.
     assert probes == []
 
 
@@ -928,8 +907,8 @@ async def test_sources_tab_disabling_a_stale_last_source_never_renders_a_conf(
     await user.open('/')
     user.find('Sources').click()
     # The card rendered with two sources enabled, so its switch is live. Another tab disabled
-    # Spotify in the meantime; re-reading the enabled set is what keeps this click from
-    # reaching `render_snapserver()`'s `ValueError`.
+    # Spotify in the meantime; re-reading the enabled set keeps this click from reaching
+    # `render_snapserver()`'s `ValueError`.
     _seed_sources('AirPlay')
     user.find(marker='source-toggle-AirPlay').click()
     await user.should_see(index._LAST_SOURCE_MESSAGE)
@@ -976,7 +955,7 @@ async def test_sources_tab_enable_waits_for_snapserver_before_repainting_the_chi
     user.find('Sources').click()
 
     # Chained onto `stub_systemctl` rather than replacing it, so arming the refusal is the only
-    # way this test's seam differs from every other test's.
+    # difference from every other test's seam.
     stub = system.systemctl
 
     def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -1007,9 +986,8 @@ async def test_sources_tab_repaints_on_activation(audera_home, mock_snapserver_e
     mock_stream_status['AirPlay'] = 'playing'
     user.find('Players').click()
     user.find('Sources').click()
-    # `refresh()` returns an `AwaitableResponse`, which defers the rebuild to a background task so
-    # that awaiting it can take precedence. An un-yielded assertion here reads the old chip
-    # whether or not the repaint was requested.
+    # `refresh()` returns an `AwaitableResponse`, which defers the rebuild to a background task, so
+    # an un-yielded assertion here reads the old chip whether or not the repaint was requested.
     await _settled(lambda: _chip(user, 'AirPlay') == 'playing')
     assert _chip(user, 'AirPlay') == 'playing'
 
@@ -1053,7 +1031,7 @@ async def test_sources_tab_disable_without_listeners_opens_no_dialog(
     user.find(marker='source-toggle-AirPlay').click()
     await user.should_see('AirPlay 2 disabled')
     assert _elements(user, marker='disable-destination') == []
-    # Skipping the dialog is not skipping the disable.
+    # The dialog is skipped; the disable still applies.
     assert sources_dal.get_enabled() == ['Spotify']
     assert 'name=AirPlay' not in snapserver_conf.read_text(encoding='utf-8')
 
@@ -1079,11 +1057,10 @@ async def test_sources_tab_disable_moves_the_listener_to_the_chosen_destination(
 ):
     """The destination the dialog offered is the one `Group.SetStream` receives.
 
-    `tests/systemd/inside/test_index.py` covers the reassignment against a real Snapserver, but it
-    calls the handler with a destination of its own. This is the path where the operator picks one,
-    and the select's value is a source id where everything the dialog renders is a display label.
-    The two differ for Spotify, and `set_group_stream(gid, 'AirPlay 2')` mis-routes with no error,
-    so a label reaching the call reads back as anything but `AirPlay`.
+    The select's value is a source id where everything else the dialog renders is a display label.
+    The two differ for Spotify, and `set_group_stream(gid, 'AirPlay 2')` mis-routes with no error.
+    `tests/systemd/inside/test_index.py` covers the reassignment itself, with a destination of its
+    own rather than one the operator picked.
     """
     _seed_sources('AirPlay', 'Spotify')
     _live(mock_stream_status, 'AirPlay')
@@ -1154,9 +1131,8 @@ async def test_sources_tab_disable_without_a_live_destination_says_so_and_procee
     assert _elements(user, marker='disable-destination') == []
     user.find(marker='disable-confirm').click()
     await user.should_see('Spotify Connect disabled')
-    # Nothing is running to move onto, so Snapserver's own `default_source` fallback applies. The
-    # dialog says so, and the disable is not blocked by a state the operator cannot fix from it.
-    # The group is left where it was rather than moved somewhere nothing is feeding.
+    # Nothing is running to move onto, so the group is left where it was and Snapserver's own
+    # `default_source` fallback applies. The dialog says so, and the disable is not blocked.
     assert mock_snapserver_listener.stream_id == 'Spotify'
     assert sources_dal.get_enabled() == ['AirPlay']
 
@@ -1371,9 +1347,9 @@ async def test_players_tab_chip_tint_tracks_the_status(
         mock_stream_status['Spotify'] = word
     Page().load()
     await user.open('/')
-    # A text colour and a 10 % tint of the same hue, matching the hue the by-stream header uses
-    # for the same word. `_stream_tint` spells its rungs out rather than parsing `_stream_state`'s
-    # class string, so this assertion is what keeps the two in agreement.
+    # A text colour and a 10 % tint of the same hue, matching the by-stream header's hue for the
+    # same word. `_stream_tint` spells its rungs out rather than parsing `_stream_state`'s class
+    # string, so this assertion keeps the two in agreement.
     chip = _stream_chip(user, 'abc123')
     assert f'text-{hue}-500' in chip._classes
     assert f'bg-{hue}-500/10' in chip._classes
@@ -1447,8 +1423,7 @@ async def test_players_tab_orphan_stream_keeps_its_own_label(
     Page().load()
     await user.open('/')
     # A group parked on a stream outside the enabled set still names it, and the menu still omits
-    # it as the current stream. A chip reading 'Unassigned' would say the player is listening to
-    # nothing, which is false.
+    # it as the current stream. A chip reading 'Unassigned' would be false.
     assert _stream_value(user, 'abc123') == 'Ghost'
     assert _elements(user, marker='player-move-abc123-Ghost') == []
     await user.should_see(marker='player-move-abc123-AirPlay')
@@ -1503,8 +1478,7 @@ async def test_players_tab_reads_groups_once_per_render(
     await user.open('/')
     await _settled(lambda: reads.count('clients') >= 1)
     # Read once per render and passed down as an `_Assignment` rather than once per card, so the
-    # count tracks `get_clients`, which is once per render however many times the poll re-renders
-    # the tab.
+    # count tracks `get_clients` however many times the poll re-renders the tab.
     assert reads.count('groups') == reads.count('clients')
     assert reads.count('groups') >= 1
 
@@ -1879,7 +1853,7 @@ async def test_settings_tab_switching_the_grouping_relayouts_the_players_tab(
         user.find(kind=ui.toggle, content='By stream').elements.pop().value = features.FF_GROUPING_BY_STREAM
     await _settled(lambda: _elements(user, marker='player-move-abc123') != [])
     assert settings_dal.get().features[features.PLAYER_GROUPING_KEY] == features.FF_GROUPING_BY_STREAM
-    # `_on_feature_change` already refreshed the Players tab, so the new layout costs no new code.
+    # `_on_feature_change` already refreshes the Players tab, so the new layout needs no extra code.
     assert _elements(user, marker='player-stream-abc123') == []
     assert _elements(user, marker='player-move-abc123') != []
 
@@ -1987,9 +1961,9 @@ async def test_players_tab_unreadable_volume_withholds_a_value_and_disables_the_
 ):
     Page().load()
     await user.open('/')
-    # A daemon that cannot be read used to seed the slider at `DEFAULT_PERCENT_VOLUME`, rendering
-    # `25%`, which is indistinguishable from a player genuinely set to 25% and is the base a drag
-    # would then write its edit against. The reading is withheld instead.
+    # An unreadable daemon used to seed the slider at `DEFAULT_PERCENT_VOLUME`, rendering `25%`,
+    # which is indistinguishable from a player genuinely set to 25% and is the base a drag would
+    # write its edit against. The reading is withheld instead.
     await user.should_see('—')
     await user.should_not_see('25%')
     await user.should_see(kind=ui.icon, content='volume_off')

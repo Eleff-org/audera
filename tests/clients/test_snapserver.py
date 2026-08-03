@@ -33,8 +33,8 @@ def test_get_clients(client):
 
 
 def test_get_stream_status(client):
-    # The container boots the no-arg render of the bootstrap set, so the expected stream is
-    # derived from `DEFAULT_ENABLED` rather than named here.
+    # The container boots the bootstrap set, so the expected stream is derived from
+    # `DEFAULT_ENABLED` rather than named here.
     expected = default_source(sources_dal.DEFAULT_ENABLED)
     result = client.get_stream_status()
     assert isinstance(result, dict)

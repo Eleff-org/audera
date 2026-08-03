@@ -36,10 +36,9 @@ def test_sources_disable(audera_home):
 
 
 def test_sources_a_failed_write_leaves_the_previous_file_readable(audera_home, monkeypatch):
-    # The Players tab reads the enabled set on every render, including the 10 s poll's, while the
-    # Sources tab writes it from a worker thread, so a reader can land mid-write. The write goes
-    # through `io.write_text`, to a sibling file that is moved into place, so a half-written set
-    # never reaches the destination.
+    # The Players tab reads the enabled set on every render while the Sources tab writes it from a
+    # worker thread, so a reader can land mid-write. `io.write_text` moves a sibling file into
+    # place, so a half-written set never reaches the destination.
     sources_dal.set_enabled('Spotify', True)
 
     def _boom(*args, **kwargs):
@@ -55,17 +54,16 @@ def test_sources_a_failed_write_leaves_the_previous_file_readable(audera_home, m
 
 
 def test_sources_setup_state_round_trip(audera_home):
-    # PlexAmp's claim survives a reboot on the device but nothing recorded it, so the card
-    # re-derived `setup required` from a live probe every render, and a backend that was slow to
-    # answer read as unclaimed.
+    # Without a record, the card re-derived `setup required` from a live probe every render, and a
+    # backend that was slow to answer read as unclaimed.
     assert sources_dal.get_setup('PlexAmp') == {}
     sources_dal.set_setup_complete('PlexAmp', True)
     assert sources_dal.get_setup('PlexAmp') == {'complete': True}
 
 
 def test_sources_setup_state_and_the_enabled_set_do_not_clobber_each_other(audera_home):
-    # Both writes are read-modify-write over the whole document, so the claim record survives a
-    # later toggle of an unrelated source and the toggle survives the claim.
+    # Both writes are read-modify-write over the whole document, so neither section clobbers the
+    # other.
     sources_dal.set_setup_complete('PlexAmp', True)
     sources_dal.set_enabled('Spotify', True)
 
@@ -74,12 +72,11 @@ def test_sources_setup_state_and_the_enabled_set_do_not_clobber_each_other(auder
 
 
 def test_sources_a_setup_write_alone_is_not_a_recorded_enabled_set(audera_home):
-    """Recording a claim must not stand in for recording what the operator enabled.
+    """A setup write alone leaves the enabled set unrecorded, so adoption still runs.
 
     `is_recorded()` reads the `enabled` key rather than the file's existence, because a setup write
-    creates the file too. Keyed on the file, a claim on a device that had never toggled a source
-    would permanently refuse adoption, and the enabled set would stay frozen at `DEFAULT_ENABLED`
-    however the device was actually configured.
+    creates the file too. Keyed on the file, a claim would permanently refuse adoption and freeze
+    the enabled set at `DEFAULT_ENABLED`.
     """
     sources_dal.set_setup_complete('PlexAmp', True)
 
@@ -89,9 +86,8 @@ def test_sources_a_setup_write_alone_is_not_a_recorded_enabled_set(audera_home):
 
 
 def test_sources_clear_setup_discards_the_record(audera_home):
-    # Disabling a source is the one thing that discards its setup state: the operator is turning
-    # the backend off, and whatever it was claimed against is no longer what the next enable
-    # faces.
+    # Disabling a source is the only thing that discards its setup state, since the next enable
+    # faces a backend that is no longer claimed.
     sources_dal.set_setup_complete('PlexAmp', True)
     sources_dal.clear_setup('PlexAmp')
     assert sources_dal.get_setup('PlexAmp') == {}
@@ -120,23 +116,21 @@ def test_sources_adopt_records_the_observed_set(audera_home):
 
 def test_sources_adopt_never_overwrites_a_recorded_set(audera_home):
     sources_dal.set_enabled('Spotify', True)
-    # A recorded set is the operator's intent and takes precedence over anything inferred from
-    # the server.
+    # A recorded set takes precedence over anything inferred from the server.
     assert sources_dal.adopt(['PlexAmp']) is False
     assert sources_dal.get_enabled() == ['AirPlay', 'Spotify']
 
 
 def test_sources_adopt_refuses_an_empty_set(audera_home):
-    # An empty observation means an unreachable Snapserver rather than a device with no sources,
-    # and recording it would render a zero-stream conf.
+    # An empty observation means an unreachable Snapserver, and recording it would render a
+    # zero-stream conf.
     assert sources_dal.adopt([]) is False
     assert not sources_dal.is_recorded()
 
 
 def test_sources_default_enabled_does_not_drift_from_the_catalog():
-    # The DAL does not import the catalog, so nothing else stops DEFAULT_ENABLED from naming an
-    # uncatalogued id, which would make render_snapserver() raise and write an empty conf on a
-    # real flash.
+    # The DAL does not import the catalog, so nothing else stops `DEFAULT_ENABLED` from naming an
+    # uncatalogued id, which would make `render_snapserver()` raise on a flash.
     assert sources_dal.DEFAULT_ENABLED
     assert set(sources_dal.DEFAULT_ENABLED) <= {source.id for source in CATALOG}
     assert source_lines(sources_dal.DEFAULT_ENABLED)

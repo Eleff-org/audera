@@ -1,7 +1,6 @@
 """Tests for the audio-source catalog and the conf it renders.
 
-The catalog's three rules are the complex domain logic the suite's integration-first standard
-exempts, so they are asserted directly rather than through the CLI that emits them.
+The catalog's three rules are asserted directly rather than through the CLI that emits them.
 """
 
 import itertools
@@ -15,8 +14,8 @@ from audera.domains.sources import CATALOG, default_source, source_lines
 ALL_IDS = [source.id for source in CATALOG]
 SUBSETS = [list(subset) for size in range(len(ALL_IDS) + 1) for subset in itertools.combinations(ALL_IDS, size)]
 
-# go-librespot's three valid pipe formats, by the bit depth each one carries. The Spotify
-# source URI states a bit depth too, and nothing at runtime checks that the two agree.
+# go-librespot's three valid pipe formats, by bit depth. The Spotify source URI states a bit depth
+# too, and nothing at runtime checks that the two agree.
 PIPE_FORMAT_BITS: dict[str, int] = {'s16le': 16, 's32le': 32, 'f32le': 32}
 
 
@@ -66,8 +65,7 @@ def test_spotify_states_a_sampleformat():
 
 
 def test_airplay_states_no_sampleformat():
-    # snapserver forces 44100:16:2 on airplay:// and ignores any supplied value, so stating it
-    # would record a setting the code does not honour.
+    # snapserver forces 44100:16:2 on airplay:// and ignores any supplied value.
     assert 'sampleformat' not in source_lines(['AirPlay'])[0]
 
 
@@ -101,8 +99,8 @@ def test_default_source_is_empty_when_nothing_catalogued_is_enabled():
 
 @pytest.mark.parametrize('enabled', [[], ['Nope']])
 def test_render_snapserver_rejects_an_empty_stream_list(enabled):
-    # Rule 2. Zero streams crashes snapserver at the first client connect, so the renderer must
-    # have no path to emitting one, including via ids that name no catalog entry.
+    # Rule 2. Zero streams crashes snapserver at the first client connect, including when the ids
+    # name no catalog entry.
     with pytest.raises(ValueError):
         conf.render_snapserver(enabled)
 
@@ -119,9 +117,9 @@ def test_render_snapserver_ignores_argument_order():
 
 
 def test_go_librespot_pipe_format_agrees_with_the_spotify_source_uri():
-    # go-librespot states the sample format and snapserver states the rate and channels, across
-    # two files, and neither validates the other. A mismatch produces a byte-misaligned stream
-    # rather than an error, so this assertion is the only check on it.
+    # go-librespot states the sample format and snapserver states the rate and channels, in two
+    # files, and neither validates the other. A mismatch produces a byte-misaligned stream rather
+    # than an error.
     config = yaml.safe_load(conf.render_go_librespot())
     pipe_bits = PIPE_FORMAT_BITS[config['audio_output_pipe_format']]
 

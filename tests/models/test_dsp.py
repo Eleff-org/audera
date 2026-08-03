@@ -2,11 +2,10 @@ from audera.models.dsp import DSPConfig
 
 
 def test_dsp_config_legacy_dict_drops_retired_keys():
-    """A config written by an earlier release loads, and re-serializes without its retired keys.
+    """A config written by an earlier release loads and re-serializes without its retired keys.
 
     Deployed devices carry `~/.audera/dsp/{player_id}.json` files from before the parametric-EQ
-    rewrite. Pydantic ignores the unknown keys on the way in; the assertion is that they do not
-    come back out, since a `to_dict()` that echoed them would keep re-writing a `pipeline` the
+    rewrite. A `to_dict()` that echoed the unknown keys would keep re-writing a `pipeline` the
     compiler no longer reads.
     """
     legacy = {

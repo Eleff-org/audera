@@ -16,12 +16,11 @@ device provisions shairport-sync with.
 
 This script does not play audio. shairport-sync 4.3.7 in AirPlay 2 mode requires the transient
 HAP pair-verify a real sender performs, and `pyatv`'s implementation of it is rejected with
-`HTTP 400` on `/pair-pin-start`. Sending a tone needs an iPhone, iPad, or Mac. The checks here
-cover everything up to the first byte of audio.
+`HTTP 400` on `/pair-pin-start`, so sending a tone needs an iPhone, iPad, or Mac.
 
 Exit status is 0 only when the receiver advertised AirPlay 2 and Snapserver knows the stream. A
-receiver that advertises while Snapserver has no such stream is a `snapserver.conf` fault rather
-than a shairport-sync fault.
+receiver that advertises while Snapserver has no such stream is a `snapserver.conf` fault, not a
+shairport-sync fault.
 """
 
 import argparse
@@ -61,7 +60,7 @@ async def _find_receiver(host: Optional[str], name: str, timeout: float):
     """Returns the `pyatv` config for the AirPlay receiver, or `None`.
 
     Scans for every protocol rather than filtering to RAOP, since whether an `_airplay._tcp`
-    service is advertised is one half of the AirPlay 2 check.
+    service is advertised is half of the AirPlay 2 check.
 
     Parameters
     ----------
@@ -82,7 +81,7 @@ async def _find_receiver(host: Optional[str], name: str, timeout: float):
     if not found:
         return None
     # Match by name, then fall back to the sole result of a unicast probe, which can only have
-    # found the probed address. A name mismatch is reported rather than treated as no receiver.
+    # found the probed address. A name mismatch is reported rather than read as no receiver.
     for config in found:
         if config.name == name:
             return config
@@ -107,8 +106,8 @@ def _check_advertisement(config) -> bool:
     for protocol in (Protocol.RAOP, Protocol.AirPlay):
         service = config.get_service(protocol)
         if service is None:
-            # `_airplay._tcp` absent with `_raop._tcp` present is the AirPlay 1 downgrade:
-            # shairport-sync built without `--with-airplay-2`, reporting the same version string.
+            # `_airplay._tcp` absent with `_raop._tcp` present means shairport-sync was built
+            # without `--with-airplay-2`, which reports the same version string.
             print(f'[ FAIL ] No {protocol.name} service advertised')
             ok = False
         elif service.port != _AIRPLAY_2_PORT:

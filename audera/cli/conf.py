@@ -86,10 +86,8 @@ pipeline: []
 def render_snapserver(enabled: Sequence[str]) -> str:
     """Renders the Snapserver configuration file.
 
-    Required rather than defaulted to the bootstrap set, which makes this a pure renderer: its
-    output depends on its argument alone and it cannot read the recorded set on its own.
-    `commands.py` passes `sources_dal.get_enabled()`, which is the seam where a device's own
-    record — and its degradation to `DEFAULT_ENABLED` — is decided.
+    A pure renderer: `enabled` is required rather than defaulted to the bootstrap set, so the
+    output depends on the argument alone. `commands.py` passes `sources_dal.get_enabled()`.
 
     Parameters
     ----------
@@ -107,7 +105,7 @@ def render_snapserver(enabled: Sequence[str]) -> str:
     `ValueError`
         When no catalogued source is enabled. Snapserver dereferences a null default stream at
         the first client connect, so a zero-stream configuration crashes it and is not emitted.
-        There is no fallback to the bootstrap set, which would let the data-access layer and
+        It does not fall back to the bootstrap set, which would let the data-access layer and
         `/etc/snapserver.conf` disagree.
     """
     ids = list(enabled)
@@ -119,8 +117,8 @@ def render_snapserver(enabled: Sequence[str]) -> str:
         raise ValueError(f'At least one catalogued audio source must be enabled, got {ids!r}.')
 
     sources = '\n'.join(lines)
-    # Derived here rather than accepted as a parameter, so no caller can name a default that
-    # no rendered source provides; Snapserver mis-routes that without reporting an error.
+    # Derived rather than accepted as a parameter, so no caller can name a default no rendered
+    # source provides, which Snapserver mis-routes without reporting an error.
     default = default_source(ids)
 
     # `rf` rather than `r`: any future brace in the literal below raises a `ValueError` at call
@@ -171,14 +169,11 @@ threads = -1
 #  - "/var/lib/snapserver/" when running as daemon
 #  - "$HOME/.config/snapserver/" when not running as daemon
 #
-# Set explicitly rather than left empty. `server.json` is where Snapcast persists what Audera
-# does not store: client names, volumes, latencies, group membership, and each group's
-# `stream_id`. The unit runs in the foreground rather than with `-d`, so an empty value takes
-# the `$HOME` branch, and provisioning sets a `HOME` on that unit for go-librespot. Leaving
-# this empty would couple the persisted player configuration to an environment variable chosen
-# for an unrelated backend; changing that variable makes snapserver start from an empty state
-# file, with every player renamed back to its MAC. The value below is upstream's own daemon
-# default, stated here so the unit's environment cannot change it.
+# Set explicitly rather than left empty. `server.json` here is where Snapcast persists what
+# Audera does not store: client names, volumes, latencies, group membership, and each group's
+# `stream_id`. An empty value resolves against `$HOME`, which provisioning sets on this unit for
+# go-librespot, so changing that variable would make snapserver start from an empty state file
+# with every player renamed back to its MAC. The value below is upstream's own daemon default.
 datadir = /var/lib/snapserver/
 
 # enable mDNS to publish services
@@ -390,10 +385,9 @@ default_source = {default}
 def render_go_librespot() -> str:
     """Renders the go-librespot (Spotify Connect) configuration file.
 
-    Rendered once at provision time into `/var/lib/snapserver/.config/go-librespot`. Nothing
-    passes that path to go-librespot; go-librespot derives it from `$HOME`, which provisioning
-    sets on Snapserver's unit through a drop-in. The content is static, so nothing here changes
-    when the source is enabled or disabled.
+    Rendered once at provision time into `/var/lib/snapserver/.config/go-librespot`, which
+    go-librespot derives from `$HOME`, set on Snapserver's unit by a provisioning drop-in. The
+    content is static, so it does not change when the source is enabled or disabled.
 
     Returns
     -------
@@ -404,23 +398,22 @@ def render_go_librespot() -> str:
 device_name: Audera
 device_type: speaker
 
-# Spotify's highest tier. The pipe below is lossless from here on, so this is the
-# ceiling for the Spotify source.
+# Spotify's highest tier, and the ceiling for this source, since the pipe below is
+# lossless from here on.
 bitrate: 320
 
 # Snapserver reads the child process's stdout, so the pipe backend writes there.
 # `s16le` must agree with the Spotify source URI's `sampleformat=44100:16:2` in
-# audera/domains/sources/catalog.py. go-librespot states the format, snapserver
-# states the rate and channels, and neither validates the other. A mismatch produces
-# a byte-misaligned stream, which is audible distortion rather than an error.
+# audera/domains/sources/catalog.py. Neither side validates the other, and a mismatch
+# produces a byte-misaligned stream, which is audible distortion rather than an error.
 audio_backend: pipe
 audio_output_pipe: /dev/stdout
 audio_output_pipe_format: s16le
 
 # Loudness levelling, per song rather than per album, so every track reaches Snapserver
-# at the same loudness. Snapcast's documented `+6.0` pregain is not adopted, because the
-# DSP editor's auto-protected pre-amp computes clip-safe headroom from the EQ bands alone
-# and does not account for gain applied upstream of it.
+# at the same loudness. Snapcast's documented `+6.0` pregain is not adopted: the DSP
+# editor's auto-protected pre-amp computes clip-safe headroom from the EQ bands alone and
+# does not account for gain applied upstream of it.
 normalisation_disabled: false
 normalisation_use_album_gain: false
 normalisation_pregain: 0.0
@@ -431,11 +424,10 @@ normalisation_pregain: 0.0
 zeroconf_enabled: true
 
 # Registers the `_spotify-connect._tcp` service through the running avahi-daemon over D-Bus
-# instead of go-librespot's own mDNS responder, which is the `builtin` default. There is no
-# auto-detection; `zeroconf/zeroconf.go:67` branches on this key alone. Upstream's guidance
-# is that `builtin` is for hosts with no avahi, and that avahi is the choice "to avoid port
-# conflicts". This host runs avahi: AirPlay needs it, `plexamp-mdns` publishes through it,
-# and `audera.local` is its hostname. Chosen on that guidance, not on an observed conflict.
+# instead of go-librespot's own mDNS responder, the `builtin` default. There is no
+# auto-detection; `zeroconf/zeroconf.go:67` branches on this key alone. Upstream reserves
+# `builtin` for hosts with no avahi; this host runs avahi for AirPlay, `plexamp-mdns`, and
+# `audera.local`.
 zeroconf_backend: avahi
 
 credentials:
@@ -444,8 +436,7 @@ credentials:
     persist_credentials: true
 
 # go-librespot's HTTP API. Its only consumer would be now-playing metadata, which is out
-# of scope for beta.1 and requires snapserver >= 0.34's bundled meta_go-librespot.py. It
-# stays off until something reads it, to avoid an unused listening socket.
+# of scope for beta.1 and requires snapserver >= 0.34's bundled meta_go-librespot.py.
 server:
   enabled: false
 """

@@ -109,8 +109,8 @@ class SnapserverClient:
     def get_stream_status(self) -> dict[str, str]:
         """Returns the status of every Snapcast stream, keyed by stream id.
 
-        Projects the payload `get_status()` already fetches. The status is Snapserver's own value
-        for the stream: `'playing'`, `'idle'`, or `'disabled'`.
+        The status is Snapserver's own value for the stream, one of `'playing'`, `'idle'`, or
+        `'disabled'`.
         """
         status = self.get_status()
         return {stream['id']: stream['status'] for stream in status.get('server', {}).get('streams', [])}

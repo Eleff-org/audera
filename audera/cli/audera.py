@@ -77,9 +77,8 @@ def main():
         help="Print the audio sources' systemd units to stdout, one per line.",
         epilog='Execute `audera streamer units --help` for help.',
     )
-    # One destination, so the two flags cannot disagree and neither can be omitted. Required
-    # because provisioning enables one list and disables the other, and a bare `units` silently
-    # meaning one of them would make the wrong call look right.
+    # One destination, so the two flags cannot disagree, and required, since provisioning enables
+    # one list and disables the other and a bare `units` would silently mean one of them.
     _STREAMER_UNITS_SELECTION = _STREAMER_UNITS_PARSER.add_mutually_exclusive_group(required=True)
     _STREAMER_UNITS_SELECTION.add_argument(
         '--enabled',

@@ -1,14 +1,13 @@
 #!/bin/bash
 
 # Streamer-only install/setup helpers for Audera device setup scripts.
-# Sourced by streamer/automation/setup.sh, which sources lib/common.sh too: `write_streamer_units`
-#   calls its `write_camilladsp_service`. Bash resolves a function name when the call runs rather
-#   than when the file is sourced, so the two `source` lines have no required order.
+# Sourced by streamer/automation/setup.sh alongside lib/common.sh: `write_streamer_units` calls its
+#   `write_camilladsp_service`. Bash resolves function names at call time, so the two `source` lines
+#   have no required order.
 
-# Writes the helper `plexamp-mdns.service` executes, which publishes `plexamp.local` over
-#   mDNS. `_enable_source(PlexAmp)` runs `enable --now plexamp-mdns`, which fails on a host
-#   that has the unit but not its ExecStart target, so the helper is written here, beside the
-#   unit that names it.
+# Writes the helper `plexamp-mdns.service` executes, which publishes `plexamp.local` over mDNS.
+#   Written here, beside the unit that names it, since `_enable_source(PlexAmp)` runs
+#   `enable --now plexamp-mdns` and that fails without the ExecStart target present.
 write_plexamp_mdns_helper() {
     cat > /usr/local/bin/plexamp-mdns.sh <<'EOF'
 #!/bin/bash
@@ -17,23 +16,17 @@ EOF
     chmod +x /usr/local/bin/plexamp-mdns.sh
 }
 
-# Writes every systemd unit the streamer runs. Its four arguments are the only values the
-#   units interpolate, so the heredocs below are the sole description of a provisioned
-#   device's unit set, and `tests/systemd/inside/test_provisioning.py` asserts against them.
-#   `camilladsp.service` is the one exception: it comes from `lib/common.sh`, because the
-#   player installs the same unit, so the tests scan both files for heredocs.
+# Writes every systemd unit the streamer runs, except `camilladsp.service`, which comes from
+#   `lib/common.sh` since the player installs the same unit.
 #
 # The snapserver and snapclient heredocs are unquoted, so `$snapserver_home` and
-#   `$snapserver_config` expand from these locals. `plexamp.service`'s is quoted, so the
-#   literal `$(seq 1 30)` and `$i` in its ExecStartPre reach the unit file unexpanded.
+#   `$snapserver_config` expand from these locals. `plexamp.service`'s is quoted, so the literal
+#   `$(seq 1 30)` and `$i` in its ExecStartPre reach the unit file unexpanded.
 #
-# Every unit here carries TimeoutStopSec=5. Audera stops these units from Python, through
-#   `audera/services/system.py`, whose subprocess timeout is 15 seconds, and the manager's
-#   default stop timeout is 90: a backend that ignores SIGTERM makes `systemctl` outlive the
-#   seam that called it, raising `TimeoutExpired` and skipping every step after the stop.
-#   `systemctl restart` is stop-then-start and the whole round trip shares the one budget, so
-#   5 rather than a value nearer 15. `tests/systemd/inside/test_index.py` asserts the budget
-#   per unit.
+# Every unit carries TimeoutStopSec=5. Audera stops these units through
+#   `audera/services/system.py`, whose subprocess timeout is 15 seconds; the manager's default stop
+#   timeout of 90 would let `systemctl` outlive the seam and raise `TimeoutExpired`. A restart is
+#   stop-then-start on one budget, hence 5 rather than a value nearer 15.
 write_streamer_units() {
     local snapserver_home="$1"
     local snapserver_config="$2"
@@ -45,24 +38,20 @@ write_streamer_units() {
 [Unit]
 Description=Snapcast server
 # nqptp because snapserver forks shairport-sync for the airplay:// source, and that fork
-#   needs the PTP clock already holding UDP 319/320. After= on a disabled unit is a no-op,
-#   so this costs nothing when AirPlay is off.
+#   needs the PTP clock already holding UDP 319/320. After= on a disabled unit is a no-op.
 After=network.target sound.target nqptp.service
 
 [Service]
 # systemd sets no HOME for a unit with no User=, and everything snapserver forks inherits that.
-#   go-librespot cannot start without one: it computes its --config_dir default by calling Go's
-#   os.UserConfigDir(), which errors when neither XDG_CONFIG_HOME nor HOME is set, and it
-#   returns that error before flag.Parse runs, so passing --config_dir does not help. Snapserver
-#   then re-forks the dead backend on stdout EOF with no backoff, roughly ten times a second and
-#   never reaping, so the device drifts to PID exhaustion while the Sources tab reports Spotify
-#   healthy.
-# HOME rather than XDG_CONFIG_HOME satisfies both branches of os.UserConfigDir(), is what any
-#   other forked backend would look for, and HOME/.config/go-librespot is the directory this
-#   script rendered config.yml into.
-# Snapserver reads HOME too. Its datadir defaults to HOME/.config/snapserver/ for a foreground
-#   process, so this line would move server.json, holding every player name, volume, latency,
-#   group, and stream assignment. The rendered conf states datadir outright, which prevents it.
+#   go-librespot exits before flag.Parse computing its --config_dir default via Go's
+#   os.UserConfigDir(), which errors when neither XDG_CONFIG_HOME nor HOME is set, so
+#   --config_dir does not help. Snapserver then re-forks the dead backend on stdout EOF with no
+#   backoff, roughly ten times a second and never reaping, until the device runs out of PIDs.
+#   HOME satisfies both branches of os.UserConfigDir() and HOME/.config/go-librespot is where
+#   this script rendered config.yml.
+# Snapserver reads HOME too: its datadir defaults to HOME/.config/snapserver/ in the foreground,
+#   so this line would move server.json, which holds every player name, volume, latency, group,
+#   and stream assignment. The rendered conf states datadir outright, which prevents it.
 Environment=HOME=$snapserver_home
 ExecStart=/usr/bin/snapserver -c $snapserver_config
 Restart=on-failure
@@ -155,11 +144,9 @@ EOF
 
     # nqptp stop-timeout drop-in
     #
-    # `nqptp.service` comes from DietPi's `shairport-sync-airplay2` package, so this is a drop-in
-    #   rather than a unit: the script must not own a file apt will replace. It needs the same
-    #   budget as the units above, since enabling or disabling AirPlay from the Sources tab is
-    #   `systemctl disable --now nqptp` through the seam, so nqptp is the one unit whose stop an
-    #   operator can trigger directly.
+    # `nqptp.service` ships with DietPi's `shairport-sync-airplay2` package, so this is a drop-in
+    #   rather than a unit the script owns and apt would replace. It needs the same stop budget as
+    #   the units above: toggling AirPlay from the Sources tab runs `disable --now nqptp`.
     mkdir -p /etc/systemd/system/nqptp.service.d
     cat > /etc/systemd/system/nqptp.service.d/timeout.conf <<'EOF'
 [Service]
@@ -174,26 +161,21 @@ activate_streamer_units() {
     # Infrastructure, always on
     systemctl enable snapserver snapclient camilladsp audera-streamer
 
-    # Optional sources. Which of them run is what the operator recorded in
-    #   `~/.audera/sources.json`, which survives a reprovision because this script writes only
-    #   `/etc`, `/var/lib`, and unit files. `audera streamer units` derives the two lists from
-    #   that record, falling back to `audera.dal.sources.DEFAULT_ENABLED` when nothing has been
-    #   recorded, which is the state of a freshly flashed device. No source and no unit is named
-    #   here, so changing the bootstrap set or the catalog is a change to Python alone. The
-    #   Snapserver configuration step renders its conf from the same record, so the streams
-    #   Snapserver serves and the units feeding them come from one answer.
+    # Optional sources. `audera streamer units` derives both lists from `~/.audera/sources.json`,
+    #   which survives a reprovision because this script writes only `/etc`, `/var/lib`, and unit
+    #   files, falling back to `audera.dal.sources.DEFAULT_ENABLED` on a freshly flashed device. No
+    #   source or unit is named here, so changing the bootstrap set or the catalog is a change to
+    #   Python alone. The Snapserver conf is rendered from the same record.
     local disabled_units enabled_units
     disabled_units="$(audera streamer units --disabled)"
     enabled_units="$(audera streamer units --enabled)"
 
     # Unquoted expansions: the output is one unit per line and must word-split into one argument
-    #   each. Both lists can be empty — a device running only sources that snapserver forks itself
-    #   has no units either way — and `systemctl enable` with no unit is a usage error, so each is
-    #   guarded.
+    #   each. Either list can be empty, and `systemctl enable` with no unit is a usage error, so
+    #   each is guarded.
     if [ -n "$disabled_units" ]; then
-        # `--now`, matching `toggle.apply`: a reprovision of a device whose operator turned a source
-        #   off would otherwise leave the previous image's backend running with nothing in the conf
-        #   naming it, holding its port or its fifo until the reboot at the end of the flash.
+        # `--now`, matching `toggle.apply`: without it a reprovision leaves the previous image's
+        #   backend running, holding its port or fifo, with nothing in the conf naming it.
         # shellcheck disable=SC2086
         systemctl disable --now $disabled_units
     fi
@@ -202,9 +184,8 @@ activate_streamer_units() {
         systemctl enable $enabled_units
     fi
 
-    # The sources' units are started on their own line and first, because snapserver forks
-    # shairport-sync, which needs AirPlay's PTP clock already up, and `systemctl start a b`
-    # enqueues its jobs concurrently.
+    # Source units start first and on their own line: snapserver forks shairport-sync, which needs
+    # AirPlay's PTP clock already up, and `systemctl start a b` enqueues its jobs concurrently.
     if [ -n "$enabled_units" ]; then
         # shellcheck disable=SC2086
         systemctl start $enabled_units
