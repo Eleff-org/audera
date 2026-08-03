@@ -25,7 +25,7 @@ from audera.models.player import Group, Player
 from audera.models.settings import Settings
 from audera.services import system
 from audera.ui import components, features
-from audera.ui.streamer.pages import Page, index
+from audera.ui.streamer.pages import Page, current, index
 from audera.ui.streamer.pages.dsp import _band_summary
 
 _ElementT = TypeVar('_ElementT', bound=ui.element)
@@ -486,6 +486,16 @@ def _live(status: dict[str, str], *ids: str) -> None:
 def _definition(source_id: str) -> SourceDefinition:
     """Returns a catalog entry by id."""
     return next(source for source in CATALOG if source.id == source_id)
+
+
+def _page(user: User) -> Page:
+    """Returns the `Page` this user's client rendered against.
+
+    One is built per client, so the instance a test constructs to call `load()` is not the one the
+    render path holds; only this one carries that client's `_dialog_open` and `_claim_in_flight`.
+    """
+    with user:
+        return current()
 
 
 def _elements(user: User, **kwargs) -> list:
@@ -998,9 +1008,9 @@ async def test_sources_tab_activation_repaints_nothing_during_a_claim(
     reads: list[int] = []
     monkeypatch.setattr(SnapserverClient, 'get_stream_status', lambda self: reads.append(1) or {})
     _seed_sources('AirPlay')
-    page = Page()
-    page.load()
+    Page().load()
     await user.open('/')
+    page = _page(user)
     user.find('Sources').click()
 
     # A repaint here deletes the claim flow's elements and cancels its timers, which is the same
@@ -1490,7 +1500,7 @@ async def test_players_tab_by_player_fetches_stream_status(
     monkeypatch.setattr(SnapserverClient, 'get_stream_status', lambda self: reads.append(1) or {})
     page = Page()
     page.load()
-    # Adoption reads the stream status once at construction, which is not a render-path cost.
+    # Adoption reads the stream status once in `load()`, which is not a render-path cost.
     # Cleared here so the count measures only the per-render RPCs.
     reads.clear()
     await user.open('/')
@@ -1506,9 +1516,9 @@ async def test_players_tab_open_chip_menu_suppresses_and_releases_the_poll(
 ):
     _seed_sources('AirPlay', 'Spotify')
     _live(mock_stream_status, 'AirPlay')
-    page = Page()
-    page.load()
+    Page().load()
     await user.open('/')
+    page = _page(user)
     menu = _elements(user, kind=ui.menu)[0]
     with user:
         menu.value = True
@@ -1810,7 +1820,7 @@ async def test_players_tab_by_stream_fetches_stream_status(
     _seed_grouping(features.FF_GROUPING_BY_STREAM)
     page = Page()
     page.load()
-    # Adoption's construction-time read is not a render-path cost. Cleared so this measures the
+    # Adoption's read in `load()` is not a render-path cost. Cleared so this measures the
     # per-render RPCs and cannot pass on adoption's read alone.
     reads.clear()
     await user.open('/')
@@ -1823,13 +1833,13 @@ async def test_players_tab_by_stream_fetches_stream_status(
 async def test_players_tab_by_stream_open_menu_suppresses_and_releases_the_poll(
     audera_home, mock_snapserver_two_players, mock_stream_status, mock_camilladsp, user: User
 ):
-    # Seeded before the page is constructed: `Page.__init__` reads the settings once.
+    # Seeded before the page is opened: the client's `Page` reads the settings once, at construction.
     _seed_grouping(features.FF_GROUPING_BY_STREAM)
     _seed_sources('AirPlay', 'Spotify')
     _live(mock_stream_status, 'AirPlay')
-    page = Page()
-    page.load()
+    Page().load()
     await user.open('/')
+    page = _page(user)
     menu = _elements(user, kind=ui.menu)[0]
     with user:
         menu.value = True
@@ -1922,6 +1932,56 @@ async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, u
         'apply_defaults() triggered script_mode via ui.colors(). '
         'Use app.colors() for application-wide theming instead of ui.colors().'
     )
+
+
+# One `Page` per client. Every assertion below fails against a shared instance, because
+# `@ui.refreshable` filters its render targets by instance alone: one `refresh()` clears every
+# client's tab, and the builds it starts race on one `_players_generation`, so all but the last
+# return having rendered nothing.
+async def _rendered(*users: User) -> None:
+    """Waits for every user's Players tab to finish the rebuild its poll's first tick started."""
+    await _settled(lambda: all(_sees_player(user) for user in users))
+
+
+def _sees_player(user: User) -> bool:
+    """Whether this user's element tree carries the player card's name label."""
+    return 'Living Room' in [label.text for label in _elements(user, kind=ui.label)]
+
+
+async def test_a_second_client_does_not_blank_the_first(audera_home, mock_snapserver_with_client, create_user):
+    Page().load()
+    first, second = create_user(), create_user()
+    await first.open('/')
+    await second.open('/')
+    await _rendered(first, second)
+
+    assert _sees_player(first), 'the first client blanked when the second one opened'
+    assert _sees_player(second)
+
+
+async def test_concurrent_clients_both_render_players(audera_home, mock_snapserver_with_client, create_user):
+    Page().load()
+    first, second = create_user(), create_user()
+    await asyncio.gather(first.open('/'), second.open('/'))
+    await _rendered(first, second)
+
+    assert _sees_player(first)
+    assert _sees_player(second)
+
+
+async def test_one_clients_poll_leaves_another_clients_players_tab(audera_home, mock_snapserver_with_client, create_user):
+    """`render`'s 10 s timer fires one refresh per client per tick, against that client alone."""
+    Page().load()
+    first, second = create_user(), create_user()
+    await first.open('/')
+    await second.open('/')
+    await _rendered(first, second)
+
+    _page(first)._build_players_tab.refresh()
+    await _rendered(first, second)
+
+    assert _sees_player(first), 'the refreshing client did not come back'
+    assert _sees_player(second), "another client's poll cleared this tab"
 
 
 async def test_volume_slider_seeded_from_daemon(

@@ -36,8 +36,8 @@ def render(page: 'Page', player_id: str) -> None:
     """Renders the full-page parametric-EQ editor for a single player.
 
     Bands are the source of truth; they are compiled to a live CamillaDSP pipeline
-    on Save. Per-page edit state lives in closures (not on `page`, which is shared
-    across every connected client): `state['saved']` mirrors the persisted config and
+    on Save. Per-page edit state lives in closures rather than on `page`, which holds
+    only what the tabs share: `state['saved']` mirrors the persisted config and
     `state['staged']` is the working copy that is compiled, validated, and pushed on
     Save. Scalar field edits mutate a band in place and only recompute the dirty
     indicator, derived pre-amp, and live response chart; structural changes

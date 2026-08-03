@@ -9,14 +9,26 @@ List @audera/ui for the Python package layout.
 Every UI app follows this two-file pattern:
 
 **`pages.py`** — contains a `Page` class:
-- `__init__`: loads state (settings, clients); no platform decorator unless dietpi-only
-- `load()`: registers routes via `ui.page(route)(self.method)`
+- `__init__`: loads that client's state (settings, flags); no platform decorator unless dietpi-only
+- `load()`: registers routes, and runs whatever belongs to the process rather than to a page load
 - Page methods: one per route (e.g. `index()`, `welcome()`, `connect()`)
 - Tab builder methods: `_build_<name>_tab()` — private, called from a page method
 
+**One `Page` per connected client.** `load()` registers route closures that each build their own, and publish it on `app.storage.client['page']` for `current()`. `run()`'s instance only calls `load()`; it renders nothing. A `Page` shared across clients is a correctness bug, not just contention:
+
+- `@ui.refreshable` keys its render targets on the bound instance and on **nothing else** (`refreshable._execute_refresh` filters `target.instance != instance`). One instance makes every `refresh()` a broadcast that clears every open browser's tab.
+- Re-entrancy guards on `Page` then guard the wrong scope. `_players_generation` is stamped per build and compared after each `await`; shared, it is a counter that builds in *different* browsers race on, and the loser returns having rendered nothing — an empty tab until that client reloads.
+- Latches on `Page` become cross-client freezes: one operator's open menu (`_dialog_open`) would suspend everyone's poll, and one operator's Plex OAuth (`_claim_in_flight`) would refuse everyone's source toggles.
+
+Anything genuinely process-scoped goes in `load()` or at module level, not on the instance — `index.adopt_running_sources` is there because it is a blocking Snapserver read that reconciles the device once, and `index._CHOREOGRAPHY_LOCK` is a module global because it serializes host mutations across every client. The cost of a per-client `Page` is `_load_settings()`, one JSON read per page load; in exchange a settings edit is picked up on the next load rather than never.
+
+`tests/ui/test_streamer.py`'s `_page(user)` is how a test reaches the instance the render path holds — the one it constructs to call `load()` is not it.
+
+`ui/setup` is the one app that still shares an instance, and it goes further — it stores live `ui.element` handles on `self` (`network_selector`, `password_input`), which a second browser would overwrite. It is single-client by construction: it serves one onboarding browser over its own access point, and the device leaves setup mode once that browser finishes. Give it the same treatment before it is ever reachable from the LAN.
+
 **`pages/` sub-package** — when `pages.py` grows past a few hundred lines, split it into a `pages/` package instead of one flat file:
 - `pages/__init__.py`: the thin `Page` class (`__init__`, `load()`) re-exported so `from …pages import Page` is unchanged. Each route method delegates to a module-level `render(page, …)` — e.g. `def dsp(self, player_id): dsp.render(self, player_id)`.
-- One module per route (`pages/index.py`, `pages/dsp.py`, …): a `render(page, …)` function plus that route's private `_build_<name>_tab(page)` / `_on_<action>(page, …)` helpers. `page` carries the shared state (`page.settings`, `page._dialog_open`); the `Page` class is **not** split across files. `@ui.refreshable` helpers stay module-level, keyed on the `page` argument, and are refreshed via `_build_<name>_tab.refresh()`.
+- One module per route (`pages/index.py`, `pages/dsp.py`, …): a `render(page, …)` function plus that route's private `_build_<name>_tab(page)` / `_on_<action>(page, …)` helpers. `page` carries that client's state (`page.settings`, `page._dialog_open`); the `Page` class is **not** split across files. `@ui.refreshable` helpers stay module-level, keyed on the `page` argument, and are refreshed via `_build_<name>_tab.refresh()`.
 - Private helper modules (`pages/_clients.py`, `pages/_plex.py`, …): shared client factories and self-contained flows, imported by the route modules. To avoid an import cycle, route modules never import names from `pages/__init__.py` at runtime — they take `page` as an argument and import `Page` only under `TYPE_CHECKING`.
 
 **`__init__.py`** — thin `run()` entry point only:

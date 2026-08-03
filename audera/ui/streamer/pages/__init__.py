@@ -1,21 +1,27 @@
 """Audera app pages"""
 
 from dotenv import load_dotenv
-from nicegui import ui
+from nicegui import app, ui
 
 from audera.ui.streamer.pages import dsp, index
-from audera.ui.streamer.pages._clients import _load_settings, _snapserver
+from audera.ui.streamer.pages._clients import _load_settings
 
 load_dotenv()
 
 
 class Page:
-    """A `class` that represents the streamer dashboard app."""
+    """A `class` that represents the streamer dashboard app.
+
+    One instance per connected client. `@ui.refreshable` keys its render targets on the bound
+    instance and on nothing else, so a `Page` shared across clients makes every `refresh()` a
+    broadcast that clears every open browser's tab, and makes `_players_generation` a counter that
+    concurrent builds in *different* browsers race on — the loser returns having rendered nothing,
+    leaving that client an empty Players tab until it reloads.
+    """
 
     def __init__(self):
         """Initializes an instance of the streamer dashboard app."""
         self.settings = _load_settings()
-        self._client = _snapserver(self.settings)
         self._dialog_open: bool = False
         # The Players tab's build counter. An `async` `@ui.refreshable` is not re-entrant, so two
         # refreshes in the same tick both clear and then both append, rendering every element twice.
@@ -23,15 +29,17 @@ class Page:
         # Set while the PlexAmp claim flow is mid-OAuth. A Sources tab refresh deletes the flow's
         # elements and cancels its timers, so a source toggle raised during a claim is refused.
         self._claim_in_flight: bool = False
-        # Reconciles the enabled source set against the streams Snapserver is serving, so an
-        # in-place upgrade does not rewrite the conf from a set that contradicts the device.
-        # No-ops once a set has been recorded.
-        index.adopt_running_sources(self)
 
     def load(self) -> None:
-        """Registers page routes."""
-        ui.page('/')(self.index)
-        ui.page('/player/{player_id}/dsp')(self.dsp)
+        """Registers page routes, each of which builds its own `Page`."""
+        # Reconciles the enabled source set against the streams Snapserver is serving, so an
+        # in-place upgrade does not rewrite the conf from a set that contradicts the device.
+        # No-ops once a set has been recorded. Here rather than in `__init__` because it is a
+        # blocking Snapserver read that belongs to the process, not to a page load.
+        index.adopt_running_sources(self)
+
+        ui.page('/')(_index)
+        ui.page('/player/{player_id}/dsp')(_dsp)
 
     async def index(self) -> None:
         """Renders the main dashboard page."""
@@ -51,3 +59,26 @@ class Page:
     @ui.refreshable
     def _build_sources_tab(self) -> None:
         index.build_sources_tab(self)
+
+
+def current() -> Page:
+    """Returns the calling client's `Page`.
+
+    Only valid inside a client context. Production code is handed its `page`; this is for a caller
+    that has only the client, such as a test asserting on per-client state after a render.
+    """
+    return app.storage.client['page']
+
+
+async def _index() -> None:
+    """The `/` route. One `Page` per client, published for `current()`."""
+    page = Page()
+    app.storage.client['page'] = page
+    await page.index()
+
+
+def _dsp(player_id: str) -> None:
+    """The `/player/{player_id}/dsp` route. One `Page` per client, published for `current()`."""
+    page = Page()
+    app.storage.client['page'] = page
+    page.dsp(player_id)
