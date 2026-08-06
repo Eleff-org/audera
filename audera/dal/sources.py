@@ -18,6 +18,7 @@ file, since a setup record can create the file before any enabled set is recorde
 
 import json
 import os
+import threading
 from typing import Union
 
 from audera import io
@@ -34,6 +35,8 @@ FILE_NAME: str = 'sources.json'
 # Provisioning renders the conf and the systemd unit state from `get_enabled()`, so this is what
 # a device with no recorded set gets; it never overwrites a recording.
 DEFAULT_ENABLED: tuple[str, ...] = ('AirPlay',)
+
+_WRITE_LOCK = threading.Lock()
 
 
 def is_recorded() -> bool:
@@ -64,10 +67,11 @@ def adopt(ids: list[str]) -> bool:
     ids: `list[str]`
         The source ids observed running, in catalog order.
     """
-    if not ids or is_recorded():
-        return False
-    _save(ids)
-    return True
+    with _WRITE_LOCK:
+        if not ids or is_recorded():
+            return False
+        _save(ids)
+        return True
 
 
 def set_enabled(id: str, enabled: bool) -> list[str]:
@@ -83,12 +87,13 @@ def set_enabled(id: str, enabled: bool) -> list[str]:
     enabled: `bool`
         Whether the source is enabled.
     """
-    ids = get_enabled()
-    if enabled and id not in ids:
-        ids.append(id)
-    elif not enabled and id in ids:
-        ids.remove(id)
-    return _save(ids)
+    with _WRITE_LOCK:
+        ids = get_enabled()
+        if enabled and id not in ids:
+            ids.append(id)
+        elif not enabled and id in ids:
+            ids.remove(id)
+        return _save(ids)
 
 
 def get_setup(id: str) -> dict:
@@ -112,10 +117,11 @@ def set_setup_complete(id: str, complete: bool) -> None:
     complete: `bool`
         Whether setup is complete.
     """
-    data = _document()
-    setup = data.setdefault('sources', {}).setdefault('setup', {})
-    setup[id] = {**setup.get(id, {}), 'complete': complete}
-    _save_document(data)
+    with _WRITE_LOCK:
+        data = _document()
+        setup = data.setdefault('sources', {}).setdefault('setup', {})
+        setup[id] = {**setup.get(id, {}), 'complete': complete}
+        _save_document(data)
 
 
 def clear_setup(id: str) -> None:
@@ -129,12 +135,13 @@ def clear_setup(id: str) -> None:
     id: `str`
         The source id.
     """
-    data = _document()
-    setup = data.get('sources', {}).get('setup', {})
-    if id not in setup:
-        return
-    del setup[id]
-    _save_document(data)
+    with _WRITE_LOCK:
+        data = _document()
+        setup = data.get('sources', {}).get('setup', {})
+        if id not in setup:
+            return
+        del setup[id]
+        _save_document(data)
 
 
 def _document() -> dict:

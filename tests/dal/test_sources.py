@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 
 import pytest
 
@@ -126,6 +127,37 @@ def test_sources_adopt_refuses_an_empty_set(audera_home):
     # zero-stream conf.
     assert sources_dal.adopt([]) is False
     assert not sources_dal.is_recorded()
+
+
+def test_sources_concurrent_set_enabled_and_set_setup_complete(audera_home):
+    """Both mutations survive when two threads race on the same file."""
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def _toggle():
+        try:
+            barrier.wait(timeout=5)
+            sources_dal.set_enabled('Spotify', True)
+        except Exception as exc:
+            errors.append(exc)
+
+    def _setup():
+        try:
+            barrier.wait(timeout=5)
+            sources_dal.set_setup_complete('PlexAmp', True)
+        except Exception as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=_toggle)
+    t2 = threading.Thread(target=_setup)
+    t1.start()
+    t2.start()
+    t1.join(timeout=10)
+    t2.join(timeout=10)
+
+    assert not errors, errors
+    assert 'Spotify' in sources_dal.get_enabled()
+    assert sources_dal.get_setup('PlexAmp') == {'complete': True}
 
 
 def test_sources_default_enabled_does_not_drift_from_the_catalog():

@@ -331,11 +331,14 @@ def _build_claim_flow(page: 'Page') -> None:
                 if await asyncio.to_thread(setup_complete):
                     port_timer[0].cancel()
                     page._claim_in_flight = False
-                    # Recorded before the override is removed, so a failure removing it still
-                    # leaves the claim recorded. The record is needed because the live probe reads
-                    # `unclaimed` again as soon as provisioning stops the unit.
-                    await asyncio.to_thread(sources_dal.set_setup_complete, SOURCE_ID, True)
-                    await asyncio.to_thread(_remove_claim_override)
+                    try:
+                        await asyncio.to_thread(sources_dal.set_setup_complete, SOURCE_ID, True)
+                    except Exception:
+                        pass
+                    try:
+                        await asyncio.to_thread(_remove_claim_override)
+                    except Exception:
+                        pass
                     page._build_sources_tab.refresh()
 
             port_timer.append(ui.timer(2.0, _poll_port))
