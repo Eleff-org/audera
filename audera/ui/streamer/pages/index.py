@@ -138,7 +138,7 @@ def adopt_running_sources(page: 'Page') -> None:
     """Seeds the enabled source set from the streams Snapserver is serving, once, when nothing has
     been recorded yet.
 
-    Called once from `Page.__init__` rather than from a render path.
+    Called once from `Page.load()` rather than from a render path.
 
     `dal.sources.get_enabled()` degrades an absent `sources.json` to `DEFAULT_ENABLED`, which is
     only correct for a flashed device. An in-place upgrade inherits a conf naming sources this code
@@ -1540,10 +1540,10 @@ def _open_settings_dialog(page: 'Page', client) -> None:
             async def _on_save(c=client, ni=name_input, li=latency_input):
                 snap = _snapserver(page.settings)
                 if ni.value and ni.value != c.name:
-                    snap.set_client_name(c.id, ni.value)
+                    await asyncio.to_thread(snap.set_client_name, c.id, ni.value)
                     ui.notify(f'Renamed to "{ni.value}"', type='positive', position='top-right')
-                if int(li.value) != c.latency_ms:
-                    snap.set_client_latency(c.id, int(li.value))
+                if li.value is not None and int(li.value) != c.latency_ms:
+                    await asyncio.to_thread(snap.set_client_latency, c.id, int(li.value))
                     ui.notify(f'Latency set to {int(li.value)} ms', type='positive', position='top-right')
 
                 page._dialog_open = False
@@ -1557,14 +1557,14 @@ def _open_settings_dialog(page: 'Page', client) -> None:
     dialog.open()
 
 
-def _reset_snap_volume(page: 'Page', client, vol_label=None) -> None:
+async def _reset_snap_volume(page: 'Page', client, vol_label=None) -> None:
     """Resets the Snapcast client volume to 100% / unmuted.
 
     If vol_label is provided (from the settings dialog), its text is updated to
     reflect the new value. The players tab is *not* refreshed so that the CamillaDSP
     volume sliders retain their current visual state.
     """
-    _snapserver(page.settings).set_client_volume(client.id, 100, muted=False)
+    await asyncio.to_thread(_snapserver(page.settings).set_client_volume, client.id, 100, muted=False)
     if vol_label is not None:
         vol_label.set_text('Current Volume 100%')
     ui.notify('Snapcast volume reset to 100%', type='positive', position='top-right')

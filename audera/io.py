@@ -12,6 +12,7 @@ old file or the new one and a failure leaves the old one.
 """
 
 import os
+import threading
 from typing import Union
 
 
@@ -19,8 +20,8 @@ def write_text(path: Union[str, os.PathLike], content: str, *, encoding: str = '
     """Writes `content` to `path`, atomically, creating the parent directory as needed.
 
     The temporary file is a sibling of the destination, since `os.replace` is only atomic within a
-    filesystem, and carries the process id, so two processes writing the same destination do not
-    share one temporary name. It is `chmod`ed before the replace, since `os.replace` carries the
+    filesystem, and carries the process id and thread id, so two processes or two threads writing
+    the same destination do not share one temporary name. It is `chmod`ed before the replace, since `os.replace` carries the
     source's mode onto the destination and narrowing afterwards leaves a window in which the
     content is world-readable.
 
@@ -37,7 +38,7 @@ def write_text(path: Union[str, os.PathLike], content: str, *, encoding: str = '
     """
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
-    temp_path = f'{path}.{os.getpid()}.tmp'
+    temp_path = f'{path}.{os.getpid()}.{threading.get_ident()}.tmp'
     try:
         with open(temp_path, 'w', encoding=encoding) as f:
             f.write(content)

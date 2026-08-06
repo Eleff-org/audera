@@ -616,7 +616,7 @@ class _Refreshable:
 class _PageStub:
     """The `page` the handlers read, without the `Page` that would provision itself.
 
-    Not the real `Page`: `Page.__init__` calls `index.adopt_running_sources`, which writes
+    Not the real `Page`: `Page.load()` calls `index.adopt_running_sources`, which writes
     `sources.json` from the streams Snapserver is currently serving, so inside this container it would
     record an enabled set from the previous test's conf before the current test's first line ran.
 
