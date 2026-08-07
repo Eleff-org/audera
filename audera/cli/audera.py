@@ -70,6 +70,11 @@ def main():
         default='S32LE',
         help='CamillaDSP playback device format (camilladsp.yml only).',
     )
+    _STREAMER_CONF_PARSER.add_argument(
+        '--playback-device',
+        default='hw:0',
+        help='CamillaDSP playback ALSA device (camilladsp.yml only).',
+    )
     _STREAMER_CONF_PARSER.set_defaults(func=commands.streamer_conf)
 
     _STREAMER_UNITS_PARSER = _STREAMER_VERB_SUBPARSER.add_parser(
@@ -126,6 +131,11 @@ def main():
         choices=['S16LE', 'S32LE'],
         default='S32LE',
         help='CamillaDSP playback device format (camilladsp.yml only).',
+    )
+    _PLAYER_CONF_PARSER.add_argument(
+        '--playback-device',
+        default='hw:0',
+        help='CamillaDSP playback ALSA device (camilladsp.yml only).',
     )
     _PLAYER_CONF_PARSER.set_defaults(func=commands.player_conf)
 

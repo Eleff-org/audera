@@ -15,7 +15,7 @@ from audera.domains.sources import default_source, source_lines
 SNAPSERVER_CONF: str = '/etc/snapserver.conf'
 
 
-def render_camilladsp(playback_format: Literal['S16LE', 'S32LE'] = 'S32LE') -> str:
+def render_camilladsp(playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', playback_device: str = 'hw:0') -> str:
     """Renders the CamillaDSP configuration file.
 
     Parameters
@@ -26,6 +26,10 @@ def render_camilladsp(playback_format: Literal['S16LE', 'S32LE'] = 'S32LE') -> s
         effective ceiling is 16-bit/48 kHz (ADR 002), so ``'S16LE'`` loses no
         quality. The capture device stays ``'S32LE'`` to match Snapclient's
         32-bit loopback output.
+    playback_device : `str`
+        The ALSA playback device. Defaults to ``'hw:0'``. Pi 5 HDMI requires
+        ``'plughw:0'`` because vc4-hdmi accepts only ``IEC958_SUBFRAME_LE``
+        (see ADR 003, decision 5).
 
     Returns
     -------
@@ -73,7 +77,7 @@ devices:
   playback:
     type: Alsa
     channels: 2
-    device: "hw:0" # Must match the DAC soundcard index
+    device: "{playback_device}"
     format: {playback_format}
 
 # Essential even if empty for the config to be valid

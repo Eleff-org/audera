@@ -31,6 +31,11 @@ set_cmdline_param() {
     fi
 }
 
+# Returns true when the host is a Raspberry Pi 5
+is_pi5() {
+    grep -q 'Raspberry Pi 5' /proc/device-tree/model 2>/dev/null
+}
+
 # Configures /boot/firmware/config.txt (and cmdline.txt, for hdmi) for the given
 #   audio device; a no-op (with a message) when $1 is empty
 configure_audio_device() {
@@ -42,14 +47,19 @@ configure_audio_device() {
     echo ">>> Configuring audio device: $audio_device"
     case "$audio_device" in
         hdmi)
-            set_config_line /boot/firmware/config.txt 'hdmi_force_hotplug' 'hdmi_force_hotplug=1'
-            set_config_line /boot/firmware/config.txt 'hdmi_drive' 'hdmi_drive=2'
-            set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
-            set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
-            set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
-            set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-fkms-v3d'
-            set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
-            set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
+            if is_pi5; then
+                set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-kms-v3d'
+                set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
+            else
+                set_config_line /boot/firmware/config.txt 'hdmi_force_hotplug' 'hdmi_force_hotplug=1'
+                set_config_line /boot/firmware/config.txt 'hdmi_drive' 'hdmi_drive=2'
+                set_config_line /boot/firmware/config.txt 'hdmi_force_edid_audio' 'hdmi_force_edid_audio=1'
+                set_config_line /boot/firmware/config.txt 'hdmi_group' 'hdmi_group=1'
+                set_config_line /boot/firmware/config.txt 'hdmi_mode' 'hdmi_mode=16'
+                set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-fkms-v3d'
+                set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
+                set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
+            fi
             ;;
         digiamp-plus)
             set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=rpi-digiampplus'
@@ -75,4 +85,10 @@ configure_audio_device() {
 #   (which reject S32LE), S32LE otherwise
 camilladsp_playback_format() {
     if [ "$1" = 'hdmi' ]; then echo 'S16LE'; else echo 'S32LE'; fi
+}
+
+# Echoes the CamillaDSP playback ALSA device for the given audio device: plughw:0 for
+#   Pi 5 + hdmi (vc4-hdmi accepts only IEC958_SUBFRAME_LE), hw:0 otherwise
+camilladsp_playback_device() {
+    if [ "$1" = 'hdmi' ] && is_pi5; then echo 'plughw:0'; else echo 'hw:0'; fi
 }
