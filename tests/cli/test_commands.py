@@ -153,3 +153,17 @@ def test_conf_camilladsp_s16le_only_changes_playback(audera_cli, subject):
     assert out.count('format: S32LE') == 1
     # Comments are preserved end-to-end (scope + render fidelity).
     assert 'HDMI STABILITY' in out
+
+
+@pytest.mark.parametrize('subject', ['streamer', 'player'])
+def test_conf_camilladsp_default_playback_device_is_hw0(audera_cli, subject):
+    out = audera_cli(subject, 'conf', 'camilladsp.yml').stdout
+    assert '    device: "hw:0"\n' in out
+
+
+@pytest.mark.parametrize('subject', ['streamer', 'player'])
+def test_conf_camilladsp_playback_device_override(audera_cli, subject):
+    out = audera_cli(subject, 'conf', 'camilladsp.yml', '--playback-device', 'plughw:0').stdout
+    # Playback device becomes plughw:0; capture device stays hw:Loopback,1.
+    assert '    device: "plughw:0"\n' in out
+    assert '    device: "hw:Loopback,1"\n' in out

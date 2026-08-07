@@ -24,6 +24,10 @@ Using a different DAC requires:
 - Updating the CamillaDSP `playback.device` in `audera/cli/conf.py` (`render_camilladsp`)
 - Verifying the ALSA card index does not shift when `snd-aloop` is loaded at `index=7`
 
+### HDMI audio (Pi 5)
+
+Pi 5 has no `snd_bcm2835`; firmware-KMS (`vc4-fkms-v3d`) binds video-only and enumerates no HDMI audio card. Pi 5 requires full KMS (`vc4-kms-v3d`) for HDMI audio enumeration, and `plughw:0` for playback because the vc4-hdmi ALSA device accepts only `IEC958_SUBFRAME_LE`. Provisioning auto-detects the board model via `/proc/device-tree/model` and applies the correct overlay and playback device. Pi 4 is unaffected — `vc4-fkms-v3d` + `hw:0` remain correct. Non-HDMI DACs are unaffected on both boards.
+
 ### OS: DietPi (Debian Trixie, Raspberry Pi OS-based image)
 
 `setup.sh` sources `/boot/dietpi/func/dietpi-globals` for `G_CONFIG_INJECT` and `dietpi-set_hardware`. These functions do not exist on standard Debian or Raspberry Pi OS. The automated first-boot flow (`AUTO_SETUP_*` keys in `dietpi.txt`) is also DietPi-specific.

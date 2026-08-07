@@ -61,7 +61,7 @@ def player_start(**_) -> None:
         setup.run(role='player')
 
 
-def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE']) -> None:
+def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'], playback_device: str = 'hw:0') -> None:
     """Writes a bundled config file, rendered from `audera.cli.conf`, to stdout.
 
     Parameters
@@ -70,9 +70,11 @@ def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE']) -> Non
         The config file name to render.
     playback_format : `Literal['S16LE', 'S32LE']`
         The CamillaDSP playback device format (only applies to `camilladsp.yml`).
+    playback_device : `str`
+        The CamillaDSP playback ALSA device (only applies to `camilladsp.yml`).
     """
     if filename == 'camilladsp.yml':
-        sys.stdout.write(conf.render_camilladsp(playback_format))
+        sys.stdout.write(conf.render_camilladsp(playback_format, playback_device))
     elif filename == 'snapserver.conf':
         # The recorded enabled set, not `DEFAULT_ENABLED`. `~/.audera/sources.json` survives a
         # reprovision, so rendering the bootstrap default would ship a conf naming AirPlay to a
@@ -87,7 +89,9 @@ def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE']) -> Non
         raise SystemExit(f'Unknown config file: {filename!r}')
 
 
-def streamer_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', **_) -> None:
+def streamer_conf(
+    filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', playback_device: str = 'hw:0', **_
+) -> None:
     """Prints a bundled streamer config file to stdout.
 
     Parameters
@@ -96,10 +100,12 @@ def streamer_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S
         The config file name.
     playback_format : `Literal['S16LE', 'S32LE']`
         The CamillaDSP playback device format (only applies to `camilladsp.yml`).
+    playback_device : `str`
+        The CamillaDSP playback ALSA device (only applies to `camilladsp.yml`).
 
     Help
     ----
-    usage: audera streamer conf <filename> [--playback-format {S16LE,S32LE}]
+    usage: audera streamer conf <filename> [--playback-format {S16LE,S32LE}] [--playback-device DEVICE]
 
     Execute `audera streamer --help` for help.
 
@@ -110,7 +116,7 @@ def streamer_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S
     ```
 
     """
-    _emit_conf(filename, playback_format)
+    _emit_conf(filename, playback_format, playback_device)
 
 
 def streamer_units(disabled: bool = False, **_) -> None:
@@ -143,7 +149,7 @@ def streamer_units(disabled: bool = False, **_) -> None:
     sys.stdout.writelines(f'{unit}\n' for unit in source_units(sources_dal.get_enabled(), enabled=not disabled))
 
 
-def player_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', **_) -> None:
+def player_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', playback_device: str = 'hw:0', **_) -> None:
     """Prints a bundled player config file to stdout.
 
     Parameters
@@ -152,10 +158,12 @@ def player_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32
         The config file name.
     playback_format : `Literal['S16LE', 'S32LE']`
         The CamillaDSP playback device format (only applies to `camilladsp.yml`).
+    playback_device : `str`
+        The CamillaDSP playback ALSA device (only applies to `camilladsp.yml`).
 
     Help
     ----
-    usage: audera player conf <filename> [--playback-format {S16LE,S32LE}]
+    usage: audera player conf <filename> [--playback-format {S16LE,S32LE}] [--playback-device DEVICE]
 
     Execute `audera player --help` for help.
 
@@ -166,4 +174,4 @@ def player_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32
     ```
 
     """
-    _emit_conf(filename, playback_format)
+    _emit_conf(filename, playback_format, playback_device)

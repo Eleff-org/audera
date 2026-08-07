@@ -50,7 +50,7 @@ Run the script from the project root using Git's bundled bash.
 | `-u, --user` | `root` | SSH user |
 | `-p, --port` | `22` | SSH port |
 | `-i, --identity` | | SSH private key file |
-| `-a, --audio-device` | | Configure `dtoverlay` for the attached audio device: `hdmi`, `digiamp-plus`, `dac-plus`, `hifiberry-dac-plus`. Unset leaves the existing `dtoverlay` untouched. `hdmi` additionally uses firmware-KMS (`dtoverlay=vc4-fkms-v3d`) so the legacy `hdmi_*` settings apply, and renders the CamillaDSP playback format as `S16LE` (many HDMI sinks reject `S32LE`). |
+| `-a, --audio-device` | | Configure `dtoverlay` for the attached audio device: `hdmi`, `digiamp-plus`, `dac-plus`, `hifiberry-dac-plus`. Unset leaves the existing `dtoverlay` untouched. `hdmi` renders the CamillaDSP playback format as `S16LE` (many HDMI sinks reject `S32LE`). On Pi 4, it uses firmware-KMS (`dtoverlay=vc4-fkms-v3d`) with the legacy `hdmi_*` settings and `hw:0`. On Pi 5, it uses full KMS (`dtoverlay=vc4-kms-v3d`) and `plughw:0` (vc4-hdmi accepts only `IEC958_SUBFRAME_LE`). Board model is auto-detected. |
 | `--no-reboot` | | Skip final reboot; leaves device running for inspection |
 | `--wipe-networks` | | Delete all NetworkManager connections before reboot (triggers WiFi wizard on next boot) |
 | `-l, --log` | | Tee session output to a local file |

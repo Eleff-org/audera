@@ -53,6 +53,8 @@ The pipeline is currently empty (`filters: {}`, `pipeline: []`). When filters ar
 
 Both player and streamer configs use `device: "hw:0"`. ADR 001 noted `hw:0,0` for the player historically; this has been unified to `hw:0` for consistency with the streamer. The `,0` sub-device specifier is redundant for the DigiAMP+ and ALSA resolves both forms to the same device node.
 
+**Pi 5 HDMI exception:** Pi 5's vc4-hdmi ALSA device accepts only `IEC958_SUBFRAME_LE`. CamillaDSP emits linear PCM (`S16LE`/`S32LE`), so every format open on `hw:0` returns `EINVAL`. Using `plughw:0` pulls in ALSA's `iec958` plugin automatically — no resampling, negligible CPU, no quality loss. Provisioning auto-detects the board model (`is_pi5()` in `os/dietpi/lib/config.sh`) and passes `--playback-device plughw:0` to the CLI's `conf camilladsp.yml` command. Pi 4 and all non-HDMI DACs remain on `hw:0`.
+
 ### 6. HDMI playback uses `S16LE`
 
 The `playback.format` defaults to `S32LE`, but HDMI sinks (TVs, AVRs) frequently reject 32-bit PCM and respond with silence or dropouts. When the attached audio device is HDMI, `playback.format` is set to `S16LE` instead.
