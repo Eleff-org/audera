@@ -19,12 +19,15 @@ from audera.dal import dsp as dsp_dal
 from audera.dal import presets as presets_dal
 from audera.dal import settings as settings_dal
 from audera.dal import sources as sources_dal
+from audera.dal import volume as volume_dal
 from audera.domains.sources import CATALOG, SourceDefinition, default_source
+from audera.errors import ServiceError, Unreachable
 from audera.models.dsp import Band, DSPConfig, Preset
 from audera.models.player import Group, Player
 from audera.models.settings import Settings
 from audera.services import system
 from audera.ui import components, features
+from audera.ui.streamer import broker, commands
 from audera.ui.streamer.pages import Page, current, index
 from audera.ui.streamer.pages.dsp import _band_summary
 
@@ -33,6 +36,87 @@ _ElementT = TypeVar('_ElementT', bound=ui.element)
 
 def _unreachable(self, *args, **kwargs):
     raise ConnectionRefusedError()
+
+
+def _seed_hub(
+    monkeypatch,
+    players: list[Player] | None = None,
+    groups: list[Group] | None = None,
+    stream_status: dict[str, str] | None = None,
+    volumes: dict[str, int | None] | None = None,
+) -> broker.EventBroker:
+    """Injects a pre-seeded Hub singleton without starting its async tasks.
+
+    Also mocks ``SnapserverClient.get_status`` from the hub cache so ``broker.reseed()``
+    (called after source toggles) refreshes from the same seeded state instead of opening
+    a real socket. Stream status is read live from the cache dict so readiness tests that
+    mutate ``mock_stream_status`` during the wait still reseed correctly.
+    """
+    h = broker.EventBroker.__new__(broker.EventBroker)
+    h._host = 'localhost'
+    h._port = 1780
+    h._url = 'ws://localhost:1780/jsonrpc'
+    h.cache = broker.Cache()
+    h._callbacks = []
+    h._prev_snapshot = ()
+    h._reader_task = None
+    h._debounce_handle = None
+    h._stopped = True
+    h.cache.clients = list(players or [])
+    h.cache.groups = list(groups or [])
+    h.cache.stream_status = stream_status if stream_status is not None else {}
+    h.cache.volumes = volumes if volumes is not None else {p.id: 80 for p in (players or []) if p.connected}
+    h._prev_snapshot = h.cache.snapshot()
+    monkeypatch.setattr(broker, '_broker', h)
+
+    def _get_status(self) -> dict:
+        groups_payload = []
+        for group in h.cache.groups:
+            clients_payload = []
+            for client in h.cache.clients:
+                if client.group_id != group.id:
+                    continue
+                clients_payload.append(
+                    {
+                        'id': client.id,
+                        'connected': client.connected,
+                        'host': {'ip': client.host, 'port': client.port, 'name': client.name},
+                        'config': {
+                            'name': client.name,
+                            'volume': {'percent': client.volume, 'muted': client.muted},
+                            'latency': client.latency_ms,
+                        },
+                    }
+                )
+            groups_payload.append(
+                {
+                    'id': group.id,
+                    'name': group.name,
+                    'stream_id': group.stream_id,
+                    'muted': group.muted,
+                    'clients': clients_payload,
+                    'volume': {'percent': group.volume},
+                }
+            )
+        streams_payload = [{'id': stream_id, 'status': status} for stream_id, status in h.cache.stream_status.items()]
+        return {'server': {'groups': groups_payload, 'streams': streams_payload}}
+
+    monkeypatch.setattr(SnapserverClient, 'get_status', _get_status)
+    return h
+
+
+def _drag_slider(slider: ui.slider, value: int) -> None:
+    """Simulates a user dragging a slider to `value` by firing the Quasar `update:model-value` event.
+
+    Setting `slider.value` programmatically fires `on_change` but NOT `update:model-value`, which
+    is the event the volume controls use for persistence (so a broker push cannot echo back). This
+    helper fires the right event for tests that assert on persistence.
+    """
+    for listener in slider._event_listeners.values():
+        if listener.type == 'update:modelValue' and getattr(listener.handler, '__name__', '') != 'handle_change':
+            slider._handle_event({'listener_id': listener.id, 'args': value})
+            return
+    raise AssertionError('no update:model-value listener found on slider')
 
 
 async def _settled(condition: Callable[[], bool], *, timeout: float = 5.0, interval: float = 0.01) -> None:
@@ -64,9 +148,8 @@ async def _stable(read: Callable[[], object], *, timeout: float = 5.0, interval:
     """Returns `read()` once two consecutive readings agree, or the last one at the deadline.
 
     `_settled`'s counterpart for an element identity, which a pending rebuild changes to a value
-    nothing can name in advance. `ui.timer` fires immediately by default, so the Players tab's poll
-    rebuilds it once on connect and an id taken before that rebuild names an element about to be
-    discarded. The next fire is ten seconds out, so agreement here means quiet.
+    nothing can name in advance. Agreement means no pending rebuild changed the identity between
+    readings.
 
     Parameters
     ----------
@@ -95,8 +178,19 @@ async def _stable(read: Callable[[], object], *, timeout: float = 5.0, interval:
 # points at a real streamer, and `_build_player_card` connects to the player's own host.
 # `_stream_status` swallows the failure into `{}`, so the empty map these fixtures return matches
 # what the timeout would have produced.
+@pytest.fixture(autouse=True)
+async def _command_queue(monkeypatch):
+    """Starts a command queue for each test and tears it down afterwards."""
+    q = commands.CommandQueue()
+    q.start()
+    monkeypatch.setattr(commands, '_queue', q)
+    yield
+    await q.stop()
+
+
 @pytest.fixture
 def mock_snapserver_empty(monkeypatch, mock_stream_status):
+    _seed_hub(monkeypatch, players=[], groups=[], stream_status=mock_stream_status, volumes={})
     monkeypatch.setattr(SnapserverClient, 'get_clients', _unreachable)
 
 
@@ -104,9 +198,8 @@ def mock_snapserver_empty(monkeypatch, mock_stream_status):
 def mock_snapserver_with_client(monkeypatch, mock_camilladsp, mock_stream_status):
     player = Player(id='abc123', host='192.168.1.50', port=1704, connected=True, volume=80, name='Living Room')
 
+    _seed_hub(monkeypatch, players=[player], groups=[], stream_status=mock_stream_status)
     monkeypatch.setattr(SnapserverClient, 'get_clients', lambda self: [player])
-    # Unpatched, every render would attempt a real websocket connect to localhost:1780. Raising
-    # leaves this player with no known stream, consistent with its empty `group_id`.
     monkeypatch.setattr(SnapserverClient, 'get_groups', _unreachable)
     return player
 
@@ -115,6 +208,7 @@ def mock_snapserver_with_client(monkeypatch, mock_camilladsp, mock_stream_status
 def mock_snapserver_with_muted_client(monkeypatch, mock_camilladsp, mock_stream_status):
     player = Player(id='abc123', host='192.168.1.50', port=1704, connected=True, volume=80, muted=True, name='Living Room')
 
+    _seed_hub(monkeypatch, players=[player], groups=[], stream_status=mock_stream_status)
     monkeypatch.setattr(SnapserverClient, 'get_clients', lambda self: [player])
     monkeypatch.setattr(SnapserverClient, 'get_groups', _unreachable)
     return player
@@ -129,7 +223,12 @@ def _two_clients(*group_ids: str) -> list[Player]:
     ]
 
 
-def _mock_groups(monkeypatch, players: list[Player], groups: list[Group]) -> list[tuple[str, str]]:
+def _mock_groups(
+    monkeypatch,
+    players: list[Player],
+    groups: list[Group],
+    stream_status: dict[str, str] | None = None,
+) -> list[tuple[str, str]]:
     """Serves `players` and `groups`, and writes a move through to `groups`.
 
     Returns the ordered `(group_id, stream_id)` move log. Under the by-stream grouping the card's
@@ -143,8 +242,13 @@ def _mock_groups(monkeypatch, players: list[Player], groups: list[Group]) -> lis
         for group in groups:
             if group.id == group_id:
                 group.stream_id = stream_id
+        h = broker.get()
+        for g in h.cache.groups:
+            if g.id == group_id:
+                g.stream_id = stream_id
         return {}
 
+    _seed_hub(monkeypatch, players=players, groups=groups, stream_status=stream_status)
     monkeypatch.setattr(SnapserverClient, 'get_clients', lambda self: list(players))
     monkeypatch.setattr(SnapserverClient, 'get_groups', lambda self: list(groups))
     monkeypatch.setattr(SnapserverClient, 'set_group_stream', _set_group_stream)
@@ -161,6 +265,7 @@ def mock_snapserver_two_players(monkeypatch, mock_camilladsp, mock_stream_status
             Group(id='g1', name='', client_ids=['abc123'], stream_id='Spotify'),
             Group(id='g2', name='', client_ids=['def456'], stream_id='AirPlay'),
         ],
+        stream_status=mock_stream_status,
     )
 
 
@@ -171,6 +276,7 @@ def mock_snapserver_shared_group(monkeypatch, mock_camilladsp, mock_stream_statu
         monkeypatch,
         _two_clients('g1', 'g1'),
         [Group(id='g1', name='', client_ids=['abc123', 'def456'], stream_id='Spotify')],
+        stream_status=mock_stream_status,
     )
 
 
@@ -181,14 +287,13 @@ def mock_snapserver_orphan_stream(monkeypatch, mock_camilladsp, mock_stream_stat
         monkeypatch,
         _two_clients('g1', 'g2')[:1],
         [Group(id='g1', name='', client_ids=['abc123'], stream_id='Ghost')],
+        stream_status=mock_stream_status,
     )
 
 
 @pytest.fixture
 def mock_camilladsp(monkeypatch):
     # Stateful, like the real daemon: get returns the last-set percent, seeded at 80.
-    # The players tab reseeds the slider from get_percent_volume on every (re-)render,
-    # so a static mock would revert a drag the moment the refresh timer fires.
     calls = {}
     state = {'volume': 80}
 
@@ -429,7 +534,7 @@ def mock_snapserver_listener(monkeypatch, mock_camilladsp, mock_stream_status):
     player = Player(id='abc123', host='192.168.1.50', port=1704, connected=True, volume=80, group_id='g1', name='Living Room')
     group = Group(id='g1', name='', client_ids=['abc123'], stream_id='Spotify')
 
-    _mock_groups(monkeypatch, [player], [group])
+    _mock_groups(monkeypatch, [player], [group], stream_status=mock_stream_status)
     return group
 
 
@@ -941,22 +1046,11 @@ async def test_sources_tab_enable_writes_the_rendered_conf(
 
 
 async def test_sources_tab_enable_waits_for_snapserver_before_repainting_the_chips(
-    audera_home, mock_snapserver_empty, stub_systemctl, snapserver_conf, monkeypatch, user: User
+    audera_home, mock_snapserver_empty, stub_systemctl, snapserver_conf, mock_stream_status, monkeypatch, user: User
 ):
     """`systemctl restart` returns once systemd has forked snapserver, before it is serving."""
     _seed_sources('AirPlay')
 
-    # Refusals are armed by the restart itself rather than counted from the top of the test, so
-    # the render before the toggle answers normally and only the post-restart window refuses.
-    state = {'refusals': 0}
-
-    def _get_stream_status(self) -> dict[str, str]:
-        if state['refusals'] > 0:
-            state['refusals'] -= 1
-            raise ConnectionRefusedError()
-        return {'AirPlay': 'idle', 'Spotify': 'playing'}
-
-    monkeypatch.setattr(SnapserverClient, 'get_stream_status', _get_stream_status)
     monkeypatch.setattr(index, '_READY_TIMEOUT', 5.0)
     monkeypatch.setattr(index, '_READY_INTERVAL', 0.01)
 
@@ -964,21 +1058,32 @@ async def test_sources_tab_enable_waits_for_snapserver_before_repainting_the_chi
     await user.open('/')
     user.find('Sources').click()
 
-    # Chained onto `stub_systemctl` rather than replacing it, so arming the refusal is the only
-    # difference from every other test's seam.
+    # The readiness wait uses a direct SnapserverClient.get_stream_status call, which shares
+    # the mock_stream_status dict. Simulate Snapserver coming up after a restart by clearing
+    # the dict on restart, then populating it after a delay (the wait loop's _READY_INTERVAL).
     stub = system.systemctl
+    state = {'refusals': 0}
 
     def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         if args[:2] == ('restart', 'snapserver'):
+            mock_stream_status.clear()
             state['refusals'] = 2
         return stub(*args, check=check)
 
+    original_sleep = time.sleep
+
+    def _counted_sleep(seconds: float) -> None:
+        original_sleep(seconds)
+        if state['refusals'] > 0:
+            state['refusals'] -= 1
+        if state['refusals'] == 0 and not mock_stream_status:
+            mock_stream_status.update({'AirPlay': 'idle', 'Spotify': 'playing'})
+
     monkeypatch.setattr(system, 'systemctl', _systemctl)
+    monkeypatch.setattr(time, 'sleep', _counted_sleep)
 
     user.find(marker='source-toggle-Spotify').click()
     await user.should_see('Spotify Connect enabled')
-    # Without the wait, the refresh reads the refusal and every enabled source renders
-    # `not running`, which the unpolled tab could only correct with a page reload.
     assert _chip(user, 'Spotify') == 'playing'
     assert _chip(user, 'AirPlay') == 'idle'
 
@@ -1006,23 +1111,24 @@ async def test_sources_tab_activation_repaints_nothing_during_a_claim(
     audera_home, mock_snapserver_empty, monkeypatch, user: User
 ):
     reads: list[int] = []
-    monkeypatch.setattr(SnapserverClient, 'get_stream_status', lambda self: reads.append(1) or {})
+    original = index._stream_status
+
+    def _counting_stream_status(page):
+        reads.append(1)
+        return original(page)
+
+    monkeypatch.setattr(index, '_stream_status', _counting_stream_status)
     _seed_sources('AirPlay')
     Page().load()
     await user.open('/')
     page = _page(user)
     user.find('Sources').click()
 
-    # A repaint here deletes the claim flow's elements and cancels its timers, which is the same
-    # reason a source toggle is refused mid-claim.
     page._claim_in_flight = True
     before = len(reads)
     user.find('Players').click()
     user.find('Sources').click()
 
-    # Polling cannot prove a repaint did not happen, so the refusal is measured against a return
-    # that does repaint. With the claim cleared the next return reads once; a refused return that
-    # had read too leaves two.
     page._claim_in_flight = False
     user.find('Players').click()
     user.find('Sources').click()
@@ -1151,7 +1257,7 @@ async def test_sources_tab_failed_reassignment_aborts_before_the_dal_write(
     audera_home, mock_snapserver_listener, mock_stream_status, stub_systemctl, snapserver_conf, monkeypatch, user: User
 ):
     def _set_group_stream(self, group_id: str, stream_id: str) -> dict:
-        raise RuntimeError('Snapserver error [Group.SetStream]: timed out')
+        raise Unreachable('Snapserver error [Group.SetStream]: timed out')
 
     monkeypatch.setattr(SnapserverClient, 'set_group_stream', _set_group_stream)
     _seed_sources('AirPlay', 'Spotify')
@@ -1162,7 +1268,7 @@ async def test_sources_tab_failed_reassignment_aborts_before_the_dal_write(
     user.find(marker='source-toggle-Spotify').click()
     await user.should_see('Disable Spotify Connect')
     user.find(marker='disable-confirm').click()
-    await user.should_see('Could not move players off Spotify Connect')
+    await user.should_see('Could not disable Spotify Connect')
     # Reassignment is the sole abort point: nothing past it ran.
     assert sources_dal.get_enabled() == ['AirPlay', 'Spotify']
     assert not snapserver_conf.exists()
@@ -1191,7 +1297,7 @@ async def test_sources_tab_restart_failure_leaves_the_new_state_in_place(
 ):
     def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         if args[0] == 'restart':
-            raise subprocess.CalledProcessError(1, ['systemctl', *args], '', 'Job for snapserver.service failed.')
+            raise ServiceError('Job for snapserver.service failed.')
         return subprocess.CompletedProcess(['systemctl', *args], 0, '', '')
 
     monkeypatch.setattr(system, 'systemctl', _systemctl)
@@ -1210,11 +1316,9 @@ async def test_sources_tab_failure_surfaces_stderr_not_the_exit_status(
     audera_home, mock_snapserver_empty, mock_stream_status, stub_systemctl, snapserver_conf, monkeypatch, user: User
 ):
     def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-        # `check` is honoured rather than ignored, so the failure this asserts on is the unit move
-        # and not `toggle.apply`'s `reset-failed` precaution, which the real seam never raises from.
         if not check:
             return subprocess.CompletedProcess(['systemctl', *args], 0, '', '')
-        raise subprocess.CalledProcessError(1, ['systemctl', *args], '', 'Job for plexamp.service failed.')
+        raise ServiceError('Job for plexamp.service failed.')
 
     monkeypatch.setattr(system, 'systemctl', _systemctl)
     monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'unclaimed')
@@ -1222,7 +1326,6 @@ async def test_sources_tab_failure_surfaces_stderr_not_the_exit_status(
     await user.open('/')
     user.find('Sources').click()
     user.find(marker='source-toggle-PlexAmp').click()
-    # `CalledProcessError.__str__` renders the argv and the exit status without the reason.
     await user.should_see('Job for plexamp.service failed.')
     await user.should_not_see('non-zero exit status')
 
@@ -1413,6 +1516,7 @@ async def test_players_tab_unreachable_groups_still_offer_the_enabled_set(
     audera_home, mock_snapserver_listener, mock_stream_status, mock_camilladsp, monkeypatch, user: User
 ):
     monkeypatch.setattr(SnapserverClient, 'get_groups', _unreachable)
+    broker.get().cache.groups = []
     _seed_sources('AirPlay', 'Spotify')
     _live(mock_stream_status, 'AirPlay', 'Spotify')
     Page().load()
@@ -1467,48 +1571,44 @@ async def test_players_tab_minimized_card_hides_the_stream_chip(audera_home, moc
     assert _elements(user, marker='player-stream-abc123') == []
 
 
-async def test_players_tab_reads_groups_once_per_render(
+async def test_players_tab_reads_from_hub_cache_not_snapserver(
     audera_home, mock_snapserver_shared_group, mock_camilladsp, monkeypatch, user: User
 ):
-    groups = [Group(id='g1', name='', client_ids=['abc123', 'def456'], stream_id='Spotify')]
-    clients = _two_clients('g1', 'g1')
     reads: list[str] = []
 
     def _get_groups(self) -> list[Group]:
         reads.append('groups')
-        return groups
+        return []
 
     def _get_clients(self) -> list[Player]:
         reads.append('clients')
-        return clients
+        return []
 
     monkeypatch.setattr(SnapserverClient, 'get_groups', _get_groups)
     monkeypatch.setattr(SnapserverClient, 'get_clients', _get_clients)
     Page().load()
     await user.open('/')
-    await _settled(lambda: reads.count('clients') >= 1)
-    # Read once per render and passed down as an `_Assignment` rather than once per card, so the
-    # count tracks `get_clients` however many times the poll re-renders the tab.
-    assert reads.count('groups') == reads.count('clients')
-    assert reads.count('groups') >= 1
+    # The Players tab reads from the broker cache, not from SnapserverClient, so the patched
+    # methods are never called during render.
+    await user.should_see('Living Room')
+    assert reads.count('groups') == 0
+    assert reads.count('clients') == 0
 
 
-async def test_players_tab_by_player_fetches_stream_status(
-    audera_home, mock_snapserver_listener, mock_camilladsp, monkeypatch, user: User
+async def test_players_tab_by_player_reads_stream_status_from_hub(
+    audera_home, mock_snapserver_listener, mock_camilladsp, mock_stream_status, monkeypatch, user: User
 ):
     reads: list[int] = []
     monkeypatch.setattr(SnapserverClient, 'get_stream_status', lambda self: reads.append(1) or {})
-    page = Page()
-    page.load()
-    # Adoption reads the stream status once in `load()`, which is not a render-path cost.
-    # Cleared here so the count measures only the per-render RPCs.
+    _live(mock_stream_status, 'Spotify')
+    Page().load()
+    # Adoption reads from the broker, which falls back to the client if the broker is not started.
+    # Cleared here so the count measures only the per-render calls.
     reads.clear()
     await user.open('/')
-    await _settled(lambda: len(reads) > 1)
-    # Every tab panel builds on page load, so the Sources tab's own read is the baseline, and the
-    # by-player layout adds one more. Liveness gates attachment as well as the by-stream header's
-    # status word, so both groupings pay the third RPC.
-    assert len(reads) > 1
+    # Stream status comes from the broker cache, not from SnapserverClient.get_stream_status.
+    assert reads.count(1) == 0
+    await user.should_see('Living Room')
 
 
 async def test_players_tab_open_chip_menu_suppresses_and_releases_the_poll(
@@ -1522,12 +1622,12 @@ async def test_players_tab_open_chip_menu_suppresses_and_releases_the_poll(
     menu = _elements(user, kind=ui.menu)[0]
     with user:
         menu.value = True
-    # The 10 s poll refreshes the Players tab, which would destroy an open menu.
+    # A broker dirty signal refreshes the Players tab, which would destroy an open menu.
     assert page._dialog_open is True
     user.find(marker='player-move-abc123-AirPlay').click()
     await _settled(lambda: page._dialog_open is False)
     # Under the by-player grouping nothing refreshes, so the handler itself clears the flag. A
-    # latch left set by an element no refresh replaces would freeze the poll for the life of the
+    # latch left set by an element no refresh replaces would freeze the signal for the life of the
     # page.
     assert page._dialog_open is False
 
@@ -1536,7 +1636,7 @@ async def test_players_tab_failed_move_notifies_and_refreshes(
     audera_home, mock_snapserver_listener, mock_stream_status, mock_camilladsp, monkeypatch, user: User
 ):
     def _set_group_stream(self, group_id: str, stream_id: str) -> dict:
-        raise RuntimeError('Snapserver error [Group.SetStream]: timed out')
+        raise Unreachable('Snapserver error [Group.SetStream]: timed out')
 
     monkeypatch.setattr(SnapserverClient, 'set_group_stream', _set_group_stream)
     _seed_sources('AirPlay', 'Spotify')
@@ -1812,22 +1912,19 @@ async def test_players_tab_by_stream_menu_names_the_blast_radius(
     await user.should_see(index._stream_caption(1))
 
 
-async def test_players_tab_by_stream_fetches_stream_status(
-    audera_home, mock_snapserver_listener, mock_camilladsp, monkeypatch, user: User
+async def test_players_tab_by_stream_reads_stream_status_from_hub(
+    audera_home, mock_snapserver_listener, mock_camilladsp, mock_stream_status, monkeypatch, user: User
 ):
     reads: list[int] = []
     monkeypatch.setattr(SnapserverClient, 'get_stream_status', lambda self: reads.append(1) or {})
+    _live(mock_stream_status, 'Spotify')
     _seed_grouping(features.FF_GROUPING_BY_STREAM)
-    page = Page()
-    page.load()
-    # Adoption's read in `load()` is not a render-path cost. Cleared so this measures the
-    # per-render RPCs and cannot pass on adoption's read alone.
+    Page().load()
     reads.clear()
     await user.open('/')
-    await _settled(lambda: len(reads) > 1)
-    # The third RPC. The by-player layout renders no status word, so its baseline is the Sources
-    # tab's single read.
-    assert len(reads) > 1
+    # Stream status comes from the broker cache, not from SnapserverClient.get_stream_status.
+    assert reads.count(1) == 0
+    await user.should_see('Living Room')
 
 
 async def test_players_tab_by_stream_open_menu_suppresses_and_releases_the_poll(
@@ -1843,12 +1940,12 @@ async def test_players_tab_by_stream_open_menu_suppresses_and_releases_the_poll(
     menu = _elements(user, kind=ui.menu)[0]
     with user:
         menu.value = True
-    # The 10 s poll refreshes the Players tab, which would destroy an open menu.
+    # A broker dirty signal refreshes the Players tab, which would destroy an open menu.
     assert page._dialog_open is True
     user.find(marker='player-move-abc123-AirPlay').click()
     await _settled(lambda: page._dialog_open is False)
     # Cleared by the move it triggered. This grouping does refresh, so a latched flag would
-    # freeze the poll for the life of the page.
+    # freeze the signal for the life of the page.
     assert page._dialog_open is False
 
 
@@ -1936,10 +2033,9 @@ async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, u
 
 # One `Page` per client. Every assertion below fails against a shared instance, because
 # `@ui.refreshable` filters its render targets by instance alone: one `refresh()` clears every
-# client's tab, and the builds it starts race on one `_players_generation`, so all but the last
-# return having rendered nothing.
+# client's tab.
 async def _rendered(*users: User) -> None:
-    """Waits for every user's Players tab to finish the rebuild its poll's first tick started."""
+    """Waits for every user's Players tab to show the player card."""
     await _settled(lambda: all(_sees_player(user) for user in users))
 
 
@@ -1970,7 +2066,7 @@ async def test_concurrent_clients_both_render_players(audera_home, mock_snapserv
 
 
 async def test_one_clients_poll_leaves_another_clients_players_tab(audera_home, mock_snapserver_with_client, create_user):
-    """`render`'s 10 s timer fires one refresh per client per tick, against that client alone."""
+    """A refresh on one client's `Page` does not blank another client's tab."""
     Page().load()
     first, second = create_user(), create_user()
     await first.open('/')
@@ -1984,7 +2080,7 @@ async def test_one_clients_poll_leaves_another_clients_players_tab(audera_home, 
     assert _sees_player(second), "another client's poll cleared this tab"
 
 
-async def test_volume_slider_seeded_from_daemon(
+async def test_volume_slider_seeded_from_hub(
     audera_home,
     mock_snapserver_with_client,
     mock_camilladsp,
@@ -1992,9 +2088,10 @@ async def test_volume_slider_seeded_from_daemon(
 ):
     Page().load()
     await user.open('/')
-    # Volume seeds from the daemon via get_percent_volume — no app-side replica, no
-    # push-on-render.
-    assert mock_camilladsp.get('get_percent_volume') is True
+    # Volume seeds from the broker cache — no set_percent_volume on render.
+    sliders = list(user.find(kind=ui.slider).elements)
+    assert len(sliders) == 1
+    assert sliders[0].value == 80
     assert mock_camilladsp.get('set_percent_volume') is None
 
 
@@ -2019,6 +2116,7 @@ async def test_players_tab_volume_db_mode_shows_icon_and_label(
 async def test_players_tab_unreadable_volume_withholds_a_value_and_disables_the_slider(
     audera_home, mock_snapserver_with_client, mock_camilladsp_unreadable, user: User
 ):
+    broker.get().cache.volumes['abc123'] = None
     Page().load()
     await user.open('/')
     # An unreadable daemon used to seed the slider at `DEFAULT_PERCENT_VOLUME`, rendering `25%`,
@@ -2035,13 +2133,14 @@ async def test_players_tab_volume_percent_slider_change_persists_and_updates_lab
 ):
     Page().load()
     await user.open('/')
+    slider = _only(user, kind=ui.slider, marker='player-volume')
     with user:
-        user.find(kind=ui.slider).elements.pop().value = 60
+        _drag_slider(slider, 60)
     await _settled(lambda: mock_camilladsp.get('set_percent_volume') is not None)
-    await user.should_see('60%')
     assert mock_camilladsp.get('set_percent_volume') == 60
     assert mock_camilladsp.get('set_volume') is None
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
+    assert volume_dal.get('abc123') == 60
 
 
 async def test_players_tab_volume_db_slider_change_persists_percent_and_shows_db(
@@ -2049,11 +2148,10 @@ async def test_players_tab_volume_db_slider_change_persists_percent_and_shows_db
 ):
     Page().load()
     await user.open('/')
-    # dB mode uses the same percent (0-100) slider; only the label shows dB.
+    slider = _only(user, kind=ui.slider, marker='player-volume')
     with user:
-        user.find(kind=ui.slider).elements.pop().value = 50
+        _drag_slider(slider, 50)
     await _settled(lambda: mock_camilladsp.get('set_percent_volume') is not None)
-    await user.should_see('-6.0 dB')  # percent_to_db(50) == -6.020...
     assert mock_camilladsp.get('set_percent_volume') == 50
     assert mock_camilladsp.get('set_volume') is None
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 100, False)
@@ -2064,9 +2162,9 @@ async def test_players_tab_volume_db_slider_floor_mutes_via_snapcast(
 ):
     Page().load()
     await user.open('/')
-    # Floor is 0% (displayed as MIN_DB in dB mode); dragging there mutes via Snapcast.
+    slider = _only(user, kind=ui.slider, marker='player-volume')
     with user:
-        user.find(kind=ui.slider).elements.pop().value = 0
+        _drag_slider(slider, 0)
     await _settled(lambda: mock_snapserver_volume.get('set_client_volume') is not None)
     assert mock_snapserver_volume.get('set_client_volume') == ('abc123', 0, True)
 

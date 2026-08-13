@@ -17,12 +17,15 @@ file, since a setup record can create the file before any enabled set is recorde
 """
 
 import json
+import logging
 import os
 import threading
-from typing import Union
+from typing import Callable, Union
 
 from audera import io
 from audera.dal import path
+
+logger = logging.getLogger(__name__)
 
 PATH: Union[str, os.PathLike] = path.HOME
 FILE_NAME: str = 'sources.json'
@@ -37,6 +40,24 @@ FILE_NAME: str = 'sources.json'
 DEFAULT_ENABLED: tuple[str, ...] = ('AirPlay',)
 
 _WRITE_LOCK = threading.Lock()
+_observers: list[Callable[[], None]] = []
+
+
+def on_change(callback: Callable[[], None]) -> None:
+    """Registers a callback invoked after any write to the sources document.
+
+    Fires for enabled-set changes and setup-record writes so every connected browser can refresh
+    the Sources tab (Plex claim completion is a setup write, not an enabled-set write).
+    """
+    _observers.append(callback)
+
+
+def _notify_observers() -> None:
+    for cb in _observers:
+        try:
+            cb()
+        except Exception:
+            logger.exception('sources observer failed')
 
 
 def is_recorded() -> bool:
@@ -71,7 +92,8 @@ def adopt(ids: list[str]) -> bool:
         if not ids or is_recorded():
             return False
         _save(ids)
-        return True
+    _notify_observers()
+    return True
 
 
 def set_enabled(id: str, enabled: bool) -> list[str]:
@@ -93,7 +115,11 @@ def set_enabled(id: str, enabled: bool) -> list[str]:
             ids.append(id)
         elif not enabled and id in ids:
             ids.remove(id)
-        return _save(ids)
+        else:
+            return ids
+        result = _save(ids)
+    _notify_observers()
+    return result
 
 
 def get_setup(id: str) -> dict:
@@ -122,6 +148,7 @@ def set_setup_complete(id: str, complete: bool) -> None:
         setup = data.setdefault('sources', {}).setdefault('setup', {})
         setup[id] = {**setup.get(id, {}), 'complete': complete}
         _save_document(data)
+    _notify_observers()
 
 
 def clear_setup(id: str) -> None:
@@ -142,6 +169,7 @@ def clear_setup(id: str) -> None:
             return
         del setup[id]
         _save_document(data)
+    _notify_observers()
 
 
 def _document() -> dict:

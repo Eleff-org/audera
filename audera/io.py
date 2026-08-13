@@ -15,6 +15,8 @@ import os
 import threading
 from typing import Union
 
+from audera.errors import StorageError
+
 
 def write_text(path: Union[str, os.PathLike], content: str, *, encoding: str = 'utf-8', mode: Union[int, None] = None) -> None:
     """Writes `content` to `path`, atomically, creating the parent directory as needed.
@@ -45,8 +47,13 @@ def write_text(path: Union[str, os.PathLike], content: str, *, encoding: str = '
         if mode is not None:
             os.chmod(temp_path, mode)
         os.replace(temp_path, path)
+    except OSError as exc:
+        raise StorageError(str(exc)) from exc
     finally:
         # `os.replace` consumed the temporary file on the success path, so this only runs after a
         # failure, where it keeps one file per failure from accumulating beside the destination.
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass

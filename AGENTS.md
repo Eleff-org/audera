@@ -55,7 +55,7 @@ All seven models (`Band`, `DSPConfig`, `Preset`, `Player`, `Group`, `Settings`, 
 
 ## DAL
 
-- `dsp`, `presets`, `settings`, and `sources` all persist via plain `json` (not duckdb). A `DSPConfig`'s and a `Preset`'s `bands` are nested lists of objects, which duckdb's `read_json_auto` — flat/columnar under the pytensils DTYPES constraint — cannot model. The duckdb-backed DALs were retired, so every surviving DAL is plain-json for the same reason.
+- `dsp`, `presets`, `settings`, `sources`, and `volume` all persist via plain `json`.
 - Config files: `~/.audera/{dsp,dsp/presets}/{id}.json` (`dsp` is keyed by `player_id`), `~/.audera/settings.json`, `~/.audera/sources.json`
 - Every configuration write goes through `audera/io.py`'s `write_text(path, content, *, encoding='utf-8', mode=None)` — the DALs, `/etc/snapserver.conf`, the PlexAmp claim drop-in (`mode=0o600`, it carries a plex.tv token), and the access point's dnsmasq conf. It takes already-rendered content, writes a sibling temp, and `os.replace`s it into place, so a concurrent reader sees either the old file or the new one and a failure leaves the old one. `mode` is applied to the temp, since `os.replace` carries the source's bits. `os/dietpi/streamer/automation/setup.sh` renders to `.tmp` and `mv`s for the same reason.
 
@@ -85,6 +85,17 @@ Three rules follow from upstream Snapcast behaviour. Record an ADR before contra
 The bootstrap set is `dal.sources.DEFAULT_ENABLED`, today `('AirPlay',)`, the only source that plays with no account, claim, or pairing. It is a fallback for a device with no recorded set, never a value that overwrites one: `get_enabled()` degrades to it, and provisioning renders both the conf (`audera streamer conf snapserver.conf`) and the systemd unit state (`audera streamer units --enabled` / `--disabled`) from `get_enabled()`. On a flashed device, which has no `sources.json`, that is AirPlay's units enabled and started and every other source's installed but disabled; on a reprovision it is whatever the operator recorded, since `sources.json` survives a flash. The shell names no source, so changing `DEFAULT_ENABLED` or reordering `CATALOG` is a change to Python alone; see `os/dietpi/AGENTS.md`.
 
 `index.adopt_running_sources`, called once from `Page.load()`, seeds an absent `sources.json` from the streams Snapserver is serving ∩ `CATALOG`. The enabled set is the sole input to the conf rewrite, so on an in-place upgrade this keeps the first toggle from truncating a pre-existing stream out of `/etc/snapserver.conf` without the disable path's reassignment safeguard firing. Adoption writes nothing on an unreachable Snapserver or an empty intersection, so the next load retries.
+
+## Error hierarchy
+
+`audera/errors.py` defines three typed exceptions for command failures:
+
+- `CommandError` — base class for all command failures
+- `Unreachable(CommandError)` — the target service could not be reached
+- `ServiceError(CommandError)` — the target service rejected the request
+- `StorageError(CommandError)` — a local file operation failed
+
+Each client and service boundary translates raw exceptions (`OSError`, `CalledProcessError`, etc.) into the typed equivalent. UI write handlers catch `CommandError`; `@platform.requires('dietpi')` keeps raising `RuntimeError` (not a command failure). See ADR 006 for the full translation table.
 
 ## Code style
 

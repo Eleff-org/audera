@@ -1,15 +1,33 @@
 """Settings configuration-layer"""
 
 import json
+import logging
 import os
-from typing import Union
+from typing import Callable, Union
 
 from audera import io
 from audera.dal import path
 from audera.models import settings
 
+logger = logging.getLogger(__name__)
+
 PATH: Union[str, os.PathLike] = path.HOME
 FILE_NAME: str = 'settings.json'
+
+_observers: list[Callable[[], None]] = []
+
+
+def on_change(callback: Callable[[], None]) -> None:
+    """Registers a callback invoked after a settings save."""
+    _observers.append(callback)
+
+
+def _notify_observers() -> None:
+    for cb in _observers:
+        try:
+            cb()
+        except Exception:
+            logger.exception('settings observer failed')
 
 
 def exists() -> bool:
@@ -59,6 +77,7 @@ def save(settings_: settings.Settings) -> settings.Settings:
         An instance of a `Settings` object.
     """
     io.write_text(os.path.join(PATH, FILE_NAME), json.dumps({'settings': settings_.to_dict()}, indent=2))
+    _notify_observers()
     return settings_
 
 

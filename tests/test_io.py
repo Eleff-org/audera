@@ -6,6 +6,7 @@ import stat
 import pytest
 
 from audera import io
+from audera.errors import StorageError
 
 
 def test_write_text_creates_the_parent_directory(tmp_path):
@@ -35,7 +36,7 @@ def test_write_text_leaves_the_destination_intact_when_the_write_fails(tmp_path,
         raise OSError('disk full')
 
     monkeypatch.setattr(io.os, 'replace', _boom)
-    with pytest.raises(OSError):
+    with pytest.raises(StorageError):
         io.write_text(path, 'truncated')
 
     assert path.read_text(encoding='utf-8') == '[stream]\nsource = airplay:///\n'
@@ -49,7 +50,7 @@ def test_write_text_leaves_no_temporary_file_behind(tmp_path, monkeypatch):
         raise OSError('disk full')
 
     monkeypatch.setattr(io.os, 'replace', _boom)
-    with pytest.raises(OSError):
+    with pytest.raises(StorageError):
         io.write_text(path, '{}')
 
     assert list(tmp_path.iterdir()) == []

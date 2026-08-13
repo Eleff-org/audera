@@ -14,7 +14,6 @@ and GitHub-hosted runners are v2, so every path under `/sys/fs/cgroup` differs b
 which is not guaranteed identically across them.
 """
 
-import asyncio
 import contextlib
 import os
 import re
@@ -31,6 +30,7 @@ from audera.cli import conf
 from audera.clients import SnapserverClient
 from audera.dal import sources as sources_dal
 from audera.models.player import Group, Player
+from audera.ui.streamer import commands
 from audera.ui.streamer.pages import index
 from audera.ui.streamer.pages._clients import _load_settings
 
@@ -569,15 +569,13 @@ def listening_player(provisioned) -> Iterator[str]:
 
 
 @pytest.fixture(autouse=True)
-def choreography_lock(monkeypatch) -> None:
-    """Rebinds `index._CHOREOGRAPHY_LOCK` per test, as `index.py`'s own comment prescribes.
-
-    The lock is constructed at import and binds an event loop only on a contended acquire.
-    `test_a_second_toggle_waits_for_the_first` contends on purpose, binding the lock to that test's
-    loop, which would fail every later test in the module with `got Future attached to a different
-    loop`.
-    """
-    monkeypatch.setattr(index, '_CHOREOGRAPHY_LOCK', asyncio.Lock())
+async def _command_queue(monkeypatch):
+    """Starts a command queue for each test and tears it down afterwards."""
+    q = commands.CommandQueue()
+    q.start()
+    monkeypatch.setattr(commands, '_queue', q)
+    yield
+    await q.stop()
 
 
 @pytest.fixture
@@ -627,6 +625,7 @@ class _PageStub:
     def __init__(self) -> None:
         self.settings = _load_settings()
         self._dialog_open: bool = False
+        self._deferred_tabs: set[str] = set()
         self._claim_in_flight: bool = False
         self._build_sources_tab = _Refreshable()
 

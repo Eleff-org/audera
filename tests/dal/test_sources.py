@@ -6,6 +6,7 @@ import pytest
 
 import audera.dal.sources as sources_dal
 from audera.domains.sources import CATALOG, source_lines
+from audera.errors import StorageError
 
 
 def test_sources_absent_file_returns_the_default(audera_home):
@@ -46,7 +47,7 @@ def test_sources_a_failed_write_leaves_the_previous_file_readable(audera_home, m
         raise OSError('disk full')
 
     monkeypatch.setattr(sources_dal.io.os, 'replace', _boom)
-    with pytest.raises(OSError):
+    with pytest.raises(StorageError):
         sources_dal.set_enabled('PlexAmp', True)
 
     assert sources_dal.get_enabled() == ['AirPlay', 'Spotify']
@@ -100,6 +101,37 @@ def test_sources_clear_setup_of_an_unrecorded_source_is_a_no_op(audera_home):
     sources_dal.set_enabled('Spotify', True)
     sources_dal.clear_setup('Spotify')
     assert sources_dal.get_enabled() == ['AirPlay', 'Spotify']
+
+
+def test_sources_set_setup_complete_notifies_observers(audera_home):
+    """Setup writes must fan out so other browsers drop the claim chip after a successful claim.
+
+    Regression: only enabled-set writes notified, so browser B kept showing setup-required after
+    browser A finished the Plex claim.
+    """
+    fired: list[bool] = []
+    sources_dal.on_change(lambda: fired.append(True))
+    try:
+        sources_dal.set_setup_complete('PlexAmp', True)
+        assert fired == [True]
+    finally:
+        sources_dal._observers.pop()
+
+
+def test_sources_clear_setup_notifies_only_when_a_record_is_removed(audera_home):
+    fired: list[bool] = []
+    sources_dal.on_change(lambda: fired.append(True))
+    try:
+        sources_dal.clear_setup('PlexAmp')
+        assert fired == []
+
+        sources_dal.set_setup_complete('PlexAmp', True)
+        fired.clear()
+        sources_dal.clear_setup('PlexAmp')
+        assert fired == [True]
+        assert sources_dal.get_setup('PlexAmp') == {}
+    finally:
+        sources_dal._observers.pop()
 
 
 def test_sources_absent_file_is_not_recorded(audera_home):

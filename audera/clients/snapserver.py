@@ -2,12 +2,15 @@
 
 import ipaddress
 import json
+import time
 import uuid
 from typing import Any, List, Optional
 
+import websockets.exceptions
 import websockets.sync.client
 
 import audera
+from audera.errors import ServiceError, Unreachable
 from audera.models import player
 
 
@@ -55,11 +58,21 @@ class SnapserverClient:
         }
         if params:
             payload['params'] = params
-        with websockets.sync.client.connect(self._url) as ws:
-            ws.send(json.dumps(payload))
-            response = json.loads(ws.recv())
+        try:
+            deadline = time.monotonic() + 30
+            with websockets.sync.client.connect(self._url, open_timeout=5) as ws:
+                ws.send(json.dumps(payload))
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise Unreachable('Snapserver timeout [%s]: no response within 30s' % method)
+                    response = json.loads(ws.recv(timeout=min(10, remaining)))
+                    if response.get('id') == payload['id']:
+                        break
+        except (OSError, TimeoutError, ConnectionError, websockets.exceptions.WebSocketException) as exc:
+            raise Unreachable('Snapserver unreachable [%s]: %s' % (method, exc)) from exc
         if 'error' in response:
-            raise RuntimeError('Snapserver error [%s]: %s' % (method, response['error']))
+            raise ServiceError('Snapserver error [%s]: %s' % (method, response['error']))
         return response.get('result', {})
 
     def get_status(self) -> dict:
