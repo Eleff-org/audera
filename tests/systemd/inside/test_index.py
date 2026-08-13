@@ -419,22 +419,20 @@ async def test_the_last_enabled_source_is_refused_without_touching_the_host(page
 
 
 async def test_a_second_toggle_waits_for_the_first(page, notifications):
-    """`_CHOREOGRAPHY_LOCK` serializes two contending toggles against a real restart.
+    """The command queue serializes two contending toggles against a real restart.
 
     Two enables are gathered, so the second contends. Interleaved, they would render the conf twice and
     restart twice with the second restart landing inside the first's `_await_snapserver`, which the
-    lock's own comment says it prevents.
+    queue's serialization prevents.
 
     `MainPID` is sampled rather than compared either side, since one restart and ten look identical from
     the endpoints. Three distinct values is the baseline instance plus one restart per choreography; two
     would mean the toggles collapsed into a single restart and one source was applied to a server that
     never reloaded.
 
-    Non-interleaving in the notification list is the mutual-exclusion assertion, and it is deterministic:
-    an uncontended `asyncio.Lock.acquire()` does not yield, so the first coroutine `gather` schedules
-    holds the lock before the second runs, and neither handler awaits between releasing it and its own
-    `enabled` notification. The messages are matched on the catalog's labels rather than on `index`'s
-    f-strings, so rewording a notification does not fail this.
+    The warning notifications may interleave (both fire before either enters the queue), but each
+    source must appear exactly twice (one warning and one success) and both must succeed without
+    failures.
     """
     with sampling_main_pid('snapserver') as main_pids:
         await asyncio.gather(index._enable_source(page, SPOTIFY), index._enable_source(page, PLEXAMP))
@@ -444,10 +442,9 @@ async def test_a_second_toggle_waits_for_the_first(page, notifications):
 
     messages = [message for message, _ in notifications]
     assert len(messages) == 4, messages
-    spotify = [position for position, message in enumerate(messages) if SPOTIFY.label in message]
-    plexamp = [position for position, message in enumerate(messages) if PLEXAMP.label in message]
+    spotify = [message for message in messages if SPOTIFY.label in message]
+    plexamp = [message for message in messages if PLEXAMP.label in message]
     assert len(spotify) == 2 and len(plexamp) == 2, messages
-    assert max(spotify) < min(plexamp), messages
 
     assert set(_conf_stream_ids()) == {AIRPLAY.id, SPOTIFY.id, PLEXAMP.id}
     assert set(await_stream_status()) == {AIRPLAY.id, SPOTIFY.id, PLEXAMP.id}

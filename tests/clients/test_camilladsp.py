@@ -1,6 +1,7 @@
 import pytest
 
 from audera.clients import CamillaDSPClient
+from audera.errors import ServiceError
 
 
 @pytest.fixture(scope='session')
@@ -35,7 +36,7 @@ def test_set_volume(client):
 
 
 def test_error_response_raises(client):
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ServiceError):
         client._call('UnknownCommand')
 
 
@@ -109,7 +110,7 @@ def test_validate_config_valid(client):
 )
 def test_validate_config_invalid_raises(client, overrides):
     config = {**client.get_config(), **overrides}
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ServiceError):
         client.validate_config(config)
 
 

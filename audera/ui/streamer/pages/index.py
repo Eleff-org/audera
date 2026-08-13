@@ -2,17 +2,20 @@
 
 import asyncio
 import time
-from collections.abc import Awaitable
-from typing import TYPE_CHECKING, Callable, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Callable, NamedTuple
 
 from nicegui import ui
 
 import audera
 from audera.dal import settings as settings_dal
 from audera.dal import sources as sources_dal
+from audera.dal import volume as volume_dal
 from audera.domains.sources import CATALOG, SourceDefinition, default_source, toggle
+from audera.errors import CommandError
 from audera.models.player import Player
+from audera.models.settings import Settings
 from audera.ui import components, features
+from audera.ui.streamer import broker, commands
 from audera.ui.streamer.pages import _plex
 from audera.ui.streamer.pages._clients import _camilladsp, _snapserver
 
@@ -22,13 +25,6 @@ if TYPE_CHECKING:
 # `sources_dal` is imported as a module so that `sources_dal.PATH` resolves at call time, which
 # lets the tests redirect it. `domains.sources.toggle` carries the same convention for
 # `conf.SNAPSERVER_CONF` and `system.systemctl`.
-
-# Serializes the enable/disable choreography process-wide, so two tabs toggling at once cannot
-# interleave their DAL writes, conf renders, and `systemctl restart snapserver` calls. An
-# `asyncio.Lock()` constructed at import time only binds an event loop on a contended acquire, so
-# it is safe across pytest's per-test loops; a test that contends on it deliberately must first
-# `monkeypatch.setattr(index, '_CHOREOGRAPHY_LOCK', asyncio.Lock())`.
-_CHOREOGRAPHY_LOCK = asyncio.Lock()
 
 # `ui.tabs.on_value_change` reports the tab name rather than the `ui.tab` element, so the handler
 # and the constructor must agree on the string.
@@ -43,6 +39,7 @@ _READY_INTERVAL = 0.5
 
 _LAST_SOURCE_MESSAGE = 'At least one audio source must stay enabled.'
 _INTERRUPTION_MESSAGE = 'Applying this will briefly interrupt playback on all players.'
+
 _NO_GROUP_MESSAGE = 'This player is not in a Snapcast group yet.'
 _NO_DESTINATION_MESSAGE = 'There is nowhere else to move this player.'
 _NO_LIVE_DESTINATION_MESSAGE = 'No other enabled source is running, so Snapserver will reassign these players itself.'
@@ -82,12 +79,26 @@ class _SetupFlow(NamedTuple):
 _SETUP_FLOWS: dict[str, _SetupFlow] = {'plex_claim': _SetupFlow(_plex.setup_state, _plex.build_setup_panel)}
 
 
+def _close_dialog(page: 'Page') -> None:
+    """Clears ``_dialog_open`` and replays deferred tab refreshes if any were queued."""
+    page._dialog_open = False
+    tabs = page._deferred_tabs
+    if not tabs:
+        return
+    page._deferred_tabs = set()
+    if 'sources' in tabs:
+        page._build_sources_tab.refresh()
+    if 'settings' in tabs:
+        page._build_settings_tab.refresh()
+    if 'players' in tabs:
+        page._build_players_tab.refresh()
+
+
 async def render(page: 'Page') -> None:
     """Renders the main dashboard page.
 
-    `async` because `build_players_tab` is `async`: `@ui.refreshable` returns the coroutine its
-    function produced, so the initial build has to be awaited here or it is never scheduled. Every
-    subsequent `.refresh()` fires itself as a background task.
+    The Players tab reads from the broker cache, so no async I/O is needed for the initial build.
+    The broker's dirty callback drives subsequent rebuilds.
     """
     components.header.render(audera.NAME, 'Streamer')
 
@@ -98,35 +109,21 @@ async def render(page: 'Page') -> None:
 
     with ui.tab_panels(tabs, value=players_tab).classes('w-full'):
         with ui.tab_panel(players_tab):
-            await page._build_players_tab()  # type: ignore
+            page._build_players_tab()  # type: ignore
         with ui.tab_panel(sources_tab):
             page._build_sources_tab()  # type: ignore
         with ui.tab_panel(settings_tab):
-            _build_settings_tab(page)
+            page._build_settings_tab()  # type: ignore
 
-    def _maybe_refresh():
-        if not page._dialog_open:
-            page._build_players_tab.refresh()
-
-    ui.timer(10.0, _maybe_refresh)
-
-    # Whether the operator has opened the Sources tab yet this page. NiceGUI builds every tab panel
-    # eagerly at page load, so without this a status word that went stale while the operator was on
-    # another tab could only be corrected by reloading.
     entered_sources = False
 
     def _on_tab_change(e) -> None:
         nonlocal entered_sources
         if e.value != _SOURCES_TAB:
             return
-        # The first entry is not repainted: that panel is as fresh as the page, and `refresh()`
-        # defers the rebuild to a background task, which would delete the card out from under a
-        # toggle the operator clicked in the meantime.
         if not entered_sources:
             entered_sources = True
             return
-        # A repaint deletes the claim flow's elements and cancels its timers, so a claim in flight
-        # refuses it. No notification, since returning to a tab is not a request to abandon it.
         if page._claim_in_flight:
             return
         page._build_sources_tab.refresh()
@@ -203,8 +200,8 @@ def _remaining_ids(source_id: str) -> list[str]:
 def _stream_status(page: 'Page') -> dict[str, str]:
     """Returns Snapserver's own status word per stream id, or `{}` when it is unreachable.
 
-    Keyed by stream id, which is the source id per `CATALOG`'s rule 1, so a caller holding a source
-    indexes it directly. Every `status` parameter downstream is this dict.
+    Prefers the broker cache when the broker is running. Falls back to a direct Snapserver call for
+    callers that run before the broker starts (``adopt_running_sources``).
 
     Parameters
     ----------
@@ -212,9 +209,12 @@ def _stream_status(page: 'Page') -> dict[str, str]:
         An instance of the streamer dashboard app.
     """
     try:
+        return broker.get().cache.stream_status
+    except Exception:
+        pass
+    try:
         return _snapserver(page.settings).get_stream_status()
     except Exception:
-        # An unreachable Snapserver renders every enabled source as `not running`.
         return {}
 
 
@@ -237,8 +237,11 @@ def _await_snapserver(page: 'Page') -> None:
     """
     deadline = time.monotonic() + _READY_TIMEOUT
     while True:
-        if _stream_status(page):
-            return
+        try:
+            if _snapserver(page.settings).get_stream_status():
+                return
+        except Exception:
+            pass
         if time.monotonic() >= deadline:
             return
         time.sleep(_READY_INTERVAL)
@@ -435,8 +438,8 @@ async def _toggle_source(page: 'Page', source: SourceDefinition, enable: bool) -
         return
 
     # Stops the disable dialog from opening with an empty destination list. It is racy against a
-    # second browser tab, so `_disable_source` re-reads it inside the lock; only that re-read
-    # enforces the invariant.
+    # second browser tab, so `_disable_source_write` re-reads it inside the queue; only that
+    # re-read enforces the invariant.
     if len(_remaining_ids(source.id)) == 0:
         ui.notify(_LAST_SOURCE_MESSAGE, type='warning', position='top-right')
         page._build_sources_tab.refresh()
@@ -454,6 +457,12 @@ async def _toggle_source(page: 'Page', source: SourceDefinition, enable: bool) -
     _open_disable_dialog(page, source, players, _remaining_ids(source.id), status)
 
 
+def _enable_source_write(source: SourceDefinition) -> None:
+    """DAL write + toggle.apply, atomic in one callable through the command queue."""
+    enabled = sources_dal.set_enabled(source.id, True)
+    toggle.apply(source, True, enabled)
+
+
 async def _enable_source(page: 'Page', source: SourceDefinition) -> None:
     """Enables a source: records the intent, re-renders the conf, starts its units, restarts Snapserver.
 
@@ -468,30 +477,48 @@ async def _enable_source(page: 'Page', source: SourceDefinition) -> None:
     source: `audera.domains.sources.SourceDefinition`
         The catalog entry being enabled.
     """
-    async with _CHOREOGRAPHY_LOCK:
-        ui.notify(f'Enabling {source.label}. {_INTERRUPTION_MESSAGE}', type='warning', position='top-right')
+    ui.notify(f'Enabling {source.label}. {_INTERRUPTION_MESSAGE}', type='warning', position='top-right')
 
-        try:
-            enabled = await asyncio.to_thread(sources_dal.set_enabled, source.id, True)
-        except Exception as exc:
-            _notify_failure(f'Could not enable {source.label}', exc)
-            page._build_sources_tab.refresh()
-            return
-
-        # The remaining steps roll forward: the intent is already recorded, so a later failure
-        # notifies and leaves the new state.
-        try:
-            await asyncio.to_thread(toggle.apply, source, True, enabled)
-        except Exception as exc:
+    try:
+        await commands.get().submit(_enable_source_write, source)
+    except (CommandError, RuntimeError) as exc:
+        if source.id in sources_dal.get_enabled():
             _notify_failure(f'{source.label} is enabled, but applying it failed', exc)
-            page._build_sources_tab.refresh()
-            return
+        else:
+            _notify_failure(f'Could not enable {source.label}', exc)
+        page._build_sources_tab.refresh()
+        return
 
-        # Inside the lock, so a second toggle cannot restart Snapserver out from under the wait.
-        await asyncio.to_thread(_await_snapserver, page)
+    await asyncio.to_thread(_await_snapserver, page)
+    # Readiness used a direct Snapserver call; the Sources tab reads stream_status from the
+    # broker cache. Reseed so the success refresh does not paint pre-restart chips.
+    await broker.reseed()
 
     ui.notify(f'{source.label} enabled', type='positive', position='top-right')
     page._build_sources_tab.refresh()
+
+
+def _disable_source_write(
+    source: SourceDefinition,
+    destination: str | None,
+    settings: Settings,
+) -> bool:
+    """Re-check invariants, reassign groups, DAL write + toggle.apply, through the command queue."""
+    enabled = _enabled_ids()
+    if source.id not in enabled:
+        return False
+    if len(enabled) == 1:
+        raise RuntimeError(_LAST_SOURCE_MESSAGE)
+
+    if destination is not None:
+        snap = _snapserver(settings)
+        for group in snap.get_groups():
+            if group.stream_id == source.id:
+                snap.set_group_stream(group.id, destination)
+
+    remaining = _record_disabled(source.id)
+    toggle.apply(source, False, remaining)
+    return True
 
 
 async def _disable_source(page: 'Page', source: SourceDefinition, destination: str | None) -> None:
@@ -510,44 +537,33 @@ async def _disable_source(page: 'Page', source: SourceDefinition, destination: s
     destination: `str | None`
         The source id to move this stream's groups to, or `None` when nothing is listening.
     """
-    async with _CHOREOGRAPHY_LOCK:
-        # The guard, re-read inside the lock against a freshly read enabled set. This is the check
-        # that keeps `render_snapserver()` from raising `ValueError`; the switch affordance and
-        # `_toggle_source`'s check are both decided against a render that may be seconds stale.
-        enabled = _enabled_ids()
-        if source.id not in enabled:
-            page._build_sources_tab.refresh()
-            return
-        if len(enabled) == 1:
-            ui.notify(_LAST_SOURCE_MESSAGE, type='warning', position='top-right')
-            page._build_sources_tab.refresh()
-            return
+    enabled = _enabled_ids()
+    if source.id not in enabled:
+        page._build_sources_tab.refresh()
+        return
+    if len(enabled) == 1:
+        ui.notify(_LAST_SOURCE_MESSAGE, type='warning', position='top-right')
+        page._build_sources_tab.refresh()
+        return
 
-        ui.notify(f'Disabling {source.label}. {_INTERRUPTION_MESSAGE}', type='warning', position='top-right')
+    ui.notify(f'Disabling {source.label}. {_INTERRUPTION_MESSAGE}', type='warning', position='top-right')
 
-        if destination is not None:
-            try:
-                await asyncio.to_thread(_reassign_groups, page, source.id, destination)
-            except Exception as exc:
-                _notify_failure(f'Could not move players off {source.label}', exc)
-                page._build_sources_tab.refresh()
-                return
-
-        try:
-            remaining = await asyncio.to_thread(_record_disabled, source.id)
-        except Exception as exc:
-            _notify_failure(f'Could not disable {source.label}', exc)
-            page._build_sources_tab.refresh()
-            return
-
-        try:
-            await asyncio.to_thread(toggle.apply, source, False, remaining)
-        except Exception as exc:
+    try:
+        did_work = await commands.get().submit(_disable_source_write, source, destination, page.settings)
+    except (CommandError, RuntimeError) as exc:
+        if source.id not in sources_dal.get_enabled():
             _notify_failure(f'{source.label} is disabled, but applying it failed', exc)
-            page._build_sources_tab.refresh()
-            return
+        else:
+            _notify_failure(f'Could not disable {source.label}', exc)
+        page._build_sources_tab.refresh()
+        return
 
-        await asyncio.to_thread(_await_snapserver, page)
+    if not did_work:
+        page._build_sources_tab.refresh()
+        return
+
+    await asyncio.to_thread(_await_snapserver, page)
+    await broker.reseed()
 
     ui.notify(f'{source.label} disabled', type='positive', position='top-right')
     page._build_sources_tab.refresh()
@@ -570,27 +586,6 @@ def _record_disabled(source_id: str) -> list[str]:
     remaining = sources_dal.set_enabled(source_id, False)
     sources_dal.clear_setup(source_id)
     return remaining
-
-
-def _reassign_groups(page: 'Page', source_id: str, destination: str) -> None:
-    """Moves every Snapcast group listening to `source_id` onto `destination`.
-
-    The groups are re-read here rather than reused from the ids captured when the disable dialog
-    opened, so a group that joined the stream while the dialog was up is moved too.
-
-    Parameters
-    ----------
-    page: `audera.ui.streamer.pages.Page`
-        An instance of the streamer dashboard app.
-    source_id: `str`
-        The source being disabled.
-    destination: `str`
-        The source id to move the groups to.
-    """
-    snap = _snapserver(page.settings)
-    for group in snap.get_groups():
-        if group.stream_id == source_id:
-            snap.set_group_stream(group.id, destination)
 
 
 def _attached_players(page: 'Page', source_id: str) -> list[Player]:
@@ -675,13 +670,10 @@ def _open_disable_dialog(
         ui.label(_INTERRUPTION_MESSAGE).classes('text-xs text-gray-500 mt-2')
 
         def _dismiss():
-            # Cancel, ESC, and a backdrop click are the same answer, and the switch has already
-            # flipped, so a dismissal refreshes the tab back to the recorded state. Not reached on
-            # the confirm path, where a refresh would land mid-choreography.
             if state['handled']:
                 return
             state['handled'] = True
-            page._dialog_open = False
+            _close_dialog(page)
             page._build_sources_tab.refresh()
 
         with ui.row().classes('justify-between w-full mt-4'):
@@ -694,10 +686,8 @@ def _open_disable_dialog(
 
             async def _on_confirm():
                 state['handled'] = True
-                page._dialog_open = False
+                _close_dialog(page)
                 dialog.close()
-                # `None` disables without an explicit move and lets Snapserver's own fallback
-                # apply, as `_toggle_source` does when nothing is listening.
                 await _disable_source(page, source, destination.value if destination is not None else None)
 
             ui.button('Cancel', on_click=_on_cancel).props('flat dense')
@@ -708,10 +698,8 @@ def _open_disable_dialog(
 
 
 def _notify_failure(message: str, exc: Exception) -> None:
-    """Notifies a failed host mutation, preferring the subprocess's own reason.
+    """Notifies a failed host mutation, preferring a service's own reason.
 
-    `CalledProcessError.__str__` is the argv and the exit status rather than the reason, so a
-    `systemctl` failure reads as "returned non-zero exit status 1" unless `stderr` is used.
     `getattr` rather than `exc.stderr` because `@platform.requires('dietpi')` raises
     `RuntimeError`, which has no `stderr`.
 
@@ -750,22 +738,11 @@ class _Assignment(NamedTuple):
     siblings: int
 
 
-def _group_streams(page: 'Page') -> dict[str, str]:
-    """Returns the stream id each Snapcast group is listening to, or `{}` when unreachable.
-
-    `get_clients()` drops the group's `stream_id`, so the Players tab needs this second read to
-    report assignment. Read once per render and passed down, never per card.
-
-    Parameters
-    ----------
-    page: `audera.ui.streamer.pages.Page`
-        An instance of the streamer dashboard app.
-    """
+def _group_streams_from_hub() -> dict[str, str]:
+    """Returns the stream id each Snapcast group is listening to, from the broker cache."""
     try:
-        return {group.id: group.stream_id for group in _snapserver(page.settings).get_groups()}
+        return {group.id: group.stream_id for group in broker.get().cache.groups}
     except Exception:
-        # An unreachable Snapserver leaves every assignment unknown, which still renders a valid,
-        # enabled move control.
         return {}
 
 
@@ -956,127 +933,31 @@ def _sections(
     return sections
 
 
-def _clients(page: 'Page') -> list[Player]:
-    """Returns every Snapcast client, or `[]` when Snapserver is unreachable.
+def build_players_tab(page: 'Page') -> None:
+    """Renders the Players tab from the broker cache. Synchronous — no I/O.
 
-    Parameters
-    ----------
-    page: `audera.ui.streamer.pages.Page`
-        An instance of the streamer dashboard app.
+    Called by ``Page._build_players_tab``, the ``@ui.refreshable`` method that owns the refresh
+    target (so refreshes are keyed per ``Page`` instance).
+
+    All data comes from ``broker.get().cache``. The broker's dirty callback drives rebuilds when the
+    cache changes.
     """
     try:
-        return _snapserver(page.settings).get_clients()
+        state = broker.get().cache
     except Exception:
-        return []
-
-
-# The ceiling on one round of the Players tab's reads. It exists for NiceGUI's sake: an `async`
-# page builder that has not returned by `response_timeout` (3 s, the default here) is cancelled and
-# its client deleted, so overrunning renders no page at all. The clients' own 5 s `open_timeout` is
-# longer than that and is counted per connect. There are two rounds below, so this bounds the tab
-# at 2 s; a round that overruns degrades to the same empty result an unreachable host produces.
-#
-# `asyncio.wait_for` cancels the await rather than the worker thread, which keeps blocking on its
-# own socket until `open_timeout` fires, leaving an orphaned thread that nothing waits on.
-_READ_TIMEOUT: float = 1.0
-
-_T = TypeVar('_T')
-
-
-async def _bounded(awaitable: Awaitable[_T], default: _T) -> _T:
-    """Awaits `awaitable` under `_READ_TIMEOUT`, returning `default` if it overruns or raises.
-
-    Parameters
-    ----------
-    awaitable: `Awaitable`
-        The read, or gathered group of reads, to bound.
-    default: `Any`
-        What the caller renders when the reads do not arrive in time.
-    """
-    try:
-        return await asyncio.wait_for(awaitable, _READ_TIMEOUT)
-    except Exception:
-        return default
-
-
-async def _volumes(clients: list[Player]) -> dict[str, int | None]:
-    """Returns each client's CamillaDSP volume as a percent, keyed by client id, or `None` where
-    the daemon could not be read.
-
-    One connect per client: CamillaDSP runs on the player, so this fans out across as many hosts as
-    there are cards.
-
-    A failed read is reported as `None` rather than as a number, since a default seed is
-    indistinguishable from a player genuinely at that volume and a drag would then write an edit
-    relative to a volume the player never held.
-
-    Parameters
-    ----------
-    clients: `list[audera.models.player.Player]`
-        The connected players to read, in card order.
-    """
-
-    async def _one(client: Player) -> int | None:
-        try:
-            return await asyncio.to_thread(_camilladsp(client.host).get_percent_volume)
-        except Exception:
-            return None
-
-    return dict(zip([c.id for c in clients], await asyncio.gather(*(_one(c) for c in clients))))
-
-
-async def build_players_tab(page: 'Page') -> None:
-    """Renders the Players tab: lists Snapcast clients with per-client volume, mute/enable, and
-    stream-assignment controls, under the selected `player_grouping`.
-
-    Called by `Page._build_players_tab`, the `@ui.refreshable` method that owns the refresh
-    target (so refreshes are keyed per `Page` instance).
-
-    Every read happens here, once, and is passed down: three Snapcast RPCs (`get_clients()`,
-    `get_groups()`, and `get_stream_status()`) plus one CamillaDSP read per player. A card never
-    reads anything of its own.
-
-    The status read is unconditional rather than by-stream only, because liveness gates attachment
-    as well as the by-stream header's status word: a source Snapserver is not feeding is not a
-    destination either grouping may offer.
-
-    Every read is a blocking websocket connect, so all of them go off-thread and run concurrently,
-    under `_READ_TIMEOUT` per round. This coroutine runs on the event loop that serves every
-    session, so a single unreachable host would otherwise hold the whole UI. Two rounds rather than
-    one, with `get_clients()` alone in the first, so a device with nothing connected does not pay
-    for the other three.
-
-    An `async` `@ui.refreshable` is not re-entrant (see `Page._players_generation`), so each build
-    stamps itself before its first `await` and returns at every resumption point where a newer one
-    has since started. Without that, two refreshes in the same tick each append a full set of cards.
-    """
-    generation = page._players_generation = page._players_generation + 1
-
-    clients = await _bounded(asyncio.to_thread(_clients, page), [])
-    if generation != page._players_generation:
+        ui.label('No Snapcast clients found.').classes('text-gray-500')
         return
 
+    clients = state.clients
     connected_clients = [c for c in clients if c.connected]
     if not connected_clients:
         ui.label('No Snapcast clients found.').classes('text-gray-500')
         return
 
-    streams, status, volumes = await _bounded(
-        asyncio.gather(
-            asyncio.to_thread(_group_streams, page),
-            asyncio.to_thread(_stream_status, page),
-            _volumes(connected_clients),
-        ),
-        ({}, {}, {}),
-    )
-    if generation != page._players_generation:
-        return
+    streams = _group_streams_from_hub()
+    status = state.stream_status
+    volumes = {c.id: state.volumes.get(c.id) for c in connected_clients}
 
-    # Restated against the card list, so an overrun of the round above still renders every card. An
-    # absent id is `None`, the same value a failed read reports.
-    volumes = {c.id: volumes.get(c.id) for c in connected_clients}
-
-    # Named after the feature-flag constant so flag-gated UI is obvious to the reader.
     FF_GROUPING_BY_STREAM = features.flag_enabled(page.settings, features.PLAYER_GROUPING_KEY, features.FF_GROUPING_BY_STREAM)
     enabled = _enabled_ids()
     assignments = {c.id: _assignment(c, clients, streams, enabled) for c in connected_clients}
@@ -1397,7 +1278,13 @@ def _build_move_menu(
     # The menu's own open state, so the 10 s poll cannot destroy an open menu mid-interaction. One
     # event covers both open and close. Every path that refreshes must clear the flag first: left
     # latched by an element the refresh deleted, it freezes the poll for the life of the page.
-    menu.on_value_change(lambda e: setattr(page, '_dialog_open', bool(e.value)))
+    def _on_menu_change(e):
+        if e.value:
+            page._dialog_open = True
+        else:
+            _close_dialog(page)
+
+    menu.on_value_change(_on_menu_change)
 
 
 def _build_move_menu_item(
@@ -1464,13 +1351,10 @@ async def _on_stream_change(page: 'Page', client: Player, stream_id: str, refres
         Whether the move landed. `False` also means the tab has already been refreshed, so a caller
         that repaints in place must not touch its own elements afterwards.
     """
-    # Cleared before anything that can refresh, never after; a flag latched by a deleted element
-    # freezes the poll for the life of the page.
-    page._dialog_open = False
+    _close_dialog(page)
     try:
-        await asyncio.to_thread(_snapserver(page.settings).set_group_stream, client.group_id, stream_id)
-    except Exception as exc:
-        # Refresh regardless of the grouping, so the control returns to the assignment in effect.
+        await commands.get().submit(_snapserver(page.settings).set_group_stream, client.group_id, stream_id)
+    except CommandError as exc:
         _notify_failure(f'Could not move {client.name}', exc)
         page._build_players_tab.refresh()
         return False
@@ -1487,7 +1371,10 @@ async def _on_mute_change(page: 'Page', client_id: str, muted: bool) -> None:
     Does not refresh the Players tab afterward, so the volume slider keeps its live
     drag state — see `_reset_snap_volume` for the same rationale.
     """
-    await asyncio.to_thread(_snapserver(page.settings).set_client_volume, client_id, 100, muted=muted)
+    try:
+        await commands.get().submit(_snapserver(page.settings).set_client_volume, client_id, 100, muted=muted)
+    except CommandError:
+        ui.notify('Could not update mute state', type='negative', position='top-right')
 
 
 async def _on_enabled_change(page: 'Page', client, enabled: bool) -> None:
@@ -1496,7 +1383,10 @@ async def _on_enabled_change(page: 'Page', client, enabled: bool) -> None:
     Toggling off mutes the Snapcast client (the minimized-card state is derived from
     `client.muted` on the next render); toggling on unmutes it.
     """
-    await asyncio.to_thread(_snapserver(page.settings).set_client_volume, client.id, 100, muted=not enabled)
+    try:
+        await commands.get().submit(_snapserver(page.settings).set_client_volume, client.id, 100, muted=not enabled)
+    except CommandError:
+        ui.notify('Could not update player state', type='negative', position='top-right')
     page._build_players_tab.refresh()
 
 
@@ -1534,26 +1424,29 @@ def _open_settings_dialog(page: 'Page', client) -> None:
         with ui.row().classes('justify-between w-full mt-4'):
 
             def _on_cancel():
-                page._dialog_open = False
+                _close_dialog(page)
                 dialog.close()
 
             async def _on_save(c=client, ni=name_input, li=latency_input):
                 snap = _snapserver(page.settings)
-                if ni.value and ni.value != c.name:
-                    await asyncio.to_thread(snap.set_client_name, c.id, ni.value)
-                    ui.notify(f'Renamed to "{ni.value}"', type='positive', position='top-right')
-                if li.value is not None and int(li.value) != c.latency_ms:
-                    await asyncio.to_thread(snap.set_client_latency, c.id, int(li.value))
-                    ui.notify(f'Latency set to {int(li.value)} ms', type='positive', position='top-right')
+                try:
+                    if ni.value and ni.value != c.name:
+                        await commands.get().submit(snap.set_client_name, c.id, ni.value)
+                        ui.notify(f'Renamed to "{ni.value}"', type='positive', position='top-right')
+                    if li.value is not None and int(li.value) != c.latency_ms:
+                        await commands.get().submit(snap.set_client_latency, c.id, int(li.value))
+                        ui.notify(f'Latency set to {int(li.value)} ms', type='positive', position='top-right')
+                except CommandError as exc:
+                    _notify_failure('Save failed', exc)
 
-                page._dialog_open = False
+                _close_dialog(page)
                 dialog.close()
                 page._build_players_tab.refresh()
 
             ui.button('Cancel', on_click=_on_cancel).props('flat dense')
             ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
 
-    dialog.on('hide', lambda: setattr(page, '_dialog_open', False))
+    dialog.on('hide', lambda: _close_dialog(page))
     dialog.open()
 
 
@@ -1564,7 +1457,11 @@ async def _reset_snap_volume(page: 'Page', client, vol_label=None) -> None:
     reflect the new value. The players tab is *not* refreshed so that the CamillaDSP
     volume sliders retain their current visual state.
     """
-    await asyncio.to_thread(_snapserver(page.settings).set_client_volume, client.id, 100, muted=False)
+    try:
+        await commands.get().submit(_snapserver(page.settings).set_client_volume, client.id, 100, muted=False)
+    except CommandError as exc:
+        _notify_failure('Could not reset Snapcast volume', exc)
+        return
     if vol_label is not None:
         vol_label.set_text('Current Volume 100%')
     ui.notify('Snapcast volume reset to 100%', type='positive', position='top-right')
@@ -1579,78 +1476,74 @@ def _build_volume_controls(
     """Renders a volume icon, slider, and live value label (routed through CamillaDSP).
 
     Volume is owned by the CamillaDSP daemon, which persists it durably via its
-    `--statefile`; the slider seeds from the daemon (`get_percent_volume`) and writes
-    through it (`set_percent_volume`) — the app keeps no replica.
+    ``--statefile``; the slider seeds from the broker cache and writes through CamillaDSP
+    via ``update:model-value`` — a Quasar event that fires only on user interaction, not
+    on programmatic ``set_value()``, so a broker push cannot echo back to the device.
 
-    The slider is **always** a percent (0-100) control regardless of the 'volume'
-    feature selection, so the handle sits at the same physical spot when toggling
-    between modes. The selection only changes the value label: percent mode shows
-    `NN%`, dB mode shows `percent_to_db(value)` as `-N.N dB`. Both modes drive
-    CamillaDSP through `set_percent_volume`.
+    The slider's value is bound from ``broker.get().cache.volumes[client_id]`` via NiceGUI's
+    binding system (100 ms propagation). Every pushed value is step-aligned via
+    ``int(round(…))`` so Quasar does not snap the slider and emit a phantom
+    ``update:model-value``.
 
-    Mute is anchored at the slider floor (`percent <= 0`, displayed as `MIN_DB` in dB
-    mode), never on lossy zero-rounding, so a mid-range edit never silently mutes the
-    client on the next refresh. The seed is step-aligned to the integer percent slider
-    so the periodic refresh does not fire a phantom `update:model-value`.
-
-    An `initial_volume` of `None` means the daemon could not be read. The slider then
-    renders disabled at the floor with `—` for its value, and the caller leaves the Mute
-    binding off it. See `_volumes` for why no number is substituted.
-
-    Returns the `ui.slider` element so the caller can bind its enabled state to the
+    Returns the ``ui.slider`` element so the caller can bind its enabled state to the
     Mute checkbox built alongside it in the card header.
     """
     camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
-    # Named after the feature-flag constant so flag-gated UI is obvious to the reader.
     FF_VOLUME_PERC_OR_DB = features.flag_enabled(page.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
 
-    async def _persist_and_sync(percent: float) -> None:
+    def _write_volume(camilla_client, settings, cid, percent):
+        camilla_client.set_percent_volume(percent)
+        volume_dal.set(cid, percent)
         muted = percent <= 0
-        await asyncio.to_thread(
-            _snapserver(page.settings).set_client_volume,
-            client_id,
-            0 if muted else 100,
-            muted=muted,
-        )
+        _snapserver(settings).set_client_volume(cid, 0 if muted else 100, muted=muted)
 
-    async def _on_volume_percent(e):
-        percent = int(e.value)
+    async def _persist_and_sync(e) -> None:
+        percent = int(e.args)
         try:
-            await asyncio.to_thread(camilla.set_percent_volume, percent)
-        except Exception:
+            await commands.get().submit(
+                _write_volume, camilla, page.settings, client_id, percent, coalesce_key=('volume', client_id)
+            )
+        except CommandError:
             pass
-        await _persist_and_sync(percent)
 
     unknown = initial_volume is None
 
     ui.icon('volume_off' if unknown else 'volume_up').classes('text-gray-400')
     slider = (
-        ui.slider(min=0, max=100, step=1, value=0 if unknown else int(round(initial_volume)), on_change=_on_volume_percent)
+        ui.slider(min=0, max=100, step=1, value=0 if unknown else int(round(initial_volume)))
         .classes('grow')
         .mark(f'player-volume player-volume-{client_id}')
     )
+    slider.on('update:model-value', _persist_and_sync)
     if unknown:
         slider.set_enabled(False)
-    # Fixed width + right-align keeps the slider length constant as the label text
-    # changes digit count (e.g. -9.0 dB -> -10.0 dB), so the handle doesn't shift.
+
+    def _step_aligned(vol):
+        if vol is None:
+            return 0
+        return int(round(vol))
+
+    try:
+        h = broker.get()
+        slider.bind_value_from(h.cache.volumes, client_id, backward=_step_aligned)
+    except Exception:
+        pass
+
     value_label = ui.label().classes('text-xs text-gray-500 shrink-0 whitespace-nowrap text-right w-16')
 
     def _text(value: float) -> str:
-        """Formats the slider's position, or returns `—` when the volume is unknown."""
         if unknown:
             return '—'
         if FF_VOLUME_PERC_OR_DB:
             return f'{camilla.percent_to_db(value):.1f} dB'
         return f'{int(value)}%'
 
-    # Bound rather than set even when the volume is unknown, so the label tracks a live drag once a
-    # reading arrives.
     value_label.bind_text_from(slider, 'value', backward=_text)
 
     return slider
 
 
-def _build_settings_tab(page: 'Page') -> None:
+def build_settings_tab(page: 'Page') -> None:
     """Renders the Settings tab — one single-select button group per registered UX feature."""
     ui.label('Features').classes('text-lg font-medium mb-2')
     for feature in features.FEATURES:
@@ -1662,8 +1555,15 @@ def _build_settings_tab(page: 'Page') -> None:
         ).classes('mb-4')
 
 
-def _on_feature_change(page: 'Page', key: str, value: str) -> None:
+async def _on_feature_change(page: 'Page', key: str, value: str) -> None:
     """Persists a feature-flag selection and refreshes the Players tab to reflect it."""
-    page.settings.features[key] = value
-    settings_dal.save(page.settings)
+    updated = page.settings.model_copy(deep=True)
+    updated.features[key] = value
+    try:
+        await commands.get().submit(settings_dal.save, updated)
+    except CommandError:
+        ui.notify('Could not save settings', type='negative', position='top-right')
+        page._build_players_tab.refresh()
+        return
+    page.settings = updated
     page._build_players_tab.refresh()

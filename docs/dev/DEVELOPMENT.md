@@ -59,5 +59,5 @@ All seven models (`Band`, `DSPConfig`, `Preset`, `Player`, `Group`, `Settings`, 
 
 ## DAL
 
-- `dsp`, `presets`, `settings`, and `sources` all persist via plain `json`. A `DSPConfig`'s and a `Preset`'s `bands` are nested lists of objects, which duckdb's `read_json_auto` cannot model, since it is flat/columnar under the pytensils DTYPES constraint. The duckdb-backed DALs were retired for the same reason.
+- `dsp`, `presets`, `settings`, `sources`, and `volume` all persist via plain `json`.
 - Config files: `~/.audera/{dsp,dsp/presets}/{id}.json` (`dsp` is keyed by `player_id`), `~/.audera/settings.json`, `~/.audera/sources.json`

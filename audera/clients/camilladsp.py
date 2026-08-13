@@ -3,9 +3,11 @@
 import json
 import math
 
+import websockets.exceptions
 import websockets.sync.client
 
 import audera
+from audera.errors import ServiceError, Unreachable
 
 _CMD_GET_CONFIG_JSON = 'GetConfigJson'
 _CMD_SET_CONFIG_JSON = 'SetConfigJson'
@@ -45,16 +47,17 @@ class CamillaDSPClient:
             The command argument, if any.
         """
         payload = {command: value} if value is not None else command
-        with websockets.sync.client.connect(self._url, open_timeout=5) as ws:
-            ws.send(json.dumps(payload))
-            response = json.loads(ws.recv())
-        # CamillaDSP wraps responses as {"CommandName": {"result": "Ok/Error", ...}}
-        # Unknown commands return {"Invalid": {"error": "..."}} instead
+        try:
+            with websockets.sync.client.connect(self._url, open_timeout=5) as ws:
+                ws.send(json.dumps(payload))
+                response = json.loads(ws.recv())
+        except (OSError, TimeoutError, ConnectionError, websockets.exceptions.WebSocketException) as exc:
+            raise Unreachable('CamillaDSP unreachable [%s]: %s' % (command, exc)) from exc
         if isinstance(response, dict) and 'Invalid' in response:
-            raise RuntimeError('CamillaDSP error [%s]: %s' % (command, response['Invalid']))
+            raise ServiceError('CamillaDSP error [%s]: %s' % (command, response['Invalid']))
         inner = response.get(command, response) if isinstance(response, dict) else response
         if isinstance(inner, dict) and inner.get('result') == 'Error':
-            raise RuntimeError('CamillaDSP error [%s]: %s' % (command, inner))
+            raise ServiceError('CamillaDSP error [%s]: %s' % (command, inner))
         return response
 
     def get_config(self) -> dict:
@@ -94,7 +97,7 @@ class CamillaDSPClient:
         # `_call` only raises on a literal `result == 'Error'`, but any non-`Ok` result
         #   (e.g. a validation message / ConfigValidationError) means the config is invalid.
         if isinstance(inner, dict) and inner.get('result') != 'Ok':
-            raise RuntimeError('CamillaDSP validation failed [%s]: %s' % (_CMD_VALIDATE_CONFIG, inner))
+            raise ServiceError('CamillaDSP validation failed [%s]: %s' % (_CMD_VALIDATE_CONFIG, inner))
 
     def get_clipped_samples(self) -> int:
         """Returns the number of clipped samples since the last reset."""

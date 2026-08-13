@@ -10,8 +10,10 @@ import audera
 from audera.dal import dsp as dsp_dal
 from audera.dal import presets as presets_dal
 from audera.domains.dsp import auto_preamp_db, clone_bands, compile_pipeline, format_rew, loudness_preset, parse_rew
+from audera.errors import CommandError
 from audera.models.dsp import PASS_TYPES, Band, DSPConfig, Preset
 from audera.ui import components, features
+from audera.ui.streamer import commands
 from audera.ui.streamer.pages._clients import _camilladsp, _snapserver
 
 if TYPE_CHECKING:
@@ -328,26 +330,36 @@ def render(page: 'Page', player_id: str) -> None:
         _band_table.refresh()
         _mark_changed()
 
+    def _save_dsp(camilla_client, staged):
+        current = camilla_client.get_config()
+        compiled = compile_pipeline(current, staged)
+        camilla_client.validate_config(compiled)
+        camilla_client.set_config(compiled)
+
     async def _on_save() -> None:
         """Compiles → validates → pushes the live pipeline, then persists the config.
 
         Pattern B (live apply, no restart): the daemon owns volume and `SetConfigJson`
         leaves the fader untouched, so no volume snapshot/restore is needed. The config
         is keyed by the player id (`dsp/{id}.json`), so Save only updates that one file.
+
+        The CamillaDSP push and the local persist are separate commands so a StorageError
+        on the DAL write cannot mask a successful hardware apply.
         """
         camilla = _camilladsp(live.host)
         try:
-            current = await asyncio.to_thread(camilla.get_config)
-            compiled = compile_pipeline(current, state['staged'])
-            await asyncio.to_thread(camilla.validate_config, compiled)  # gate; raises on invalid
-            await asyncio.to_thread(camilla.set_config, compiled)
-        except Exception as exc:
+            await commands.get().submit(_save_dsp, camilla, state['staged'])
+        except CommandError as exc:
             ui.notify(f'Save failed: {exc}', type='negative', position='top-right')
             return
-        await asyncio.to_thread(dsp_dal.update, state['staged'])
         try:
-            await asyncio.to_thread(camilla.reset_clipped_samples)  # start the clip watch fresh
-        except Exception:
+            await commands.get().submit(dsp_dal.update, state['staged'])
+        except CommandError as exc:
+            ui.notify(f'Applied but could not save to disk: {exc}', type='negative', position='top-right')
+            return
+        try:
+            await commands.get().submit(camilla.reset_clipped_samples)
+        except CommandError:
             pass
         state['saved'] = state['staged'].model_copy(deep=True)
         _mark_changed()

@@ -2,6 +2,7 @@
 
 import subprocess
 
+from audera.errors import ServiceError, Unreachable
 from audera.services import logging, platform
 
 # Bounds every call. A `systemctl` verb that has not returned in 15 seconds is hung.
@@ -35,7 +36,9 @@ def systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
         )
     except subprocess.CalledProcessError as exc:
         LOGGER.error(f'systemctl {" ".join(args)} failed: {(exc.stderr or "").strip()}')
-        raise
+        raise ServiceError((exc.stderr or '').strip() or str(exc)) from exc
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise Unreachable(str(exc)) from exc
 
 
 @platform.requires('dietpi')
@@ -52,5 +55,5 @@ def is_active(unit: str) -> bool:
         # outcome here and must not raise.
         result = systemctl('is-active', unit, check=False)
         return result.stdout.strip() == 'active'
-    except (subprocess.SubprocessError, OSError):
+    except (Unreachable, ServiceError, RuntimeError):
         return False

@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from audera.errors import ServiceError
 from audera.services import system
 from tests.systemd.inside.conftest import await_no_new_zombies, await_pids, still_alive, unit_state, zombies_for
 
@@ -137,7 +138,7 @@ def test_is_active_is_false_for_a_genuinely_failed_unit(failing_unit):
     A test that patched `systemctl is-active` to print `failed` would pin the comparison rather than
     that systemd emits that word for this state.
     """
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(ServiceError):
         system.systemctl('start', failing_unit)
 
     assert unit_state(failing_unit)['ActiveState'] == 'failed'
@@ -152,7 +153,7 @@ def test_a_failed_unit_logs_systemds_own_reason(failing_unit, caplog):
     captured, so the reason reaches the log only if the seam writes it there, including the
     `journalctl -xeu` pointer.
     """
-    with caplog.at_level('ERROR'), pytest.raises(subprocess.CalledProcessError):
+    with caplog.at_level('ERROR'), pytest.raises(ServiceError):
         system.systemctl('start', failing_unit)
 
     assert f'systemctl start {failing_unit}' in caplog.text
@@ -166,7 +167,7 @@ def test_check_false_returns_the_returncode_and_stdout_contract(failing_unit):
     This is the contract `services/ap.py` is slated to migrate onto: it still shells out to `systemctl`
     itself and branches on `returncode`.
     """
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(ServiceError):
         system.systemctl('start', failing_unit)
 
     result = system.systemctl('is-active', failing_unit, check=False)

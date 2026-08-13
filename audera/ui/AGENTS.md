@@ -20,7 +20,7 @@ Every UI app follows this two-file pattern:
 - Re-entrancy guards on `Page` then guard the wrong scope. `_players_generation` is stamped per build and compared after each `await`; shared, it is a counter that builds in *different* browsers race on, and the loser returns having rendered nothing — an empty tab until that client reloads.
 - Latches on `Page` become cross-client freezes: one operator's open menu (`_dialog_open`) would suspend everyone's poll, and one operator's Plex OAuth (`_claim_in_flight`) would refuse everyone's source toggles.
 
-Anything genuinely process-scoped goes in `load()` or at module level, not on the instance — `index.adopt_running_sources` is there because it is a blocking Snapserver read that reconciles the device once, and `index._CHOREOGRAPHY_LOCK` is a module global because it serializes host mutations across every client. The cost of a per-client `Page` is `_load_settings()`, one JSON read per page load; in exchange a settings edit is picked up on the next load rather than never.
+Anything genuinely process-scoped goes in `load()` or at module level, not on the instance — `index.adopt_running_sources` is there because it is a blocking Snapserver read that reconciles the device once, and the command queue (`commands.py`) is a module-level singleton because it serializes host mutations across every client. The cost of a per-client `Page` is `_load_settings()`, one JSON read per page load; in exchange a settings edit is picked up on the next load rather than never.
 
 `tests/ui/test_streamer.py`'s `_page(user)` is how a test reaches the instance the render path holds — the one it constructs to call `load()` is not it.
 
@@ -120,10 +120,10 @@ The Players tab renders under `player_grouping`: **by player** (a flat list of c
 UI code never calls `subprocess` directly; every systemd interaction goes through `audera.services.system` (see the root `AGENTS.md` for why the seam exists). The Sources tab does not call that seam itself either: `domains.sources.toggle.apply` holds the conf write, the units and the restart, and `index._enable_source` / `_disable_source` keep only what needs `page`. Beyond that:
 
 - `/etc/` targets are module constants, referenced by attribute. Import the module (`from audera.cli import conf`) and read `conf.SNAPSERVER_CONF` at call time, so a test can redirect the write into `tmp_path`. `from audera.cli.conf import SNAPSERVER_CONF` binds the device path at import and writes to the real file under test.
-- Notifications read `getattr(exc, 'stderr', '') or str(exc)`. `CalledProcessError.__str__` contains the argv and the exit status but not the reason. `getattr` rather than `exc.stderr` because `@platform.requires('dietpi')` raises `RuntimeError`, which has no `stderr`; reading it directly raises `AttributeError` inside the handler on every dev-box toggle.
+- Notifications read `getattr(exc, 'stderr', '') or str(exc)`. `getattr` rather than `exc.stderr` because `@platform.requires('dietpi')` raises `RuntimeError`, which has no `stderr`; reading it directly raises `AttributeError` inside the handler on every dev-box toggle.
 - Order the choreography so it rolls forward, with a single abort point. The data-access layer goes first because the enabled set is the intent and `/etc/snapserver.conf` is derived from it; the restart goes last, when every input it reads is already on disk. On the disable path, reassigning listeners is the only abort point: before the DAL write, aborting changes nothing, and after the conf is written the stream no longer exists to reassign anyone off. Steps past that point notify with `type='negative'` and leave the new state rather than unwinding.
-- Wait for the restarted Snapserver before repainting anything that reads it. `systemctl restart snapserver` returns once systemd has forked the process, not once it is serving; the unit declares no readiness protocol, so the JSON-RPC socket refuses connections for seconds afterwards and a refresh inside that window renders every enabled source `not running`. `index._await_snapserver` polls `Server.GetStatus` off-thread until it answers or `_READY_TIMEOUT` passes, and runs inside `_CHOREOGRAPHY_LOCK` so a second toggle cannot restart Snapserver out from under the wait. A non-empty status is a sound readiness signal only because of `CATALOG`'s rule 2: the conf just loaded always names a stream, so `{}` means unreachable. It returns rather than raises on timeout, since `not running` is then the correct chip.
-- Guards that protect an invariant are re-read inside the lock. The disabled switch and the pre-dialog check are both decided against a render that may be seconds stale; only the check taken inside `index._CHOREOGRAPHY_LOCK`, against a freshly read enabled set, enforces the invariant.
+- Wait for the restarted Snapserver before repainting anything that reads it. `systemctl restart snapserver` returns once systemd has forked the process, not once it is serving; the unit declares no readiness protocol, so the JSON-RPC socket refuses connections for seconds afterwards and a refresh inside that window renders every enabled source `not running`. `index._await_snapserver` polls `Server.GetStatus` off-thread until it answers or `_READY_TIMEOUT` passes, and runs outside the command queue so it does not block other commands. A non-empty status is a sound readiness signal only because of `CATALOG`'s rule 2: the conf just loaded always names a stream, so `{}` means unreachable. It returns rather than raises on timeout, since `not running` is then the correct chip.
+- Guards that protect an invariant are re-read inside the queue. The disabled switch and the pre-dialog check are both decided against a render that may be seconds stale; only the check taken inside `_disable_source_write`, against a freshly read enabled set, enforces the invariant.
 - A dev box behaves differently from the device. `sources_dal.set_enabled` is plain JSON under `~/.audera` and has no platform gate, so a source toggle on a developer's machine mutates `~/.audera/sources.json` and only then fails at the `/etc/` write or the `systemctl` call, leaving the enabled set changed.
 
 ## Previewing UI changes (screenshot loop)
@@ -140,6 +140,43 @@ The user iterates on UI from screenshots. Most player UI only renders with live 
 4. **Clean up before committing**: stop the background server, delete `_preview.py`, and free port 8080. The harness is never committed.
 
 The real app runs with `reload=False`, so the user restarts it to see applied changes.
+
+## Event broker
+
+`audera/ui/streamer/broker.py` brokers events from two sources — Snapserver (persistent WebSocket) and local metadata (volume DAL) — into a single cache the UI reads from.
+
+- **Singleton.** `broker.start(host, port)` creates the module-level `EventBroker` instance on `app.on_startup`. `broker.get()` returns it; `broker.stop()` tears it down on `app.on_shutdown`.
+- **Persistent async WebSocket.** A reader task holds a `websockets.asyncio.client.connect` to `ws://host:1780/jsonrpc`. Writes use short-lived connections via `_call` (Snapserver's `excludeSession` excludes the writing socket from notifications).
+- **`broker.Cache`.** A mutable cache of `clients`, `groups`, `stream_status`, and `volumes`. `build_players_tab` reads this directly; no async I/O is needed.
+- **Seed then delta.** `Server.GetStatus` on connect seeds the cache. Notifications update it in place. `Client.OnConnect` reseeds via a short-lived connection (the new client's state is not in the payload).
+- **Diff before signal.** `snapshot()` returns an immutable tuple. After every notification, compare against the prior snapshot; signal dirty only on change. An idle system does not rebuild.
+- **Debounce.** 250 ms quiet period before invoking dirty callbacks.
+- **Reconnect.** Exponential backoff from 1 s to 30 s.
+
+## Command queue
+
+`audera/ui/streamer/commands.py` serializes all UI write paths — Snapserver RPCs, CamillaDSP pushes, DAL saves, systemd toggles — through a single `asyncio.Queue` with one worker task.
+
+- **Singleton.** `commands.start()` in `_start()` after `broker.start()`. `commands.get()` returns the `CommandQueue`. `commands.stop()` on `app.on_shutdown` before `broker.stop()`.
+- **`submit(fn, *args, coalesce_key=None, **kwargs)`.** Wraps the callable in a `_PendingCommand` with a `Future`, puts it on the queue, returns `await future`. The worker runs each callable via `asyncio.to_thread`.
+- **Coalescing.** When the worker is busy and commands pile up, pending commands sharing a `coalesce_key` collapse to the latest; replaced futures resolve with `None`. No timers or artificial delays.
+- **Volume coalescing.** The volume slider submits with `coalesce_key=('volume', client_id)`, so a fast drag produces one write per worker cycle.
+- **Error propagation.** Exceptions from the callable are set on the future and re-raised in the caller. The worker continues to the next command.
+- **What stays outside.** `_await_snapserver` (20 s poll), `adopt_running_sources` (startup reconciliation), broker reads, and the Plex claim flow.
+
+## Client registry and fan-out
+
+`pages/__init__.py._registry` maps NiceGUI client id → `Page`. Populated in the `_index()` and `_dsp()` route closures; cleaned on `client.on_disconnect`. `connected_pages()` returns `(Client, Page)` pairs, filtering disconnected entries.
+
+All three fan-out callbacks — the broker's dirty callback (`_on_dirty`), `_on_sources_changed`, and `_on_settings_changed` — iterate `connected_pages()` and check `page._dialog_open`. If open, they add affected tab names to `page._deferred_tabs` instead of refreshing. Otherwise, `with client:` refreshes the relevant tabs.
+
+## Defer and replay
+
+A rebuild destroys open menus and dialogs. Every path that clears `_dialog_open` calls `_close_dialog(page)`, which replays deferred tab refreshes: if `page._deferred_tabs` is non-empty, it replaces the set with a fresh empty one and refreshes each tab that was deferred — sources, then settings, then players.
+
+## Volume binding
+
+The volume slider persists via `.on('update:model-value')` — a Quasar event that fires only on user interaction, not on programmatic `set_value()`. The slider value is bound from `broker.get().cache.volumes[client_id]` via NiceGUI's binding system. Every pushed value is step-aligned via `int(round(…))` to prevent phantom `update:model-value` emissions.
 
 ## Running a local dev server
 

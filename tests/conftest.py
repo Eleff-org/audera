@@ -47,6 +47,7 @@ def audera_home(tmp_path, monkeypatch):
         ('audera.dal.presets', 'dsp/presets'),
         ('audera.dal.settings', 'settings'),
         ('audera.dal.sources', 'sources'),
+        ('audera.dal.volume', 'volume'),
     ]:
         dest = str(tmp_path / subdir)
         (tmp_path / subdir).mkdir(parents=True, exist_ok=True)

@@ -1,12 +1,26 @@
 """Audera app pages"""
 
 from dotenv import load_dotenv
-from nicegui import app, ui
+from nicegui import Client, app, context, ui
 
 from audera.ui.streamer.pages import dsp, index
 from audera.ui.streamer.pages._clients import _load_settings
 
 load_dotenv()
+
+_registry: dict[str, 'Page'] = {}
+
+
+def connected_pages() -> list[tuple[Client, 'Page']]:
+    """Returns (client, page) pairs for every connected browser."""
+    result = []
+    for client_id, page in list(_registry.items()):
+        client = Client.instances.get(client_id)
+        if client is None or not client.has_socket_connection:
+            _registry.pop(client_id, None)
+            continue
+        result.append((client, page))
+    return result
 
 
 class Page:
@@ -14,18 +28,14 @@ class Page:
 
     One instance per connected client. `@ui.refreshable` keys its render targets on the bound
     instance and on nothing else, so a `Page` shared across clients makes every `refresh()` a
-    broadcast that clears every open browser's tab, and makes `_players_generation` a counter that
-    concurrent builds in *different* browsers race on — the loser returns having rendered nothing,
-    leaving that client an empty Players tab until it reloads.
+    broadcast that clears every open browser's tab.
     """
 
     def __init__(self):
         """Initializes an instance of the streamer dashboard app."""
         self.settings = _load_settings()
         self._dialog_open: bool = False
-        # The Players tab's build counter. An `async` `@ui.refreshable` is not re-entrant, so two
-        # refreshes in the same tick both clear and then both append, rendering every element twice.
-        self._players_generation: int = 0
+        self._deferred_tabs: set[str] = set()
         # Set while the PlexAmp claim flow is mid-OAuth. A Sources tab refresh deletes the flow's
         # elements and cancels its timers, so a source toggle raised during a claim is refused.
         self._claim_in_flight: bool = False
@@ -53,12 +63,16 @@ class Page:
     # its own refresh targets (NiceGUI filters targets by `instance`); their bodies live in
     # `index` and are re-run via `self._build_<name>_tab.refresh()`.
     @ui.refreshable
-    async def _build_players_tab(self) -> None:
-        await index.build_players_tab(self)
+    def _build_players_tab(self) -> None:
+        index.build_players_tab(self)
 
     @ui.refreshable
     def _build_sources_tab(self) -> None:
         index.build_sources_tab(self)
+
+    @ui.refreshable
+    def _build_settings_tab(self) -> None:
+        index.build_settings_tab(self)
 
 
 def current() -> Page:
@@ -74,6 +88,9 @@ async def _index() -> None:
     """The `/` route. One `Page` per client, published for `current()`."""
     page = Page()
     app.storage.client['page'] = page
+    client = context.client
+    _registry[client.id] = page
+    client.on_disconnect(lambda: _registry.pop(client.id, None))
     await page.index()
 
 
@@ -81,4 +98,7 @@ def _dsp(player_id: str) -> None:
     """The `/player/{player_id}/dsp` route. One `Page` per client, published for `current()`."""
     page = Page()
     app.storage.client['page'] = page
+    client = context.client
+    _registry[client.id] = page
+    client.on_disconnect(lambda: _registry.pop(client.id, None))
     page.dsp(player_id)
