@@ -84,7 +84,7 @@ class CamillaDSPClient:
 
         Gates every Save: the compiled pipeline is checked by the daemon before it is
         pushed via `set_config`, so an invalid config never reaches the running graph.
-        Raises `RuntimeError` when the daemon reports any non-`Ok` result.
+        Raises `ServiceError` when the daemon reports any non-`Ok` result.
 
         Parameters
         ----------

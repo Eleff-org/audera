@@ -32,6 +32,15 @@ async def test_welcome_renders_streamer(setup_page, user: User):
     await user.should_see('streamer')
 
 
+async def test_pages_carry_brand_stylesheet(setup_page, user: User):
+    """Every setup page pulls the brand CSS via header.render() -> theme.apply_page()."""
+    page = setup_page(role='streamer')
+    page.load()
+    for route in ('/', '/connect', '/finish'):
+        client = await user.open(route)
+        assert '/brand/tokens.css' in client.head_html
+
+
 async def test_welcome_renders_player(setup_page, user: User):
     page = setup_page(role='player')
     page.load()

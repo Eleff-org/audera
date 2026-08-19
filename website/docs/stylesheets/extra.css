@@ -1,0 +1,186 @@
+/* ============================================================
+   Audera website overrides
+   ============================================================
+   Bridges brand tokens (loaded via brand.css) into Zensical /
+   Material for MkDocs variables, and loads Fraunces for display
+   typography.
+   ============================================================ */
+
+/* Font faces (@font-face) are declared once in brand/tokens.css, copied to
+   brand.css and loaded ahead of this file, so the site shares one set with the
+   apps. Do not restate them here. */
+
+/* ---- Material / Zensical variable bridge ---- */
+:root {
+  --md-default-bg-color:    var(--paper);
+  --md-default-fg-color:    var(--ink);
+  --md-primary-fg-color:    var(--ink);
+  --md-primary-bg-color:    var(--paper);
+  --md-accent-fg-color:     var(--ink);
+  --md-typeset-a-color:     var(--ink);
+  --md-typeset-color:       var(--ink);
+  --md-code-bg-color:       var(--paper-2);
+  /* Self-hosted brand families (Google Fonts loader is disabled in
+     zensical.toml); Material derives --md-*-font-family from these. */
+  --md-text-font:           var(--font-sans);
+  --md-code-font:           var(--font-mono);
+}
+
+/* ---- Page background ---- */
+body,
+.md-main,
+.md-content {
+  background: var(--paper);
+}
+
+/* ---- Header bar ---- */
+.md-header {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: none;
+}
+
+/* Drop the default book logo and render the site title in the display serif,
+   matching the hero wordmark. */
+.md-header .md-logo {
+  display: none;
+}
+
+.md-header__title .md-ellipsis {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--wordmark-size);
+  font-variation-settings: 'opsz' 40, 'SOFT' 100, 'wght' 400;
+  letter-spacing: -0.01em;
+}
+
+/* Search trigger. Material's default (ink background, near-transparent on
+   hover) vanishes into the ink header, so pin it to a paper field with an ink
+   glyph in every state; the hover override matches Material's :hover
+   specificity (0,2,0) to win. The magnifier (::before) and shortcut hint
+   (::after) are tinted to stay legible on the paper field. */
+.md-search__button {
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 6px 2.2rem;
+  transition: none;
+}
+
+.md-search__button:hover,
+.md-search__button:focus {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.md-search__button::before {
+  background-color: var(--ink);
+}
+
+.md-search__button::after {
+  background: var(--paper-3);
+  color: var(--ink-3);
+}
+
+/* Repo link (GitHub badge) sits on the ink header, so tint it paper. */
+.md-header__source,
+.md-source {
+  color: var(--paper);
+}
+
+/* ---- Hero section ---- */
+.audera-hero {
+  text-align: center;
+  padding: 80px 24px 48px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.audera-hero h1 {
+  font-family: var(--font-display);
+  font-size: 56px;
+  font-weight: 300;
+  font-style: italic;
+  font-variation-settings: 'opsz' 72, 'SOFT' 100, 'wght' 300;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  margin-bottom: 16px;
+}
+
+.audera-tagline {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 300;
+  font-style: italic;
+  font-variation-settings: 'opsz' 40, 'SOFT' 100, 'wght' 300;
+  color: var(--ink-2);
+  margin-bottom: 32px;
+}
+
+.audera-body {
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  font-weight: 300;
+  margin-bottom: 40px;
+}
+
+/* ---- CTA links (underline + arrow) ----
+   The border-bottom is the underline. Material's .md-typeset a rule (0,2,0)
+   also sets text-decoration: underline, so scope the reset to .md-typeset to
+   outweigh it, else the link renders a second native underline. */
+.md-typeset .site-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 32px;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 0;
+  text-decoration: none;
+  border: none;
+  border-bottom: 1px solid var(--ink);
+  border-radius: 0;
+  transition: all var(--duration) var(--ease);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.md-typeset .site-cta:last-child {
+  margin-right: 0;
+}
+
+.md-typeset .site-cta:hover {
+  box-shadow: inset 0 -2px 0 0 var(--ink);
+}
+
+.md-typeset .site-cta--secondary {
+  color: var(--ink-3);
+  border-bottom-color: var(--ink-3);
+}
+
+.md-typeset .site-cta--secondary:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+  box-shadow: inset 0 -2px 0 0 var(--ink);
+}
+
+/* ---- Footer ---- */
+.md-footer {
+  display: none;
+}
+
+/* ---- Horizontal rule ---- */
+.md-typeset hr {
+  border-color: var(--rule);
+}
+
+/* ---- Selection ---- */
+::selection {
+  background: var(--accent-wash);
+  color: var(--ink);
+}

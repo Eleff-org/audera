@@ -1,6 +1,6 @@
 """audera
 
-🔮 `audera` is a new era of composable audio systems that brings
+`audera` is a new era of composable audio systems that brings
 open-protocols to your own hardware for multi-room synchronous playback.
 """
 
@@ -21,7 +21,7 @@ __all__ = [
 NAME: str = 'audera'
 DESCRIPTION: str = ''.join(
     [
-        '🔮 `audera` is a new era of composable audio systems that brings',
+        '`Audera` is a new era of composable audio systems that brings',
         ' open-protocols to your own hardware for multi-room synchronous playback.',
     ]
 )

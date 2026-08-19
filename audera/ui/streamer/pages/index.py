@@ -100,7 +100,7 @@ async def render(page: 'Page') -> None:
     The Players tab reads from the broker cache, so no async I/O is needed for the initial build.
     The broker's dirty callback drives subsequent rebuilds.
     """
-    components.header.render(audera.NAME, 'Streamer')
+    components.header.render(audera.NAME.capitalize())
 
     with ui.tabs().classes('w-full') as tabs:
         players_tab = ui.tab(_PLAYERS_TAB)
@@ -691,7 +691,7 @@ def _open_disable_dialog(
                 await _disable_source(page, source, destination.value if destination is not None else None)
 
             ui.button('Cancel', on_click=_on_cancel).props('flat dense')
-            (ui.button('Disable', on_click=_on_confirm).props('dense').classes('bg-gray-800 text-white').mark('disable-confirm'))
+            (ui.button('Disable', on_click=_on_confirm).props('dense').mark('disable-confirm'))
 
     dialog.on('hide', _dismiss)
     dialog.open()
@@ -1410,9 +1410,7 @@ def _open_settings_dialog(page: 'Page', client) -> None:
             with ui.column().classes('gap-0'):
                 ui.label('Snapcast Volume').classes('text-xs')
                 current_vol_label = ui.label(f'Current Volume {snap_vol}%').classes('text-xs text-gray-500')
-            ui.button('Reset', on_click=lambda c=client, lbl=current_vol_label: _reset_snap_volume(page, c, lbl)).props(
-                'dense'
-            ).classes('bg-gray-800 text-white')
+            ui.button('Reset', on_click=lambda c=client, lbl=current_vol_label: _reset_snap_volume(page, c, lbl)).props('dense')
 
         ui.separator().classes('mt-4 mb-2')
         # No group id: it is an opaque uuid that changes over time, and the stream it identified is
@@ -1444,7 +1442,7 @@ def _open_settings_dialog(page: 'Page', client) -> None:
                 page._build_players_tab.refresh()
 
             ui.button('Cancel', on_click=_on_cancel).props('flat dense')
-            ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
+            ui.button('Save', on_click=_on_save).props('dense')
 
     dialog.on('hide', lambda: _close_dialog(page))
     dialog.open()

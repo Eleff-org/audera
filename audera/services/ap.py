@@ -66,15 +66,11 @@ class AccessPoint:
     def create(self):
         """Creates the Wi-Fi access point connection."""
 
-        # Stop the network services holding wlan0 so the AP vif can be added
-        for unit in ('NetworkManager', 'wpa_supplicant'):
-            try:
-                subprocess.run(['systemctl', 'stop', unit], check=True)
-            except subprocess.CalledProcessError:
-                pass  # unit is not running
-
-        # Remove any leftover AP interface from a prior, uncleaned run
-        subprocess.run(['iw', 'dev', f'{self.ap_interface}', 'del'])  # no check; absent is fine
+        # Stop network-manager
+        try:
+            subprocess.run(['systemctl', 'stop', 'NetworkManager'], check=True)
+        except subprocess.CalledProcessError:
+            pass  # Network-manager is not running
 
         # Configure the access point interface
         subprocess.run(
@@ -167,9 +163,6 @@ class AccessPoint:
                 raise AccessPointError(
                     'Unable to delete the Wi-Fi access point {%s} on interface {%s}.' % (self.hostname, self.ap_interface)
                 )
-
-        # Remove the AP interface so a clean stop leaves no stale netdev behind
-        subprocess.run(['iw', 'dev', f'{self.ap_interface}', 'del'])  # no check; absent is fine
 
     @platform.requires('dietpi')
     def up(self):

@@ -45,7 +45,7 @@ def render(page: 'Page', player_id: str) -> None:
     indicator, derived pre-amp, and live response chart; structural changes
     (add/delete/type/preset/reset) refresh the band table.
     """
-    components.header.render(audera.NAME, 'Streamer')
+    components.header.render(audera.NAME.capitalize())
     components.layout.fill_viewport()  # page fills the viewport; the editor's `grow` column owns the scroll region
 
     snap = _snapserver(page.settings)
@@ -213,17 +213,13 @@ def render(page: 'Page', player_id: str) -> None:
                     with ui.row().classes('justify-between w-full mt-2'):
                         # Cancel dismisses only the confirm, leaving the save dialog open to rename.
                         ui.button('Cancel', on_click=confirm.close).props('flat dense').mark('preset-replace-cancel')
-                        ui.button('Replace', on_click=_on_replace).props('dense').classes('bg-gray-800 text-white').mark(
-                            'preset-replace-confirm'
-                        )
+                        ui.button('Replace', on_click=_on_replace).props('dense').mark('preset-replace-confirm')
 
                 confirm.open()
 
             with ui.row().classes('justify-between w-full mt-2'):
                 ui.button('Cancel', on_click=dialog.close).props('flat dense')
-                ui.button('Save', on_click=_on_save_preset).props('dense').classes('bg-gray-800 text-white').mark(
-                    'preset-save-run'
-                )
+                ui.button('Save', on_click=_on_save_preset).props('dense').mark('preset-save-run')
 
         dialog.open()
 
@@ -285,9 +281,7 @@ def render(page: 'Page', player_id: str) -> None:
 
             with ui.row().classes('justify-between w-full mt-2'):
                 ui.button('Cancel', on_click=dialog.close).props('flat dense')
-                ui.button('Import', on_click=_on_import).props('dense').classes('bg-gray-800 text-white').mark(
-                    'config-import-run'
-                )
+                ui.button('Import', on_click=_on_import).props('dense').mark('config-import-run')
 
         dialog.open()
 
@@ -320,7 +314,7 @@ def render(page: 'Page', player_id: str) -> None:
             with ui.row().classes('justify-between w-full mt-2'):
                 ui.button('Close', on_click=dialog.close).props('flat dense')
                 ui.button('Copy', on_click=_on_copy).props('dense')
-                ui.button('Download .yml', on_click=_on_download).props('dense').classes('bg-gray-800 text-white')
+                ui.button('Download .yml', on_click=_on_download).props('dense')
 
         dialog.open()
 
@@ -473,7 +467,7 @@ def render(page: 'Page', player_id: str) -> None:
                 dialog.close()
 
             with ui.row().classes('justify-end w-full mt-2'):
-                (ui.button('Close', on_click=_close).props('dense').classes('bg-gray-800 text-white').mark('dsp-band-close'))
+                (ui.button('Close', on_click=_close).props('dense').mark('dsp-band-close'))
 
         dialog.open()
 
@@ -544,7 +538,7 @@ def render(page: 'Page', player_id: str) -> None:
             )
             ui.space()
             ui.button('Reset', on_click=_on_reset).props('flat dense')
-            ui.button('Save', on_click=_on_save).props('dense').classes('bg-gray-800 text-white')
+            ui.button('Save', on_click=_on_save).props('dense')
 
         # Persistent handle + empty-state tip, both toggled by the forward-closure
         # `_mark_changed`: the chart shows only once a band exists, the tip otherwise.

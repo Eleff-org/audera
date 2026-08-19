@@ -1,0 +1,85 @@
+/* ============================================================
+   Audera Design Tokens
+   ============================================================
+   Single source of truth for palette, typography, shape, and
+   motion across the public website and on-device apps.
+
+   Light theme only. The palette is monochrome apart from
+   --accent-wash, the text-selection highlight.
+
+   Add new colors or type roles here first; apps and the website
+   only consume them, never hard-code.
+   ============================================================ */
+
+/* ---- Font faces (self-hosted variable woff2, latin subset) ----
+   Declared once here so every consumer shares one set: the NiceGUI apps (via
+   theme.py's link) and the website (via the brand.css copy). url() is relative
+   to this stylesheet, so `fonts/<file>` resolves under both. */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('fonts/Fraunces-italic-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('fonts/Fraunces-normal-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('fonts/Inter-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('fonts/JetBrainsMono-latin.woff2') format('woff2');
+}
+
+:root {
+  /* ---- Paper (backgrounds) ---- */
+  --paper:   #FAFAF8;  /* page background              */
+  --paper-2: #F3F2EF;  /* cards, code blocks            */
+  --paper-3: #E8E6E1;  /* dividers, inactive surfaces   */
+
+  /* ---- Ink (foreground) ---- */
+  --ink:   #1A1A18;  /* primary text, headings         */
+  --ink-2: #4A4A46;  /* body text, secondary copy      */
+  --ink-3: #7A7A74;  /* captions, placeholders         */
+  --ink-4: #A0A09A;  /* disabled, muted metadata       */
+
+  /* ---- Selection ---- */
+  --accent-wash:  #F5EDE5;  /* ::selection highlight background */
+
+  /* ---- Rules ---- */
+  --rule:        rgba(26, 26, 24, 0.08);
+  --rule-strong: rgba(26, 26, 24, 0.16);
+
+  /* ---- Status ---- */
+  --up:      #5A7A4A;
+  --up-wash: #ECF2E8;
+
+  /* ---- Typography ---- */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-sans:    'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+
+  /* Header wordmark size, shared by the apps and the website so the two
+     headers match. */
+  --wordmark-size: 24px;
+
+  /* ---- Shape ---- */
+  --radius: 0px;
+
+  /* ---- Motion ---- */
+  --duration: 250ms;
+  --ease:     cubic-bezier(0.2, 0.8, 0.2, 1);
+}

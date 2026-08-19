@@ -237,7 +237,7 @@ def _build_claim_flow(page: 'Page') -> None:
     page: `audera.ui.streamer.pages.Page`
         An instance of the streamer dashboard app.
     """
-    connect_btn = ui.button('Connect with Plex').classes('mt-2').mark('plex-connect')
+    connect_btn = ui.button('Connect with Plex →').classes('mt-2').mark('plex-connect')
     status_label = ui.label('').classes('text-sm text-gray-500 mt-1')
     auth_link = ui.link("Didn't open? Click here to authorize with Plex", '#', new_tab=True).classes('text-sm mt-1')
     auth_link.set_visibility(False)

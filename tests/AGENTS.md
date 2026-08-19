@@ -1,69 +1,38 @@
 # tests/AGENTS.md
 
-This file describes conventions for the Audera test suite. Reasoning about a particular fixture or probe lives beside it, in the code it explains.
+Conventions for the Audera test suite. List @tests/ for the layout.
 
 ## Philosophy
 
-- Integration tests only — test end-to-end behaviour as a user would
-- Only where the system is critical or of reasonable complexity
-- The CLI is tested as a process: `tests/cli/conftest.py`'s `audera_cli` runs the installed console script, so argparse's own refusals are under test
-- No class-based tests — pytest fixtures only
-- No inline imports — all imports at module top level
-- Mirror package structure under `tests/`
-- Parameterize over different entrypoints/conditions where meaningful
-- DRY — no duplicate fixtures or tests
-
-## Structure
-
-List @tests/ for the test package layout.
+- Integration tests only: end-to-end behaviour as a user would exercise it, and only where the system is critical or complex. The CLI is tested as a process (`tests/cli/conftest.py`'s `audera_cli` runs the installed console script, so argparse's own refusals are under test).
+- No class-based tests; pytest fixtures only. Prefer module-top imports (fixtures that gate on Docker import inline by necessity). Mirror the package structure under `tests/`. Parameterize over entrypoints/conditions where meaningful. Keep it DRY.
 
 ## DAL tests
 
-DAL tests use the `audera_home` fixture from `conftest.py`. It monkeypatches the module-level `PATH` constant in each DAL module to point at a `tmp_path` subdirectory, so no real `~/.audera` files are touched.
-
-Do not patch `audera.dal.path.HOME` — the `PATH` constants are computed at import time and will not reflect a late patch.
-
-A child process sees neither, so anything that shells out passes the home in the child's environment; `tests/cli/conftest.py` and `inside/conftest.py`'s `provision()` both do. Set `HOME` **and** `USERPROFILE`, and clear `HOMEDRIVE`/`HOMEPATH`: `ntpath.expanduser` never reads `HOME`, so a POSIX-shaped `env=` silently leaks the developer's own `~/.audera` into the test on Windows.
+Use the `audera_home` fixture from `conftest.py`: it monkeypatches the module-level `PATH` constant in each DAL module to point at `tmp_path`. Do not patch `audera.dal.path.HOME`, because the `PATH` constants are computed at import time and will not reflect a late patch. A child process sees neither, so anything that shells out passes the home in the child's environment (see the `env` handling in `tests/cli/conftest.py`).
 
 ## Client tests
 
 | File | Strategy |
 |---|---|
-| `test_snapserver.py` | Real snapserver in a Debian Trixie testcontainer, pinned to `0.31.0-1` to match the device (requires Docker) |
-| `test_snapserver_sources.py` | The same image booted from a conf with every catalogued source enabled (`snapserver_container_all_sources`). The image carries stub `go-librespot` and `shairport-sync` binaries that write silence, so `process://` and `airplay://` streams start. Covers conf acceptance and stream registration, not backend behaviour |
-| `test_camilladsp.py` | Real CamillaDSP binary in a custom testcontainer (requires Docker) |
-| `test_plexamp.py` | `respx` HTTP mock intercepting `httpx` calls |
+| `test_snapserver.py` | Real snapserver in a Debian Trixie testcontainer, pinned to `0.31.0-1` (Docker) |
+| `test_snapserver_sources.py` | The same image booted with every catalogued source enabled |
+| `test_camilladsp.py` | Real CamillaDSP binary in a custom testcontainer (Docker) |
+| `test_plexamp.py` | `respx` HTTP mock over `httpx` |
 
 ## Systemd lane
 
-`tests/systemd/` boots real systemd as PID 1 in a privileged Debian container and `docker exec`s an inner pytest per module under `inside/`. The code under test runs *inside*; the host half is only the driver. It is the only lane that observes a unit start, stop, or fail to stop, so it is authoritative where it disagrees with another lane.
-
-| Module | Pins |
-| :--- | :--- |
-| `test_platform.py` | `@platform.requires('dietpi')` on its *passing* branch, and that the image ships no Audera unit file |
-| `test_system.py` | The seam's effects — `start`/`stop` moving `ActiveState`, `MainPID` and reaping; `is_active` against genuinely failed and unknown units; `daemon-reload` moving a unit out of `not-found` |
-| `test_index.py` | The toggle choreography as an effect: the running streams match the conf on disk, a listener is moved to the destination the operator chose, a disabled source leaves no process, no zombie and no orphan, every unit stops inside the seam's budget, and a toggle applies against a unit systemd's start rate limit has already refused |
-| `test_plex.py` | The claim drop-in — the token reaching `/proc/<pid>/environ`, the chip ladder, and `_active_seconds` sharing an epoch with `time.monotonic()` |
-| `test_provisioning.py` | What a flash installs, including the unit state a recorded `sources.json` implies, and the `dal.sources.DEFAULT_ENABLED` fallback when there is none |
-
-The stubs are stubs, so nothing here covers backend behaviour, audio, ALSA, sync, DSP correctness, the apt pins, the DietPi repo, NetworkManager, the reboot tail, or ARM timing; `os/dietpi/AGENTS.md` lists what is still verified by flashing a device.
+`tests/systemd/` boots real systemd as PID 1 in a privileged container and `docker exec`s an inner pytest per module under `inside/`; the code under test runs *inside*. It is the only lane that observes a unit start, stop, or fail to stop, so it is authoritative where lanes disagree. Each `inside/test_*.py` docstring states what it pins. Run with `uv run pytest -m systemd -v` (opt-in, requires Docker); `-m systemd` *overrides* `addopts` rather than appending, which is why the driver passes the same flag to the inner pytest.
 
 ## Fixtures
 
-Fixtures under `tests/fixtures/` are **captured from real running services** using the scripts in `tests/scripts/`. Never hand-write or invent fixture content — fabricated responses hide real API behaviour and cause tests to pass against data that the service never actually returns.
-
-Each fixture directory contains a `README.md` that documents what the fixtures contain and how to regenerate them.
-
-`tests/scripts/` also holds checks that are run by hand against a real streamer over the network and are never collected by pytest; `check_airplay.py`'s docstring is the pattern for adding another.
+Fixtures under `tests/fixtures/` are **captured from real running services** with the scripts in `tests/scripts/`; never hand-write fixture content. Each fixture directory has a `README.md` documenting what it holds and how to regenerate it. `tests/scripts/` also holds by-hand checks against a real streamer that pytest never collects; `check_airplay.py`'s docstring is the pattern.
 
 ## Running
 
 ```bash
-uv run pytest tests/dal/ -v                          # DAL only — no Docker required
-uv run pytest tests/clients/test_snapserver.py -v   # requires Docker
-uv run pytest tests/clients/ -v                      # all client tests
-uv run pytest -v                                     # everything except the systemd lane
-uv run pytest -m systemd -v                          # real systemd in a privileged container (requires Docker)
+uv run pytest tests/dal/ -v      # no Docker
+uv run pytest tests/clients/ -v  # requires Docker
+uv run pytest -v                 # everything except the systemd lane
+uv run pytest -m systemd -v      # real systemd in a privileged container (Docker)
 ```
-
-`-m systemd` on the command line *overrides* `addopts` rather than appending to it, which makes the lane opt-in and is why the driver passes the same flag to the inner pytest.

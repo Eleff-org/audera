@@ -20,7 +20,7 @@ PlexAmp
   → network
   → Snapclient (--sampleformat 48000:32:2 → hw:Loopback,0)
   → CamillaDSP (capture: S32LE from hw:Loopback,1)
-  → CamillaDSP (playback: S32LE to hw:0 / hw:0,0)
+  → CamillaDSP (playback: S32LE to hw:0)
   → DigiAMP+ DAC
 ```
 
@@ -47,7 +47,7 @@ The downstream expansion from 16-bit to 32-bit (Snapclient `--sampleformat 48000
 ### Why this is acceptable now
 
 - PlexAmp remote streaming typically delivers 16-bit FLAC or AAC, so the ceiling matches the common source format.
-- The CamillaDSP pipeline currently has no filters or EQ active (`filters: {}`, `pipeline: []`); bit-depth headroom for DSP operations is moot.
+- The CamillaDSP EQ (ADR 003) runs on the 32-bit playback path, so its bit-depth headroom is unaffected by the 16-bit capture ceiling.
 - Changing the stream format requires coordinated changes across multiple files and has not been designed for runtime configurability.
 
 ### What must change to raise the ceiling
@@ -62,5 +62,5 @@ These four locations must always be kept in sync. There is currently no runtime 
 ## Consequences
 
 - Source material above 16-bit or above 48 kHz is silently downsampled to 16-bit/48 kHz at the streamer.
-- Adding DSP filters in CamillaDSP (EQ, room correction, crossover) operates on zero-padded 32-bit data; if high-resolution source support is added later, the DSP headroom is already present.
+- The CamillaDSP EQ (ADR 003) operates on zero-padded 32-bit data; the 32-bit playback path already carries full DSP headroom even though the source ceiling is 16-bit.
 - A future configurable stream format feature must treat `asound.conf`, `snapserver.conf`, the Snapclient service unit, and the CamillaDSP config as a single atomic configuration unit.

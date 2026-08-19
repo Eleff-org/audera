@@ -78,7 +78,7 @@ def options(config: DSPConfig) -> dict:
                 'data': [[f, m] for f, m in zip(frequencies, magnitudes)],
                 'showSymbol': False,
                 'smooth': True,
-                'lineStyle': {'color': theme.ACCENT, 'width': 2},
+                'lineStyle': {'color': theme.INK, 'width': 2},
             }
         ],
     }
