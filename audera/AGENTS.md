@@ -8,7 +8,7 @@ Each client (`clients/snapserver.py`, `camilladsp.py`, `plexamp.py`) is a synchr
 
 ## Services
 
-Host-level side effects live in `audera/services/`, never inline in the UI or CLI. Functions that touch the device are gated with `@platform.requires('dietpi')`, which raises `RuntimeError` at call time (not a `CommandError`). All `systemctl` goes through `services/system.py`; the one exception is `services/ap.py`, which still shells out inline.
+Host-level side effects live in `audera/services/`, never inline in the UI or CLI. Functions that touch the device are gated with `@platform.requires('dietpi')`, which raises `RuntimeError` at call time (not a `CommandError`). All `systemctl` goes through `services/system.py`.
 
 ## Configuration writes
 

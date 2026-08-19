@@ -42,6 +42,16 @@ def systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 @platform.requires('dietpi')
+def reboot() -> None:
+    """Reboots the device via systemd.
+
+    Routes through `systemctl()` for the `TIMEOUT`, the `stderr` logging, and the exception
+    translation. `systemctl reboot` runs unprivileged on-device, so no `sudo` is needed.
+    """
+    systemctl('reboot')
+
+
+@platform.requires('dietpi')
 def is_active(unit: str) -> bool:
     """Returns `True` when the systemd unit is active.
 

@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import time
 from typing import Dict, List, Literal, Optional, Union
 
@@ -283,4 +282,4 @@ class Page:
         await asyncio.to_thread(self.ap.stop)
         app.shutdown()
         await asyncio.to_thread(time.sleep, 5)
-        await asyncio.to_thread(os.system, 'sudo reboot')
+        await asyncio.to_thread(audera.system.reboot)

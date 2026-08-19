@@ -59,7 +59,7 @@ def streamer_start(mock: bool = False, **_) -> None:
 
     from audera.ui import setup
 
-    if not netifaces.connected():
+    if not netifaces.connected_with_retry():
         setup.run(role='streamer')
 
     streamer.run()
@@ -119,7 +119,7 @@ def player_start(**_) -> None:
     # running non-start commands.
     from audera.ui import setup
 
-    if not netifaces.connected():
+    if not netifaces.connected_with_retry():
         setup.run(role='player')
 
 
