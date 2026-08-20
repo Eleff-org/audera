@@ -18,7 +18,8 @@ uv run ty check             # type check
 uv run pytest tests/dal/ -v                          # DAL tests (no Docker required)
 uv run pytest tests/clients/test_snapserver.py -v   # requires Docker
 uv run pytest tests/clients/ -v                      # all client tests
-uv run pytest -v                                     # everything
+uv run pytest -v                                     # everything except the systemd lane
+uv run pytest -m systemd -v                          # real systemd in a privileged container (requires Docker)
 pre-commit run --all-files  # run all hooks manually
 ```
 
@@ -38,7 +39,7 @@ uv tool install git+https://github.com/Eleff-org/audera.git
 
 ## Package layout
 
-List @audera/ for the Python package layout.
+See the [`audera/` package on GitHub](https://github.com/Eleff-org/audera/tree/main/audera) for the Python module layout.
 
 ## Clients
 

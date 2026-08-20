@@ -39,3 +39,8 @@ ADRs in `docs/adrs/` are human decision records. Read and follow the relevant AD
 - `snake_case` functions/variables, `PascalCase` classes, `UPPER_CASE` constants, `_leading_underscore` private
 - Single quotes unless the string contains a single quote; f-strings for formatting
 - 4-space indentation, 129-character line limit
+
+## Conventions
+
+- Follow simplicity as a design goal, e.g. "the least buggy code is the code never written"
+- Work in comprehensive increments that incl. code, tests and docs changes in a single commit

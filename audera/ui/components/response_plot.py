@@ -54,7 +54,7 @@ def options(config: DSPConfig) -> dict:
             },
             # Full vertical lines land on the log-axis decade ticks — within [20, 20000] that is
             # exactly 100 / 1000 / 10000.
-            'splitLine': {'show': True, 'lineStyle': {'color': '#eeeeee'}},
+            'splitLine': {'show': True, 'lineStyle': {'color': theme.PAPER_2}},
             # Major ticks on the decades; minor ticks at the 2–9 subdivisions per decade
             # (30…90, 200…, 2k…). `minorSplitLine` off so only the three decades get a full line.
             'axisTick': {'show': True},
@@ -70,7 +70,7 @@ def options(config: DSPConfig) -> dict:
             'max': _Y_MAX,
             'interval': _Y_MAX - y_min,  # a single full-range step lands ticks only on the endpoints
             'axisLabel': {'formatter': '{value}'},
-            'splitLine': {'lineStyle': {'color': '#eeeeee'}},
+            'splitLine': {'lineStyle': {'color': theme.PAPER_2}},
         },
         'series': [
             {

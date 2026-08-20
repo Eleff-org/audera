@@ -29,9 +29,8 @@ Per-role `font-variation-settings` live where they are used (`website/docs/style
 | `secondary` | `--ink-3` |
 | `accent` | `--ink` |
 | `positive` | `--up` |
-| custom `paper` | `--paper` |
 
-Quasar's color API takes hex strings, not `var()`, so `audera/ui/components/theme.py` restates these token values as Python constants and must be kept in sync with `tokens.css` by hand.
+Quasar's color API takes hex strings, not `var()`, so `audera/ui/components/theme.py` restates these token values as Python constants and must be kept in sync with `tokens.css` by hand. The paper background is applied as CSS (`background: var(--paper)` in `theme.py`), not a Quasar color slot.
 
 ## Consuming tokens
 

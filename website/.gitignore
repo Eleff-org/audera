@@ -4,3 +4,6 @@ site/
 # Build-copied brand assets (sourced from brand/ at repo root)
 docs/stylesheets/brand.css
 docs/stylesheets/fonts/
+
+# Build-copied developer docs (sourced from docs/dev/ at repo root)
+docs/developer/

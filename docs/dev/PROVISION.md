@@ -4,7 +4,7 @@
 
 ## Prerequisites
 
-- Git for Windows installed (provides a bash shell)
+- `bash` (preinstalled on macOS and Linux; on Windows, install [Git for Windows](https://git-scm.com/download/win), which bundles `bash.exe`)
 - SSH access to the target device (default user: `root`, port: `22`)
 - The device is reachable at its IP address
 
@@ -12,22 +12,38 @@
 
 Clone the repository and change into the project root:
 
-```powershell
+```bash
 git clone https://github.com/Eleff-org/audera.git
 cd audera
 ```
 
 ## Usage
 
-Run the script from the project root using Git's bundled bash.
+Run the script from the project root. On macOS and Linux, invoke it with your system `bash`; on Windows, invoke it with Git's bundled `bash.exe` from PowerShell.
 
-**Streamer:**
+### Streamer
+
+**macOS / Linux**
+
+```bash
+bash os/dietpi/setup/provision.sh --device streamer --host <IP> --branch <branch>
+```
+
+**Windows (PowerShell)**
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host <IP> --branch <branch>
 ```
 
-**Player:**
+### Player
+
+**macOS / Linux**
+
+```bash
+bash os/dietpi/setup/provision.sh --device player --host <IP> --branch <branch>
+```
+
+**Windows (PowerShell)**
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device player --host <IP> --branch <branch>
@@ -35,9 +51,20 @@ Run the script from the project root using Git's bundled bash.
 
 ### Example
 
+Provision a streamer and a player from the `v0.1.0-beta.1` tag, selecting the attached audio device:
+
+**macOS / Linux**
+
+```bash
+bash os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1 --audio-device hdmi
+bash os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1 --audio-device digiamp-plus
+```
+
+**Windows (PowerShell)**
+
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1
-& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1 --audio-device hdmi
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1 --audio-device digiamp-plus
 ```
 
 ## Options

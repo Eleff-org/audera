@@ -4,21 +4,30 @@ hide:
   - toc
 ---
 
-<div class="audera-hero" markdown>
+<section class="audera-hero" markdown>
 
-# Audera
+<header class="audera-nav" markdown>
+<span class="audera-nav__mark">Audera</span>
+<div class="audera-nav__links" markdown>
+[GitHub ↗](https://github.com/Eleff-org/audera)
+</div>
+</header>
 
-Multi-room audio on your own hardware.
-{ .audera-tagline }
+<div class="audera-hero__row" markdown>
+<div class="audera-hero__text" markdown>
 
-Open protocols and whole-house synchronization. AirPlay, Spotify Connect, and PlexAmp on Raspberry Pi with room correction.
-{ .audera-body }
+<h1 class="audera-tagline"><span class="audera-tagline__lead">A new era of</span> <span class="audera-tagline__accent">composable audio systems</span></h1>
 
-[Get started →](https://github.com/Eleff-org/audera){ .site-cta }
-[View on GitHub →](https://github.com/Eleff-org/audera){ .site-cta .site-cta--secondary }
+Audera integrates open protocols (`Snapcast`, `CamillaDSP`) to provide DSP-corrected, multi-room, synchronized audio playback.
+{ .audera-body .audera-body--lead }
+
+[Get started →](getting-started/index.md){ .site-cta }
 
 </div>
+<div class="audera-hero__media" markdown>
 
----
+![The Audera Players tab on mobile, showing the Office, Basement, Garage, and Living Room players](assets/players.png){ .audera-shot }
 
-*Coming soon.*
+</div>
+</div>
+</section>

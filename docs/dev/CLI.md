@@ -23,7 +23,7 @@ Available files:
 | `asound.conf` | `/etc/asound.conf` (appended) |
 | `go-librespot.yml` | `/var/lib/snapserver/.config/go-librespot/config.yml` |
 
-`--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require. See ADR 003.
+`--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require.
 
 `snapserver.conf` is rendered from `~/.audera/sources.json` (`dal.sources.get_enabled()`), falling back to the bootstrap set (`dal.sources.DEFAULT_ENABLED`) when nothing has been recorded. The file survives a reflash, so a reprovision that emitted the bootstrap set instead would ship a conf naming a stream the operator had turned off and Snapserver would reassign every group onto it at the first client connect.
 
@@ -53,7 +53,7 @@ Available files:
 |---|---|
 | `camilladsp.yml` | `/etc/camilladsp/config.yml` |
 
-`--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require. See ADR 003.
+`--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require.
 
 ## Dispatch
 

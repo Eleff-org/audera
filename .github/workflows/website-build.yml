@@ -3,9 +3,9 @@ name: Website build check
 on:
   push:
     branches: [main]
-    paths: ['brand/**', 'website/**']
+    paths: ['brand/**', 'website/**', 'docs/dev/**']
   pull_request:
-    paths: ['brand/**', 'website/**']
+    paths: ['brand/**', 'website/**', 'docs/dev/**']
 
 jobs:
   build:
@@ -34,6 +34,13 @@ jobs:
           cp brand/tokens.css website/docs/stylesheets/brand.css
           mkdir -p website/docs/stylesheets/fonts
           cp brand/fonts/*.woff2 website/docs/stylesheets/fonts/
+
+      - name: Copy developer docs
+        run: |
+          mkdir -p website/docs/developer
+          cp docs/dev/DEVELOPMENT.md website/docs/developer/development.md
+          cp docs/dev/PROVISION.md website/docs/developer/provisioning.md
+          cp docs/dev/CLI.md website/docs/developer/cli.md
 
       - name: Build website
         run: cd website && uv run zensical build
