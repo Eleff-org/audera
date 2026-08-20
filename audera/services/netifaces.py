@@ -3,11 +3,13 @@
 import asyncio
 import socket
 import subprocess
+import time
 import uuid
 from typing import Dict, List, Literal, Optional, Union
 
 import netifaces  # type: ignore
 
+from audera.errors import ServiceError, Unreachable
 from audera.services import platform
 
 
@@ -71,6 +73,29 @@ def connected(interface: Literal['wlan0'] = 'wlan0') -> bool:
 
     except socket.gaierror:
         return False
+
+
+def connected_with_retry(interface: Literal['wlan0'] = 'wlan0', attempts: int = 3, delay: float = 2.0) -> bool:
+    """Returns `True` when the network device is connected, retrying a bounded number of times.
+
+    Used by the boot/setup gate so a single transient miss does not strand a connected device in
+    setup mode. `connected()` retains single-shot semantics for `get_local_ip_address`.
+
+    Parameters
+    ----------
+    interface: `str`
+        The network interface for the Wi-Fi connection.
+    attempts: `int`
+        The maximum number of connectivity checks before giving up.
+    delay: `float`
+        The seconds to wait between checks.
+    """
+    for attempt in range(attempts):
+        if connected(interface):
+            return True
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return False
 
 
 def get_local_ip_address() -> str:
@@ -195,6 +220,111 @@ def connection_exists(con_name: str) -> bool:
         return True
     except subprocess.CalledProcessError:
         return False
+
+
+def _run_checked(argv: List[str]) -> None:
+    """Runs `argv` and translates a failure into the typed error hierarchy.
+
+    Mirrors `system.systemctl`'s error translation: a non-zero exit becomes `ServiceError`, a
+    missing binary becomes `Unreachable`.
+
+    Parameters
+    ----------
+    argv: `List[str]`
+        The command and its arguments, e.g. `['nmcli', 'connection', 'up', 'audera']`.
+    """
+    try:
+        subprocess.run(argv, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise ServiceError((exc.stderr or '').strip() or str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise Unreachable(str(exc)) from exc
+
+
+@platform.requires('dietpi')
+def connection_add(*args: str) -> None:
+    """Adds a network-manager connection.
+
+    Parameters
+    ----------
+    *args: `str`
+        The `nmcli connection add` arguments, e.g. `'type', 'wifi', 'ifname', 'ap0', …`.
+    """
+    _run_checked(['nmcli', 'connection', 'add', *args])
+
+
+@platform.requires('dietpi')
+def connection_delete(con_name: str) -> None:
+    """Deletes the network-manager connection.
+
+    Parameters
+    ----------
+    con_name: `str`
+        The connection name.
+    """
+    _run_checked(['nmcli', 'connection', 'delete', f'{con_name}'])
+
+
+@platform.requires('dietpi')
+def connection_up(con_name: str) -> None:
+    """Brings the network-manager connection up.
+
+    Parameters
+    ----------
+    con_name: `str`
+        The connection name.
+    """
+    _run_checked(['nmcli', 'connection', 'up', f'{con_name}'])
+
+
+@platform.requires('dietpi')
+def connection_down(con_name: str) -> None:
+    """Brings the network-manager connection down.
+
+    Parameters
+    ----------
+    con_name: `str`
+        The connection name.
+    """
+    _run_checked(['nmcli', 'connection', 'down', f'{con_name}'])
+
+
+@platform.requires('dietpi')
+def add_ap_interface(base: str, ap: str) -> None:
+    """Adds the access-point virtual interface on top of the base wireless interface.
+
+    Parameters
+    ----------
+    base: `str`
+        The base wireless interface, e.g. `'wlan0'`.
+    ap: `str`
+        The access-point interface to add, e.g. `'ap0'`.
+    """
+    _run_checked(['iw', 'dev', f'{base}', 'interface', 'add', f'{ap}', 'type', '__ap'])
+
+
+@platform.requires('dietpi')
+def delete_interface(interface: str) -> None:
+    """Tears down a network interface. A missing interface is not an error and is not checked.
+
+    Parameters
+    ----------
+    interface: `str`
+        The interface to delete, e.g. `'ap0'`.
+    """
+    subprocess.run(['iw', 'dev', f'{interface}', 'del'])
+
+
+@platform.requires('dietpi')
+def set_link_up(interface: str) -> None:
+    """Brings a network interface link up.
+
+    Parameters
+    ----------
+    interface: `str`
+        The interface to bring up, e.g. `'ap0'`.
+    """
+    _run_checked(['ip', 'link', 'set', f'{interface}', 'up'])
 
 
 @platform.requires('dietpi')

@@ -219,3 +219,47 @@ def test_streamer_start_mock_skips_the_connected_gate(monkeypatch):
     assert 'connected' not in calls
     assert 'apply_seams' not in calls
     assert calls == ['loopback_bind', 'run']
+
+
+def test_streamer_start_runs_without_setup_when_the_retry_gate_passes(monkeypatch):
+    """A connected device does not enter setup on a normal boot."""
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or True)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+    monkeypatch.setattr(streamer, 'run', lambda: calls.append('run'))
+
+    commands.streamer_start()
+
+    assert calls == ['gate', 'run']
+
+
+def test_streamer_start_enters_setup_when_the_retry_gate_fails(monkeypatch):
+    """A persistently offline device enters setup after all retries are exhausted."""
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or False)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+    monkeypatch.setattr(streamer, 'run', lambda: calls.append('run'))
+
+    commands.streamer_start()
+
+    assert calls == ['gate', ('setup', {'role': 'streamer'}), 'run']
+
+
+def test_player_start_runs_without_setup_when_the_retry_gate_passes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or True)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+
+    commands.player_start()
+
+    assert calls == ['gate']
+
+
+def test_player_start_enters_setup_when_the_retry_gate_fails(monkeypatch):
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or False)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+
+    commands.player_start()
+
+    assert calls == ['gate', ('setup', {'role': 'player'})]
