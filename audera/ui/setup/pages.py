@@ -1,13 +1,14 @@
 """Remote audio device setup pages"""
 
 import asyncio
-import os
+import json
 import time
 from typing import Dict, List, Literal, Optional, Union
 
 from nicegui import app, ui
 
 import audera
+from audera.ui import components
 
 
 class Page:
@@ -53,8 +54,9 @@ class Page:
             raise audera.ap.AccessPointError('Access-point setup is only available on dietpi-os.')
 
     @property
-    def available_networks(self):
-        return [f'{key} 🔒' if value else key for key, value in self.wifi_networks.items()]
+    def _secured_ssids(self) -> List[str]:
+        """The ssids that advertise a security type, so require a password."""
+        return [ssid for ssid, security in self.wifi_networks.items() if security]
 
     async def refresh_callback(self):
         """Refreshes the list of available Wi-Fi networks."""
@@ -67,27 +69,56 @@ class Page:
 
         # Stop
         self.network_refreshing = False
-        self.network_selector.set_options(self.available_networks)
+        self._build_selector.refresh()
+
+    def _option_slot(self) -> str:
+        """Renders a dropdown row: the ssid, plus a lock icon for a secured network.
+
+        The secured ssids are baked into the Quasar `option` slot as a literal
+        array, so the lock is a Material `q-icon` rather than a glyph carried in
+        the label. No emoji reaches the UI and the selector's value stays the
+        bare ssid, so nothing is stripped before connecting.
+        """
+        # Single-quote the v-if so the double-quoted json array does not close the
+        # attribute; encode any embedded apostrophe as an entity so an ssid like
+        # "Bob's" cannot close it either.
+        secured = json.dumps(self._secured_ssids).replace("'", '&#39;')
+        return (
+            '<q-item v-bind="props.itemProps">'
+            '<q-item-section><q-item-label>{{ props.opt.label }}</q-item-label></q-item-section>'
+            "<q-item-section side v-if='" + secured + ".includes(props.opt.label)'>"
+            '<q-icon name="lock" size="18px" />'
+            '</q-item-section>'
+            '</q-item>'
+        )
+
+    @ui.refreshable_method
+    def _build_selector(self):
+        """Renders the network selector, rebuilt in place when the scan returns.
+
+        The selector is recreated rather than re-optioned because the lock slot
+        bakes the current secured set into its template; a fresh build reflects
+        the fresh scan without reaching into NiceGUI's option internals.
+        """
+        self.network_selector = (
+            ui.select(options=list(self.wifi_networks.keys()), label='Network')
+            .props('clearable outlined dense')
+            .classes('w-full')
+        )
+        self.network_selector.add_slot('option', self._option_slot())
 
     def _build_network_card(self):
         """Renders the network selector and password input."""
 
-        self.network_selector = (
-            ui.select(
-                options=self.available_networks,
-                label='Network',
-            )
-            .props('clearable rounded-md outlined dense')
-            .classes('w-full')
-        )
+        self._build_selector()
         self.password_input = (
             ui.input(placeholder='Password', password=True, password_toggle_button=True)
             .bind_visibility_from(
                 self,
                 'network_selector',
-                backward=lambda network_selector: network_selector.value and '🔒' in network_selector.value,
+                backward=lambda selector: bool(selector and selector.value) and selector.value in self._secured_ssids,
             )
-            .props('clearable rounded-md outlined dense')
+            .props('clearable outlined dense')
             .classes('w-full')
         )
 
@@ -95,10 +126,10 @@ class Page:
             ui.button(
                 'Connect',
                 on_click=lambda: self.connect_callback(
-                    str(self.network_selector.value).replace('🔒', '').strip(),
+                    self.network_selector.value,
                     str(self.password_input.value).strip() if self.password_input.value else None,
                 ),
-            ).bind_enabled_from(self, 'network_selector', backward=lambda network_selector: network_selector.value).props(
+            ).bind_enabled_from(self, 'network_selector', backward=lambda selector: bool(selector and selector.value)).props(
                 'rounded'
             ).classes('normal-case')
             ui.spinner(size='md').bind_visibility_from(self, 'network_refreshing')
@@ -151,24 +182,41 @@ class Page:
         # Stop
         self.network_refreshing = False
 
+    def _chrome(self, step: Literal['welcome', 'connect', 'finish']) -> None:
+        """Renders the branded header and the three-step progress dots.
+
+        Rendering `header.render()` is what pulls the brand stylesheet, font-faces,
+        and light palette onto the page via `theme.apply_page()`; without it the
+        setup wizard falls back to default Quasar chrome even though `run()` sets
+        the color slots.
+
+        Parameters
+        ----------
+        step: `Literal['welcome', 'connect', 'finish']`
+            The active step, rendered as a filled progress dot.
+        """
+        _labels: Dict[str, str] = {'welcome': 'Welcome', 'connect': 'Connect', 'finish': 'Finish'}
+        components.header.render(audera.NAME.capitalize(), subtitle=_labels[step])
+
+        with ui.row().classes('flex w-full'):
+            ui.space()
+            for name in ('welcome', 'connect', 'finish'):
+                ui.icon('circle', size='.7rem', color='primary' if name == step else 'gray-100').classes('self-center')
+
     def load(self):
         """Returns the page content."""
-        ui.page('/', title='%s — Welcome' % audera.NAME.lower())(self.welcome)
-        ui.page('/connect', title='%s — Connect' % audera.NAME.lower())(self.connect)
-        ui.page('/finish', title='%s — Finish' % audera.NAME.lower())(self.finish)
+        ui.page('/', title='%s — Welcome' % audera.NAME.capitalize())(self.welcome)
+        ui.page('/connect', title='%s — Connect' % audera.NAME.capitalize())(self.connect)
+        ui.page('/finish', title='%s — Finish' % audera.NAME.capitalize())(self.finish)
 
     def welcome(self):
         """Returns the welcome page content."""
 
-        with ui.row().classes('flex w-full'):
-            ui.label('%s — Welcome' % audera.NAME.lower()).classes('self-center text-sm ml-3')
-            ui.icon('circle', size='.7rem', color='primary').classes('self-center ml-auto')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
+        self._chrome('welcome')
 
         # Welcome
         with ui.card().classes('mx-auto flex w-full'):
-            ui.markdown('Welcome to **audera** 👋').classes('text-3xl')
+            ui.markdown('Welcome to **Audera**').classes('text-3xl audera-heading')
             ui.markdown(audera.DESCRIPTION.replace('`', '**'))
             ui.markdown('Click **Start** to set up your %s.' % self.role)
 
@@ -178,16 +226,12 @@ class Page:
     def connect(self):
         """Returns the connect page content."""
 
-        with ui.row().classes('flex w-full'):
-            ui.label('%s — Connect' % audera.NAME.lower()).classes('self-center text-sm ml-3')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
-            ui.icon('circle', size='.7rem', color='primary').classes('self-center')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center mr-3')
+        self._chrome('connect')
 
         # Connect
         with ui.card().classes('mx-auto flex w-full'):
-            ui.markdown('Connect to Wi-Fi').classes('text-3xl')
-            ui.markdown('Select the Wi-Fi network you would like to use with your **audera** %s.' % self.role)
+            ui.markdown('Connect to Wi-Fi').classes('text-3xl audera-heading')
+            ui.markdown('Select the Wi-Fi network you would like to use with your **Audera** %s.' % self.role)
             ui.button('Refresh', on_click=self.refresh_callback).props('rounded').classes('ml-auto normal-case')
 
             with ui.card().classes('mx-auto flex w-full'):
@@ -207,7 +251,7 @@ class Page:
         _finish_instructions: Dict[str, str] = {
             'player': (
                 'Once your player restarts, open [audera.local](http://audera.local) '
-                'to manage playback from your **audera** streamer.'
+                'to manage playback from your **Audera** streamer.'
             ),
             'streamer': (
                 'Once your streamer restarts, open [audera.local](http://audera.local) '
@@ -215,18 +259,14 @@ class Page:
             ),
         }
 
-        with ui.row().classes('flex w-full'):
-            ui.label('%s — Finish' % audera.NAME.lower()).classes('self-center text-sm ml-3')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center ml-auto')
-            ui.icon('circle', size='.7rem', color='gray-100').classes('self-center')
-            ui.icon('circle', size='.7rem', color='primary').classes('self-center mr-3')
+        self._chrome('finish')
 
         # Finish
         with ui.card().classes('mx-auto flex w-full'):
-            ui.markdown('🎉 Your %s was set up successfully' % self.role).classes('text-3xl')
+            ui.markdown('Your %s was set up successfully' % self.role).classes('text-3xl audera-heading')
             ui.markdown('Click **Finish** below to start listening.')
             ui.markdown(_finish_instructions[self.role])
-            ui.markdown('To learn more about the **audera** ecosystem, check out the [Github](%s).' % audera.HOME)
+            ui.markdown('To learn more about the **Audera** ecosystem, check out the [Github](%s).' % audera.HOME)
 
             with ui.row().classes('flex w-full'):
                 ui.button('Back', on_click=lambda: ui.navigate.to('/connect')).props('flat rounded').classes('normal-case')
@@ -242,4 +282,4 @@ class Page:
         await asyncio.to_thread(self.ap.stop)
         app.shutdown()
         await asyncio.to_thread(time.sleep, 5)
-        await asyncio.to_thread(os.system, 'sudo reboot')
+        await asyncio.to_thread(audera.system.reboot)

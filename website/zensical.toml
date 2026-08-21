@@ -1,0 +1,20 @@
+[project]
+site_name = "Audera"
+site_url = "https://audera-audio.com"
+site_description = "Open-source multi-room audio for your own hardware."
+repo_url = "https://github.com/Eleff-org/audera"
+repo_name = "Eleff-org/audera"
+extra_css = ["stylesheets/brand.css", "stylesheets/extra.css"]
+nav = [
+    { Home = "index.md" },
+    { "Getting started" = "getting-started/index.md" },
+    { "Developer docs" = [ { Development = "developer/development.md" }, { Provisioning = "developer/provisioning.md" }, { "CLI reference" = "developer/cli.md" } ] },
+]
+
+[project.theme]
+variant = "modern"
+features = ["navigation.instant"]
+# Fonts are self-hosted via @font-face in brand/tokens.css (copied to brand.css),
+# so disable Material's Google Fonts loader. extra.css bridges --md-text-font /
+# --md-code-font to the brand families so the site shares one font source.
+font = false

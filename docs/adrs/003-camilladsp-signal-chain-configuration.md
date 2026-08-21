@@ -11,7 +11,7 @@ CamillaDSP is inserted between Snapclient and the physical DAC via an ALSA loopb
 Snapclient → hw:Loopback,0 → [kernel loopback] → hw:Loopback,1 → CamillaDSP → hw:0 → DAC
 ```
 
-Several independent configuration decisions interact: clock domain synchronization, CPU-cost of resampling on constrained hardware, pipeline safety, and filter type selection. Each has a non-obvious default that would produce subtle failure (drift, clicks, CPU saturation, or quantization noise) if left at the CamillaDSP default.
+Several config values interact — clock sync, resampling cost, device-open behaviour, and filter type — and each has a non-obvious default that fails subtly (drift, clicks, HDMI dropout, CPU saturation) if left at CamillaDSP's default. The config is rendered by `render_camilladsp` in `audera/cli/conf.py`; its inline comments own the per-key rationale.
 
 ## Decisions
 
@@ -36,22 +36,19 @@ If the ALSA loopback adjustment is insufficient (symptom: persistent clicks or p
 2. **BalancedAsync** — higher quality; may cause CPU spikes on the RPi Zero 2 W.
 3. **AccurateAsync** — highest quality; not suitable for the RPi Zero 2 W; intended for RPi 4 or desktop hardware.
 
-### 3. IIR filters are preferred over FIR for CPU-constrained hardware
+### 3. DSP is IIR-only, compiled and pushed at runtime
 
-The pipeline is currently empty (`filters: {}`, `pipeline: []`). When filters are added:
+The rendered config boots with an empty pipeline (`filters: {}`, `pipeline: []`). The DSP editor (`audera/domains/dsp/`) then compiles a parametric EQ — a `Gain` pre-amp plus one `Biquad` per band — and pushes it to the running daemon over the WebSocket (`SetConfigJson`), never by rewriting the file. Bands are the source of truth; the pipeline is a derived artifact. The `domains/dsp/` docstrings own the compile-and-apply flow and the auto-protected pre-amp headroom.
 
-- **IIR (biquads)**: Use for all standard equalization (PEQ, shelving, high-pass, low-pass). Near-zero CPU cost at 48 kHz on any supported hardware.
-- **FIR (convolution)**: Reserve for linear-phase room correction or crossover requirements that IIR cannot satisfy. On the RPi Zero 2 W, limit to **≤ 4096 taps per channel** at 48 kHz. Exceeding this budget risks breaking real-time processing deadlines, which produces audible glitches.
+IIR biquads (PEQ, shelving, high/low-pass) are near-zero CPU at 48 kHz. FIR convolution is deliberately not implemented: linear-phase room correction would exceed the RPi Zero 2 W's real-time budget.
 
-### 4. Safety and silence detection settings
+### 4. The ALSA device stays open
 
-`stop_on_rate_change: true` ensures CamillaDSP exits cleanly when the input sample rate changes (e.g., Snapclient restarts or the Snapserver source format changes). Without this, CamillaDSP continues processing with a mismatched rate, producing pitch-shifted or corrupted audio until manually restarted.
-
-`silence_threshold: -100` and `silence_timeout: 10.0` instruct CamillaDSP to suspend processing after 10 seconds of silence at or below −100 dBFS. This reduces CPU and power consumption when playback is paused.
+`stop_on_rate_change: false`, `silence_threshold: null`, and `silence_timeout: null` keep CamillaDSP's ALSA device open continuously. Closing it after silence, or stopping on an input rate change, de-clocks an HDMI sink and drops the connection.
 
 ### 5. Playback device address
 
-Both player and streamer configs use `device: "hw:0"`. ADR 001 noted `hw:0,0` for the player historically; this has been unified to `hw:0` for consistency with the streamer. The `,0` sub-device specifier is redundant for the DigiAMP+ and ALSA resolves both forms to the same device node.
+Both player and streamer configs use `device: "hw:0"`. The `,0` sub-device specifier is redundant for the DigiAMP+ — ALSA resolves `hw:0` and `hw:0,0` to the same node.
 
 **Pi 5 HDMI exception:** Pi 5's vc4-hdmi ALSA device accepts only `IEC958_SUBFRAME_LE`. CamillaDSP emits linear PCM (`S16LE`/`S32LE`), so every format open on `hw:0` returns `EINVAL`. Using `plughw:0` pulls in ALSA's `iec958` plugin automatically — no resampling, negligible CPU, no quality loss. Provisioning auto-detects the board model (`is_pi5()` in `os/dietpi/lib/config.sh`) and passes `--playback-device plughw:0` to the CLI's `conf camilladsp.yml` command. Pi 4 and all non-HDMI DACs remain on `hw:0`.
 
@@ -66,7 +63,6 @@ The format is chosen at provisioning time rather than at runtime: `audera {playe
 ## Consequences
 
 - Multi-room sync does not require any Snapcast offset to compensate for the ~43 ms CamillaDSP blind latency — it is equal on all nodes and cancels out. A per-client latency offset is only required when nodes use different DAC hardware with different output latencies; the offset value equals the acoustic latency difference between nodes, measured empirically.
-- Adding FIR filters to the pipeline requires a CPU budget calculation before deployment on the RPi Zero 2 W.
 - If the stream format is changed (see ADR 002), `devices.samplerate` in `audera/cli/conf.py` (`render_camilladsp`) must be updated in the same change.
 - HDMI sinks require `playback.format: S16LE` (see decision 6); provisioning selects this automatically for `--audio-device hdmi`.
 - Runtime health can be monitored via the CamillaDSP WebSocket status interface: a capture ratio oscillating tightly around `1.000000` indicates a healthy clock sync. Persistent deviation indicates CPU saturation, thermal throttling, or hardware clock failure.

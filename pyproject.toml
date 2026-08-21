@@ -52,6 +52,10 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["audera"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"brand/tokens.css" = "audera/ui/static/brand/tokens.css"
+"brand/fonts" = "audera/ui/static/brand/fonts"
+
 [tool.uv]
 exclude-newer = "1 week"
 
@@ -78,3 +82,8 @@ main_file = ""
 # single value, so `-m systemd` on the command line overrides this rather than appending to it.
 addopts = "-m 'not systemd'"
 markers = ["systemd: requires real systemd as PID 1, in a privileged container"]
+
+[dependency-groups]
+site = [
+    "zensical>=0.0.53",
+]

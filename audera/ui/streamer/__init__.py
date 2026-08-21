@@ -124,6 +124,6 @@ def run() -> None:
     app.on_shutdown(broker.stop)
 
     try:
-        ui.run(host=settings.server_host, port=settings.server_port, title=audera.NAME, show=False, reload=False)
+        ui.run(host=settings.server_host, port=settings.server_port, title=audera.NAME.capitalize(), show=False, reload=False)
     except KeyboardInterrupt:
         app.shutdown()

@@ -11,6 +11,8 @@
 
 !audera
 !audera/**
+!brand
+!brand/**
 !tests
 !tests/**
 !os/dietpi/lib/common.sh

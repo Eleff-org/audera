@@ -1,0 +1,70 @@
+name: Publish website
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build website
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install site dependencies
+        run: uv sync --group site --frozen
+
+      - name: Copy brand assets
+        run: |
+          cp brand/tokens.css website/docs/stylesheets/brand.css
+          mkdir -p website/docs/stylesheets/fonts
+          cp brand/fonts/*.woff2 website/docs/stylesheets/fonts/
+
+      - name: Copy developer docs
+        run: |
+          mkdir -p website/docs/developer
+          cp docs/dev/DEVELOPMENT.md website/docs/developer/development.md
+          cp docs/dev/PROVISION.md website/docs/developer/provisioning.md
+          cp docs/dev/CLI.md website/docs/developer/cli.md
+
+      - name: Build website
+        run: cd website && uv run zensical build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # 5.0.0
+        with:
+          path: website/site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # 5.0.0

@@ -31,7 +31,7 @@ The streamer UI polled Snapserver every 10 seconds per browser, rebuilding the e
 
 ## Consequences
 
-- The 10 s polling timer, `_bounded`, `_READ_TIMEOUT`, `_players_generation`, and the private reader functions (`_clients`, `_group_streams`, `_stream_status` as a direct call, `_volumes`) are deleted. `build_players_tab` is synchronous.
+- The 10 s polling timer and its per-browser reader plumbing are gone; `build_players_tab` is synchronous and reads the broker cache directly.
 - A new player connecting or disconnecting is reflected in every open browser within 250 ms of Snapserver's notification, without any browser refreshing.
 - Volume changes from any source (the Snapcast Android app, another browser, CamillaDSP directly) propagate to every browser via the broker's volume binding.
 - The `_call` id-matching fix eliminates the `{}` response race independently of the broker, so any code that still uses `SnapserverClient` directly benefits.

@@ -1,0 +1,382 @@
+/* ============================================================
+   Audera website overrides
+   ============================================================
+   Bridges brand tokens (loaded via brand.css) into Zensical /
+   Material for MkDocs variables, and loads Fraunces for display
+   typography.
+   ============================================================ */
+
+/* Font faces (@font-face) are declared once in brand/tokens.css, copied to
+   brand.css and loaded ahead of this file, so the site shares one set with the
+   apps. Do not restate them here. */
+
+/* ---- Material / Zensical variable bridge ---- */
+:root {
+  --md-default-bg-color:    var(--paper);
+  --md-default-fg-color:    var(--ink);
+  --md-primary-fg-color:    var(--ink);
+  --md-primary-bg-color:    var(--paper);
+  --md-accent-fg-color:     var(--ink);
+  --md-typeset-a-color:     var(--ink);
+  --md-typeset-color:       var(--ink);
+  --md-code-bg-color:       var(--paper-2);
+  /* Self-hosted brand families (Google Fonts loader is disabled in
+     zensical.toml); Material derives --md-*-font-family from these. */
+  --md-text-font:           var(--font-sans);
+  --md-code-font:           var(--font-mono);
+}
+
+/* ---- Page background ---- */
+body,
+.md-main,
+.md-content {
+  background: var(--paper);
+}
+
+/* ---- Header bar ---- */
+.md-header {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: none;
+}
+
+/* Homepage only: the hero renders its own bespoke light nav (.audera-nav), so
+   hide Material's dark header there. .md-header is a sibling of the .md-container
+   that holds .audera-hero, so :has scopes the hide to index.md; docs pages keep
+   Material's header (search + nav) unchanged. */
+body:has(.audera-hero) .md-header {
+  display: none;
+}
+
+/* Drop the default book logo and render the site title in the display serif,
+   matching the hero wordmark. */
+.md-header .md-logo {
+  display: none;
+}
+
+.md-header__title .md-ellipsis {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-size: var(--wordmark-size);
+  font-variation-settings: 'opsz' 40, 'SOFT' 100, 'wght' 400;
+  letter-spacing: -0.01em;
+}
+
+/* Search trigger. Material's default (ink background, near-transparent on
+   hover) vanishes into the ink header, so pin it to a paper field with an ink
+   glyph in every state; the hover override matches Material's :hover
+   specificity (0,2,0) to win. The magnifier (::before) and shortcut hint
+   (::after) are tinted to stay legible on the paper field. */
+.md-search__button {
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 6px 2.2rem;
+  transition: none;
+}
+
+.md-search__button:hover,
+.md-search__button:focus {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+.md-search__button::before {
+  background-color: var(--ink);
+}
+
+.md-search__button::after {
+  background: var(--paper-3);
+  color: var(--ink-3);
+}
+
+/* Repo link (GitHub badge) sits on the ink header, so tint it paper. */
+.md-header__source,
+.md-source {
+  color: var(--paper);
+}
+
+/* Homepage only: the hero is unique to index.md, so pull it up under the header
+   by dropping Material's default top spacing (:has scopes this to that page). */
+.md-main__inner:has(.audera-hero) {
+  margin-top: 0;
+}
+
+/* ---- Hero ----
+   A bespoke light nav over a two-column row: the tagline + lead + CTA on the
+   left, a mobile app screenshot on the right. The tagline sits inside the left
+   column, vertically centered against the phone. The row collapses to one column
+   under 900px, copy first, so the screenshot never gates the text. */
+.audera-hero {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(48px, 7vw, 88px) clamp(20px, 5vw, 48px) clamp(48px, 7vw, 96px);
+}
+
+/* Bespoke light nav (mirrors .hdr in layout-c.html): the wordmark left, text
+   links right, on paper — the homepage's replacement for Material's dark header,
+   which is hidden via body:has(.audera-hero) above. */
+.audera-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+}
+
+.audera-nav__mark {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 26px;
+  color: var(--ink);
+}
+
+.audera-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+/* Material's .md-typeset a (0,2,0) sets an underline, so scope the reset to
+   .md-typeset to win — same note as the .site-cta rule below. */
+.md-typeset .audera-nav__links a {
+  color: var(--ink-3);
+  font-size: 14px;
+  text-decoration: none;
+  border: none;
+}
+
+.md-typeset .audera-nav__links a:hover {
+  color: var(--ink);
+}
+
+.audera-hero__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  gap: clamp(40px, 6vw, 72px);
+  align-items: center;
+}
+
+.audera-hero__text {
+  text-align: left;
+}
+
+/* Split display heading: "A new era of" (sans) and "composable audio systems"
+   (display serif) share one size and read as a single line, wrapping only when
+   the viewport forces it. Inter is set heavier so the sans lead holds its weight
+   beside the italic, and reads taller thanks to its larger x-height.
+
+   Scoped to .md-typeset so this rule (0,2,0) outranks Material's built-in
+   .md-typeset h1/h2 size (0,1,1); the bare class alone loses and the tagline
+   collapses to Material's default heading size — same guard the .site-cta and
+   .audera-nav rules use below. */
+.md-typeset .audera-tagline {
+  margin: 0;
+  font-size: clamp(40px, 6.4vw, 68px);
+  line-height: 1.03;
+  letter-spacing: -0.03em;
+}
+
+/* Hero tagline lives in the left column: give it its bottom gap to the lead. */
+.audera-hero .audera-tagline {
+  margin-bottom: clamp(24px, 3vw, 32px);
+}
+
+.audera-tagline__lead {
+  font-family: var(--font-sans);
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.audera-tagline__accent {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-variation-settings: 'opsz' 72, 'SOFT' 100, 'wght' 340;
+  color: var(--ink);
+}
+
+.audera-body {
+  font-size: 16px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  font-weight: 300;
+  margin-bottom: 24px;
+}
+
+.audera-body--lead {
+  font-size: clamp(17px, 1.7vw, 20px);
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 48ch;
+  margin-bottom: 34px;
+}
+
+/* ---- Hero screenshot ---- */
+.audera-hero__media {
+  display: flex;
+  justify-content: center;
+}
+
+.md-typeset .audera-shot {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  border-radius: 28px;
+  border: 1px solid var(--rule);
+  box-shadow: 0 28px 64px -24px rgba(0, 0, 0, 0.32);
+}
+
+@media screen and (max-width: 900px) {
+  .audera-hero {
+    padding: 24px 20px 48px;
+  }
+
+  .audera-hero__row {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    max-width: none;
+    margin-top: 16px;
+  }
+
+  /* On mobile the screenshot leads above the tagline as an inset phone.
+     order:-1 lifts it above the copy (DOM order stays text-then-media, so
+     desktop is untouched). max-width + margin auto keep the phone slightly
+     narrower than the column so its frame reads as a contained device rather
+     than a full-bleed banner. display:block is required: the desktop rule is
+     flex + justify-content:center, which shrink-wraps the Markdown <p> around
+     the image so width:100% can't stretch — block lets the <p>/img fill the
+     inset width. */
+  .audera-hero__media {
+    order: -1;
+    display: block;
+    width: 100%;
+    max-width: 328px;
+    margin: 0 auto;
+  }
+
+  /* Neutralize the Markdown paragraph wrapping the image so it spans the inset
+     width with no stray baseline gap under the img. */
+  .md-typeset .audera-hero__media p {
+    margin: 0;
+    line-height: 0;
+  }
+
+  /* Crop to the phone's top — through the first (Office) player card — with
+     object-fit, keeping the desktop phone chrome (rounded corners + hairline
+     border) so the device boundary stays visible. The mask fades the lower
+     edge into the paper so the copy reads as a continuation of the shot; drop
+     the box-shadow since a hard bottom shadow would fight that fade. -webkit-
+     prefix covers iOS/Android WebKit. */
+  .md-typeset .audera-shot {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: clamp(230px, 62vw, 300px);
+    object-fit: cover;
+    object-position: top center;
+    border: 1px solid var(--rule);
+    border-radius: 28px;
+    box-shadow: none;
+    -webkit-mask-image: linear-gradient(to bottom, #000 58%, transparent 96%);
+    mask-image: linear-gradient(to bottom, #000 58%, transparent 96%);
+  }
+
+  /* The desktop tagline floor (40px) overflows narrow phones, so lower it for
+     the mobile column; the accent line wraps instead of clipping off-screen. */
+  .md-typeset .audera-tagline {
+    font-size: clamp(35px, 8.4vw, 48px);
+  }
+
+  /* The Fraunces italic accent has a smaller x-height and lighter strokes than
+     the Inter lead, so at a shared size it optically reads smaller on the tight
+     mobile column. Scale only the serif up (em is relative to the h1) so it
+     matches the lead's presence; the Inter lead is left untouched. */
+  .md-typeset .audera-tagline__accent {
+    font-size: 1.16em;
+  }
+}
+
+/* ---- CTA links (underline + arrow) ----
+   The border-bottom is the underline. Material's .md-typeset a rule (0,2,0)
+   also sets text-decoration: underline, so scope the reset to .md-typeset to
+   outweigh it, else the link renders a second native underline. */
+.md-typeset .site-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 32px;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 0;
+  text-decoration: none;
+  border: none;
+  border-bottom: 1.5px solid var(--ink);
+  border-radius: 0;
+  transition: all var(--duration) var(--ease);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.md-typeset .site-cta:last-child {
+  margin-right: 0;
+}
+
+/* :active / :focus-visible mirror the hover thickening so touch devices — which
+   never fire :hover — get the same underline feedback on tap. */
+.md-typeset .site-cta:hover,
+.md-typeset .site-cta:focus-visible,
+.md-typeset .site-cta:active {
+  box-shadow: inset 0 -2px 0 0 var(--ink);
+}
+
+.md-typeset .site-cta--secondary {
+  color: var(--ink-3);
+  border-bottom-color: var(--ink-3);
+}
+
+.md-typeset .site-cta--secondary:hover,
+.md-typeset .site-cta--secondary:focus-visible,
+.md-typeset .site-cta--secondary:active {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+  box-shadow: inset 0 -2px 0 0 var(--ink);
+}
+
+/* ---- Code blocks ----
+   Material stretches top-level code blocks edge-to-edge on phones with a
+   -0.8rem inline margin (and squares off their corners), so they break the
+   inset the rest of the prose keeps. Cancel the negative inline margin and
+   restore the .4rem radius at Material's own breakpoint so code stays inset
+   like the surrounding text. Selectors mirror Material's exactly so they win
+   on source order at equal specificity; the vertical 1em margin is untouched. */
+@media screen and (max-width: 44.984375em) {
+  .md-content__inner > pre,
+  .md-content__inner > .highlight {
+    margin-inline: 0;
+  }
+
+  .md-content__inner > pre > code,
+  .md-content__inner > .highlight > pre > code {
+    border-radius: 0.4rem;
+  }
+}
+
+/* ---- Footer ---- */
+.md-footer {
+  display: none;
+}
+
+/* ---- Horizontal rule ---- */
+.md-typeset hr {
+  border-color: var(--rule);
+}
+
+/* ---- Selection ---- */
+::selection {
+  background: var(--accent-wash);
+  color: var(--ink);
+}

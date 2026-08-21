@@ -27,7 +27,7 @@ def run(role: Literal['streamer', 'player'] = 'player') -> None:
         ui.run(
             host=settings.server_host,
             port=settings.server_port,
-            title=audera.NAME.strip().lower(),
+            title=audera.NAME.strip().capitalize(),
             show=False,
             reload=False,
             reconnect_timeout=60,

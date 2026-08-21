@@ -15,7 +15,7 @@ Some UX decisions in the streamer dashboard are genuine taste or workflow tradeo
 4. Flags are user-selected and DAL-persisted (`Settings.features`), not environment/build-time — distinct from typical feature-flag systems. Every option is fully shipped code; the flag only picks which pre-built UX path renders.
 5. `Settings` stores raw selections only, never a resolved default. Default resolution is the catalog's job (`features.selected()`), keeping the model a plain persistence container.
 6. Any new UI feature is expected to ship with optionality by default: when an agent implements a UI feature with more than one defensible UX, it should propose the catalog entry (or ask which options to offer) rather than silently picking one.
-7. When a call site resolves a flag into a local boolean, that variable is named identically to the `FF_*` constant it derives from (e.g. `FF_DISABLED_VS_MUTE = flag_enabled(settings, key, features.FF_DISABLED_VS_MUTE)`). This makes every flag-gated UI branch instantly recognizable as a feature-flag conditional. The `features.` module prefix keeps the constant (an option-value string) unambiguously distinct from the local boolean, so no shadowing confusion arises.
+7. A call site that resolves a flag into a local boolean names the variable identically to the `FF_*` constant it derives from (e.g. `FF_DISABLED_VS_MUTE = flag_enabled(settings, key, features.FF_DISABLED_VS_MUTE)`), so every flag-gated branch is greppable by the `FF_` prefix.
 
 ## Consequences
 
@@ -24,4 +24,3 @@ Some UX decisions in the streamer dashboard are genuine taste or workflow tradeo
 - Old `settings.json` files missing the `features` key keep loading correctly, defaulting to `{}`.
 - Flags are per-installation, not per-user-account, since Audera has no multi-user auth.
 - Agents proposing UI work default to raising optionality as a question up front, rather than treating a single UX as a foregone conclusion.
-- Reviewers can locate every flag-conditional branch by searching for `FF_` in a rendering module, since the local resolution variable and the constant share that prefix.

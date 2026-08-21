@@ -4,8 +4,11 @@ import pytest
 import yaml
 
 import audera.dal.sources as sources_dal
-from audera.cli import conf
+from audera.cli import commands, conf
 from audera.domains.sources import CATALOG
+from audera.services import netifaces
+from audera.ui import setup, streamer
+from audera.ui.setup import _mock
 
 
 def test_conf_snapserver_emits_what_the_renderer_produces(audera_cli):
@@ -167,3 +170,96 @@ def test_conf_camilladsp_playback_device_override(audera_cli, subject):
     # Playback device becomes plughw:0; capture device stays hw:Loopback,1.
     assert '    device: "plughw:0"\n' in out
     assert '    device: "hw:Loopback,1"\n' in out
+
+
+# The `start`/`setup` verbs launch a blocking server, so process tests cover only argparse wiring.
+
+
+@pytest.mark.parametrize('subject', ['streamer', 'player'])
+def test_setup_help_exits_zero(audera_cli, subject):
+    # The `setup` verb is registered under both subjects and its `--mock` flag parses.
+    assert audera_cli(subject, 'setup', '--help').returncode == 0
+
+
+def test_streamer_start_accepts_mock_flag(audera_cli):
+    # `--help` short-circuits before the blocking `streamer.run()`, so the flag is observably parsed.
+    assert audera_cli('streamer', 'start', '--mock', '--help').returncode == 0
+
+
+# In-process unit tests, matching the lazy-import contract `commands.py` documents. `setup.run` and
+# `streamer.run` are patched out so nothing binds a socket.
+
+
+@pytest.mark.parametrize(
+    ('command', 'role'),
+    [(commands.streamer_setup, 'streamer'), (commands.player_setup, 'player')],
+)
+def test_setup_applies_seams_then_runs(monkeypatch, command, role):
+    calls = []
+    monkeypatch.setattr(_mock, 'apply_seams', lambda: calls.append('apply_seams'))
+    monkeypatch.setattr(_mock, 'loopback_bind', lambda: calls.append('loopback_bind'))
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('run', kwargs)))
+
+    command(mock=True)
+
+    assert calls == ['apply_seams', 'loopback_bind', ('run', {'role': role})]
+
+
+def test_streamer_start_mock_skips_the_connected_gate(monkeypatch):
+    calls = []
+    monkeypatch.setattr(_mock, 'apply_seams', lambda: calls.append('apply_seams'))
+    monkeypatch.setattr(_mock, 'loopback_bind', lambda: calls.append('loopback_bind'))
+    monkeypatch.setattr(streamer, 'run', lambda: calls.append('run'))
+    monkeypatch.setattr(netifaces, 'connected', lambda: calls.append('connected') or True)
+
+    commands.streamer_start(mock=True)
+
+    # The gate is skipped (`connected` never consulted), loopback is bound, and the web-app keeps
+    # the real OS by not applying the seams.
+    assert 'connected' not in calls
+    assert 'apply_seams' not in calls
+    assert calls == ['loopback_bind', 'run']
+
+
+def test_streamer_start_runs_without_setup_when_the_retry_gate_passes(monkeypatch):
+    """A connected device does not enter setup on a normal boot."""
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or True)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+    monkeypatch.setattr(streamer, 'run', lambda: calls.append('run'))
+
+    commands.streamer_start()
+
+    assert calls == ['gate', 'run']
+
+
+def test_streamer_start_enters_setup_when_the_retry_gate_fails(monkeypatch):
+    """A persistently offline device enters setup after all retries are exhausted."""
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or False)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+    monkeypatch.setattr(streamer, 'run', lambda: calls.append('run'))
+
+    commands.streamer_start()
+
+    assert calls == ['gate', ('setup', {'role': 'streamer'}), 'run']
+
+
+def test_player_start_runs_without_setup_when_the_retry_gate_passes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or True)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+
+    commands.player_start()
+
+    assert calls == ['gate']
+
+
+def test_player_start_enters_setup_when_the_retry_gate_fails(monkeypatch):
+    calls = []
+    monkeypatch.setattr(netifaces, 'connected_with_retry', lambda: calls.append('gate') or False)
+    monkeypatch.setattr(setup, 'run', lambda **kwargs: calls.append(('setup', kwargs)))
+
+    commands.player_start()
+
+    assert calls == ['gate', ('setup', {'role': 'player'})]

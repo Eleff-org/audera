@@ -1,12 +1,12 @@
 """Access point management"""
 
 import socket
-import subprocess
 import time
 from typing import Literal
 
 from audera import io
-from audera.services import netifaces, platform
+from audera.errors import CommandError
+from audera.services import netifaces, platform, system
 
 
 class AccessPoint:
@@ -66,51 +66,51 @@ class AccessPoint:
     def create(self):
         """Creates the Wi-Fi access point connection."""
 
-        # Stop the network services holding wlan0 so the AP vif can be added
+        # Stop both services that hold the wlan0 phy. While `wpa_supplicant` holds the phy, the
+        # `iw ... interface add` below fails with EBUSY. A missing, stopped, or unreachable unit is
+        # non-fatal here.
         for unit in ('NetworkManager', 'wpa_supplicant'):
             try:
-                subprocess.run(['systemctl', 'stop', unit], check=True)
-            except subprocess.CalledProcessError:
-                pass  # unit is not running
+                system.systemctl('stop', unit)
+            except CommandError:
+                pass  # not installed / not running / systemd unreachable
 
-        # Remove any leftover AP interface from a prior, uncleaned run
-        subprocess.run(['iw', 'dev', f'{self.ap_interface}', 'del'])  # no check; absent is fine
+        # The `finally` always restarts NetworkManager, so a failure below never leaves it stopped.
+        try:
+            # Reset any stale access point interface before re-adding it.
+            netifaces.delete_interface(self.ap_interface)
 
-        # Configure the access point interface
-        subprocess.run(
-            ['iw', 'dev', f'{self.interface}', 'interface', 'add', f'{self.ap_interface}', 'type', '__ap'], check=True
-        )
-        subprocess.run(['ip', 'link', 'set', f'{self.ap_interface}', 'up'], check=True)
+            # Configure the access point interface
+            netifaces.add_ap_interface(self.interface, self.ap_interface)
+            netifaces.set_link_up(self.ap_interface)
 
-        # Configure dnsmasq
+            # Configure dnsmasq
 
-        # Re-configure dnsmasq each time the access-point is started because the
-        #   player identity may change overtime.
+            # Re-configure dnsmasq each time the access-point is started because the
+            #   player identity may change overtime.
 
-        io.write_text(
-            '/etc/NetworkManager/dnsmasq.conf',
-            '\n'.join(
-                [
-                    f'interface={self.ap_interface}',
-                    'dhcp-range=10.42.0.10,10.42.0.100,12h',
-                    'dhcp-option=3,10.42.0.1',
-                    'dhcp-option=6,10.42.0.1',
-                    f'address=/{self.url}/10.42.0.1',
-                ]
-            ),
-        )
+            io.write_text(
+                '/etc/NetworkManager/dnsmasq.conf',
+                '\n'.join(
+                    [
+                        f'interface={self.ap_interface}',
+                        'dhcp-range=10.42.0.10,10.42.0.100,12h',
+                        'dhcp-option=3,10.42.0.1',
+                        'dhcp-option=6,10.42.0.1',
+                        f'address=/{self.url}/10.42.0.1',
+                    ]
+                ),
+            )
 
-        # Restart network-manager
-        subprocess.run(['systemctl', 'restart', 'NetworkManager'], check=True)
+        finally:
+            # Restart NetworkManager unconditionally. This is unguarded so a failed restart surfaces.
+            system.systemctl('restart', 'NetworkManager')
 
         # Add the access point connection
         if not self.connection_exists():
             # Create the access point
-            add_connection_result = subprocess.run(
-                [
-                    'nmcli',
-                    'connection',
-                    'add',
+            try:
+                netifaces.connection_add(
                     'type',
                     'wifi',
                     'ifname',
@@ -135,48 +135,50 @@ class AccessPoint:
                     '10.42.0.1',
                     'ipv6.method',
                     'ignore',
-                ]
-            )
+                )
+            except CommandError:
+                raise AccessPointError(
+                    'Unable to add the Wi-Fi access point connection {%s} on interface {%s}.'
+                    % (self.hostname, self.ap_interface)
+                )
 
-            # Wait for the service
-            if add_connection_result.returncode == 0:
-                # Check the service, time-out if the service fails to start after 10 seconds
-                time_out = 0
+            # Wait for the service, time-out if the service fails to start after 10 seconds
+            time_out = 0
 
-                while time_out < 10:
-                    time.sleep(1)
+            while time_out < 10:
+                time.sleep(1)
 
-                    if self.connection_exists():
-                        break
+                if self.connection_exists():
+                    break
 
-                    time_out += 1
+                time_out += 1
 
-                if not self.connection_exists():
-                    raise AccessPointError(
-                        'Unable to add the Wi-Fi access point connection {%s} on interface {%s}.'
-                        % (self.hostname, self.ap_interface)
-                    )
+            if not self.connection_exists():
+                raise AccessPointError(
+                    'Unable to add the Wi-Fi access point connection {%s} on interface {%s}.'
+                    % (self.hostname, self.ap_interface)
+                )
 
     @platform.requires('dietpi')
     def delete(self):
         """Delets the Wi-Fi access point connection."""
         if self.connection_exists():
             try:
-                subprocess.run(['nmcli', 'connection', 'delete', f'{self.hostname}'], check=True)
-            except subprocess.CalledProcessError:
+                netifaces.connection_delete(self.hostname)
+            except CommandError:
                 raise AccessPointError(
                     'Unable to delete the Wi-Fi access point {%s} on interface {%s}.' % (self.hostname, self.ap_interface)
                 )
 
-        # Remove the AP interface so a clean stop leaves no stale netdev behind
-        subprocess.run(['iw', 'dev', f'{self.ap_interface}', 'del'])  # no check; absent is fine
+        # Tear down the access point interface unconditionally; an absent interface is fine.
+        netifaces.delete_interface(self.ap_interface)
 
     @platform.requires('dietpi')
     def up(self):
         """Resumes the Wi-Fi access point."""
         try:
-            subprocess.run(['nmcli', 'connection', 'up', f'{self.hostname}'], check=True)
-        except subprocess.CalledProcessError:
+            netifaces.connection_up(self.hostname)
+        except CommandError:
             raise AccessPointError(
                 'Unable to start the Wi-Fi access point {%s} on interface {%s}.' % (self.hostname, self.ap_interface)
             )
@@ -186,8 +188,8 @@ class AccessPoint:
         """Pauses the Wi-Fi access point."""
         if self.connection_exists():
             try:
-                subprocess.run(['nmcli', 'connection', 'down', f'{self.hostname}'], check=True)
-            except subprocess.CalledProcessError:
+                netifaces.connection_down(self.hostname)
+            except CommandError:
                 raise AccessPointError(
                     'Unable to stop the Wi-Fi access point {%s} on interface {%s}.' % (self.hostname, self.ap_interface)
                 )

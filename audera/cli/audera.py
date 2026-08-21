@@ -56,7 +56,26 @@ def main():
         help='Start the audera streamer service.',
         epilog='Execute `audera streamer start --help` for help.',
     )
+    _STREAMER_START_PARSER.add_argument(
+        '--mock',
+        action='store_true',
+        default=False,
+        help='Run the web-app on loopback:8080 off-device, skipping the network-setup gate.',
+    )
     _STREAMER_START_PARSER.set_defaults(func=commands.streamer_start)
+
+    _STREAMER_SETUP_PARSER = _STREAMER_VERB_SUBPARSER.add_parser(
+        name='setup',
+        help='Run the Wi-Fi setup wizard, streamer copy.',
+        epilog='Execute `audera streamer setup --help` for help.',
+    )
+    _STREAMER_SETUP_PARSER.add_argument(
+        '--mock',
+        action='store_true',
+        default=False,
+        help='Apply the dev-box seams and bind loopback:8080 to run the wizard off-device.',
+    )
+    _STREAMER_SETUP_PARSER.set_defaults(func=commands.streamer_setup)
 
     _STREAMER_CONF_PARSER = _STREAMER_VERB_SUBPARSER.add_parser(
         name='conf',
@@ -119,6 +138,19 @@ def main():
         epilog='Execute `audera player start --help` for help.',
     )
     _PLAYER_START_PARSER.set_defaults(func=commands.player_start)
+
+    _PLAYER_SETUP_PARSER = _PLAYER_VERB_SUBPARSER.add_parser(
+        name='setup',
+        help='Run the Wi-Fi setup wizard, player copy.',
+        epilog='Execute `audera player setup --help` for help.',
+    )
+    _PLAYER_SETUP_PARSER.add_argument(
+        '--mock',
+        action='store_true',
+        default=False,
+        help='Apply the dev-box seams and bind loopback:8080 to run the wizard off-device.',
+    )
+    _PLAYER_SETUP_PARSER.set_defaults(func=commands.player_setup)
 
     _PLAYER_CONF_PARSER = _PLAYER_VERB_SUBPARSER.add_parser(
         name='conf',

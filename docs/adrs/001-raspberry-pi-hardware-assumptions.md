@@ -13,11 +13,11 @@ The following assumptions are accepted for the current release. Any work to broa
 
 ### CPU architecture: `aarch64`
 
-`setup.sh` downloads `camilladsp-linux-aarch64.tar.gz`. This binary will not run on `x86_64`, `armv7`, or any other architecture. Changing the target platform requires parameterizing the archive URL or distributing CamillaDSP through an alternative mechanism (e.g., a distribution package).
+Provisioning downloads `camilladsp-linux-aarch64.tar.gz` (`install_camilladsp` in `os/dietpi/lib/common.sh`). This binary will not run on `x86_64`, `armv7`, or any other architecture. Changing the target platform requires parameterizing the archive URL or distributing CamillaDSP through an alternative mechanism (e.g., a distribution package).
 
 ### Soundcard: HiFiBerry DigiAMP+
 
-Both `dietpi.txt` files set `CONFIG_SOUNDCARD=rpi-digiampplus`. This configures DietPi to load the correct ALSA driver for the DigiAMP+ HAT. The physical DAC is addressed as `hw:0,0` (player) and `hw:0` (streamer) in the CamillaDSP config.
+Both `dietpi.txt` files set `CONFIG_SOUNDCARD=rpi-digiampplus`. This configures DietPi to load the correct ALSA driver for the DigiAMP+ HAT. The physical DAC is addressed as `hw:0` in the CamillaDSP config for both roles (see ADR 003, decision 5).
 
 Using a different DAC requires:
 - Updating `CONFIG_SOUNDCARD` in `dietpi.txt`
@@ -30,7 +30,7 @@ Pi 5 has no `snd_bcm2835`; firmware-KMS (`vc4-fkms-v3d`) binds video-only and en
 
 ### OS: DietPi (Debian Trixie, Raspberry Pi OS-based image)
 
-`setup.sh` sources `/boot/dietpi/func/dietpi-globals` for `G_CONFIG_INJECT` and `dietpi-set_hardware`. These functions do not exist on standard Debian or Raspberry Pi OS. The automated first-boot flow (`AUTO_SETUP_*` keys in `dietpi.txt`) is also DietPi-specific.
+The automated first-boot flow — the `AUTO_SETUP_*` keys in `dietpi.txt` that run `setup.sh` unattended — is DietPi-specific and has no equivalent on standard Debian or Raspberry Pi OS. (Config injection itself uses Audera's own `set_config_line`/`set_cmdline_param` helpers in `os/dietpi/lib/config.sh`, not DietPi's `G_CONFIG_INJECT`.)
 
 Packages resolve from two apt origins, Raspberry Pi OS and Debian trixie, so a package name alone does not determine which build is installed. Use `apt-cache policy` to check which origin a given package resolves to.
 
@@ -40,7 +40,7 @@ Packages resolve from two apt origins, Raspberry Pi OS and Debian trixie, so a p
 
 `dietpi.txt` sets `AUTO_SETUP_NET_ETHERNET_ENABLED=0` and `AUTO_SETUP_NET_WIFI_ENABLED=1`. This is a pre-flash decision. DietPi does not support enabling both simultaneously — if both are set to `1`, WiFi takes priority and Ethernet is disabled.
 
-The player installs NetworkManager post-setup, which can manage additional interfaces (including Ethernet) after first boot. The streamer does not install NetworkManager; its network configuration is fixed at flash time.
+Both the player and streamer install NetworkManager during setup (`setup_network_manager` in `os/dietpi/lib/common.sh`), which can manage additional interfaces — including Ethernet — after first boot.
 
 ## Consequences
 

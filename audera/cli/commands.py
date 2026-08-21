@@ -1,5 +1,6 @@
 """Audera commands"""
 
+import os
 import sys
 from typing import Literal
 
@@ -9,12 +10,26 @@ from audera.domains.sources import source_units
 from audera.services import netifaces
 
 
-def streamer_start(**_) -> None:
+def _mock_enabled(flag: bool) -> bool:
+    """Returns whether mock mode is on, from the `--mock` flag or `AUDERA_MOCK`.
+
+    The env var lets a whole shell run mock without repeating the flag.
+    """
+    return flag or os.getenv('AUDERA_MOCK', '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def streamer_start(mock: bool = False, **_) -> None:
     """Starts the audera streamer service, running setup first if not connected to a network.
+
+    Parameters
+    ----------
+    mock : `bool`
+        Whether to run the web-app against loopback:8080 with the network-setup gate
+        skipped, for local development off-device. Also honors `AUDERA_MOCK`.
 
     Help
     ----
-    usage: audera streamer start
+    usage: audera streamer start [--mock]
 
     Execute `audera streamer --help` for help.
 
@@ -22,18 +37,65 @@ def streamer_start(**_) -> None:
     --------
     ``` console
     audera streamer start
+    audera streamer start --mock
     ```
 
     """
     # Lazy import so tests can patch audera.ui.streamer.run and audera.ui.setup.run
     # without fighting module-level binding, and to avoid importing heavy UI
     # dependencies when running non-start commands.
-    from audera.ui import setup, streamer
+    from audera.ui import streamer
 
-    if not netifaces.connected():
+    if _mock_enabled(mock):
+        # Lazy import, only under the flag, so a normal start never imports the mock module.
+        # The seams are NOT applied: platform.NAME stays the real OS, so a Sources-tab toggle
+        # still fails safe on @platform.requires('dietpi') instead of shelling out systemctl.
+        # The connected() gate is skipped; the wizard is reached via `streamer setup --mock`.
+        from audera.ui.setup import _mock
+
+        _mock.loopback_bind()
+        streamer.run()
+        return
+
+    from audera.ui import setup
+
+    if not netifaces.connected_with_retry():
         setup.run(role='streamer')
 
     streamer.run()
+
+
+def streamer_setup(mock: bool = False, **_) -> None:
+    """Runs the Wi-Fi setup wizard, streamer copy.
+
+    Parameters
+    ----------
+    mock : `bool`
+        Whether to apply the dev-box seams and bind loopback:8080, for local development
+        off-device. Also honors `AUDERA_MOCK`. Non-mock is a legitimate on-device launch.
+
+    Help
+    ----
+    usage: audera streamer setup [--mock]
+
+    Execute `audera streamer --help` for help.
+
+    Examples
+    --------
+    ``` console
+    audera streamer setup --mock
+    ```
+
+    """
+    from audera.ui import setup
+
+    if _mock_enabled(mock):
+        from audera.ui.setup import _mock
+
+        _mock.apply_seams()
+        _mock.loopback_bind()
+
+    setup.run(role='streamer')
 
 
 def player_start(**_) -> None:
@@ -57,8 +119,41 @@ def player_start(**_) -> None:
     # running non-start commands.
     from audera.ui import setup
 
-    if not netifaces.connected():
+    if not netifaces.connected_with_retry():
         setup.run(role='player')
+
+
+def player_setup(mock: bool = False, **_) -> None:
+    """Runs the Wi-Fi setup wizard, player copy.
+
+    Parameters
+    ----------
+    mock : `bool`
+        Whether to apply the dev-box seams and bind loopback:8080, for local development
+        off-device. Also honors `AUDERA_MOCK`. Non-mock is a legitimate on-device launch.
+
+    Help
+    ----
+    usage: audera player setup [--mock]
+
+    Execute `audera player --help` for help.
+
+    Examples
+    --------
+    ``` console
+    audera player setup --mock
+    ```
+
+    """
+    from audera.ui import setup
+
+    if _mock_enabled(mock):
+        from audera.ui.setup import _mock
+
+        _mock.apply_seams()
+        _mock.loopback_bind()
+
+    setup.run(role='player')
 
 
 def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'], playback_device: str = 'hw:0') -> None:
