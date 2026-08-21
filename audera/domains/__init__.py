@@ -1,0 +1,1 @@
+"""Unit-testable domain logic"""

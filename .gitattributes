@@ -1,0 +1,8 @@
+# `eol=lf` pins the worktree, not just the index. `docker COPY` takes worktree bytes, so CRLF in a
+# checkout breaks `tests/docker/`'s images: shell scripts fail with `$'\r': command not found`, unit
+# `ExecStart` lines carry a trailing `\r`, and `.version` reads back as `dietpi\r`. Applied to
+# everything so a file added to an image is covered without a per-extension rule.
+#
+# This does not cover files written by Python: `pathlib.Path.write_text` translates `\n` to `\r\n`
+# on Windows, so use `write_bytes` or a `sed -i` in the image for those.
+* text=auto eol=lf

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MediaContainer>
+  <Timeline type="music" state="stopped" />
+  <Timeline type="video" state="stopped" />
+  <Timeline type="photo" state="stopped" />
+</MediaContainer>

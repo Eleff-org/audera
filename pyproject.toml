@@ -1,5 +1,89 @@
 [build-system]
-requires = ["setuptools>=64.0", "setuptools_scm[toml]>=8"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools_scm]
+[project]
+name = "audera"
+version = "0.1.0b1"
+description = "Audera is a new era of composable audio systems that brings open-protocols to your own hardware for multi-room synchronous playback."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Tom Eleff" }]
+requires-python = "==3.13.*"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "duckdb>=1.5.1",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "netifaces>=0.11.0",
+    "nicegui>=3.10.0",
+    "python-dotenv>=1.2.2",
+    "httpx>=0.28.1",
+    "websockets>=16.0",
+    "pyyaml>=6.0",
+    "camilladsp-plot @ git+https://github.com/HEnquist/pycamilladsp-plot@v3.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=4.5.1",
+    "ruff>=0.15.10",
+    "ty>=0.0.29",
+    "pytest>=9.0.3",
+    "pytest-asyncio>=0.24.0",
+    "testcontainers>=4.14.2",
+    "respx>=0.23.1",
+]
+
+[project.urls]
+Issues = "https://github.com/Eleff-org/audera/issues"
+Releases = "https://github.com/Eleff-org/audera/releases"
+
+[project.scripts]
+audera = "audera.cli.audera:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["audera"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"brand/tokens.css" = "audera/ui/static/brand/tokens.css"
+"brand/fonts" = "audera/ui/static/brand/fonts"
+
+[tool.uv]
+exclude-newer = "1 week"
+
+[tool.ruff]
+line-length = 129
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# audera/cli/conf.py embeds bundled config files verbatim and may not
+#   respect line length requirements.
+"audera/cli/conf.py" = ["E501", "W291", "W293"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+main_file = ""
+
+# The systemd lane is opt-in: it builds an image and boots a privileged container. `-m` stores a
+# single value, so `-m systemd` on the command line overrides this rather than appending to it.
+addopts = "-m 'not systemd'"
+markers = ["systemd: requires real systemd as PID 1, in a privileged container"]
+
+[dependency-groups]
+site = [
+    "zensical>=0.0.53",
+]

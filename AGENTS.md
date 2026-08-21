@@ -1,100 +1,46 @@
-# Audera Agent Guidelines
+# AGENTS.md
 
-## Build/Lint/Test Commands
+Repo-wide commands, the architecture-decision workflow, and code style. Tree-specific conventions live in their own files: back-end package conventions in `audera/AGENTS.md`, UI conventions in `audera/ui/AGENTS.md`, visual conventions in `brand/AGENTS.md`, the public site in `website/AGENTS.md`, tests in `tests/AGENTS.md`, and the device image in `os/dietpi/AGENTS.md`.
 
-### Building
-- Install package: `pip install .`
-- Install in development mode: `pip install -e .`
+## Commands
 
-### Linting
-- Run flake8: `flake8`
-- Configuration: max-line-length = 129
+```bash
+uv sync --all-extras        # install all dependencies including dev
+uv run ruff check --fix     # lint (max-line-length = 129)
+uv run ruff format          # format
+uv run ty check             # type check
+uv run python testing.py    # run ad-hoc tests (no formal test framework)
+uv run pytest tests/dal/ -v                          # DAL tests (no Docker required)
+uv run pytest tests/clients/test_snapserver.py -v   # requires Docker
+uv run pytest tests/clients/ -v                      # all client tests
+uv run pytest -v                                     # everything except the systemd lane
+uv run pytest -m systemd -v                          # real systemd in a privileged container (requires Docker)
+pre-commit install          # install git hooks (run once after clone)
+pre-commit run --all-files  # run all hooks manually
+```
 
-### Testing
-- Run test files: `python testing.py` or `python testing_2.py`
-- No formal test framework configured (pytest/unittest not in requirements)
+Install as a tool directly from GitHub:
+```bash
+uv tool install git+https://github.com/Eleff-org/audera.git
+```
 
-## Code Style Guidelines
+## Package layout
 
-### Imports
-- Use absolute imports: `from audera import module`
-- Group imports: standard library, third-party, local
-- Use `from __future__ import annotations` for forward references
+List @audera/ for the Python package layout.
 
-### Type Hints
-- Use comprehensive type annotations
-- Use `Literal` for constrained values: `Literal[1, 2]`
-- Use `Union`/`Optional` for complex types
-- Type hint all function parameters and return values
+## Architecture decisions
 
-### Naming Conventions
-- Functions/variables: `snake_case`
-- Classes: `PascalCase`
-- Constants: `UPPER_CASE`
-- Private members: `_leading_underscore`
+ADRs in `docs/adrs/` are human decision records. Read and follow the relevant ADR when working on code it covers. List @docs/adrs/ for the catalog.
 
-### Documentation
-- Use Google-style docstrings
-- Document all classes, methods, and functions
-- Include parameter descriptions with types
-- Include return value descriptions
+## Code style
 
-### Code Structure
-- Use dataclasses for structured data: `@dataclass`
-- Implement `from_dict()` and `to_dict()` methods for serialization
-- Use `__post_init__()` for dataclass initialization logic
-- Implement `__repr__()` with JSON formatting
-- Implement `__eq__()` for comparison
+- Type-hint all parameters and return values; use `Literal` for constrained string values
+- Google-style docstrings
+- `snake_case` functions/variables, `PascalCase` classes, `UPPER_CASE` constants, `_leading_underscore` private
+- Single quotes unless the string contains a single quote; f-strings for formatting
+- 4-space indentation, 129-character line limit
 
-### Error Handling
-- Use specific exception types (TypeError, KeyError, ValueError)
-- Provide descriptive error messages
-- Validate input parameters
+## Conventions
 
-### Formatting
-- Max line length: 129 characters
-- Use 4 spaces for indentation
-- Use single quotes for strings unless containing single quotes
-- Use f-strings for string formatting
-
-### Best Practices
-- Use type checking with `isinstance()`
-- Use list comprehensions for simple transformations
-- Use context managers where appropriate
-- Avoid global state when possible
-- Use meaningful variable names
-- Keep functions focused and single-purpose
-
-## Orchestrator Usage
-- **Import**: `from audera import orchestrator`
-- **Purpose**: Isolate critical tasks from blocking the main event loop
-- **Key Features**:
-  - Thread/process pool execution
-  - Automatic retry on failure
-  - Configurable timeouts
-  - Comprehensive logging
-- **Usage Patterns**:
-  - **Synchronous execution**:
-    ```python
-    orchestrator = audera.orchestrator.Orchestrator(logger=logger)
-    result = orchestrator.run(
-        task_id="unique_task_id",
-        func=critical_function,
-        restart_on_failure=True,
-        timeout=30.0,
-        pool_type="thread"
-    )
-    ```
-  - **Asynchronous execution** (for coroutines):
-    ```python
-    result = await orchestrator.arun(
-        task_id="unique_task_id",
-        coro_func=async_critical_function,
-        restart_on_failure=True,
-        timeout=30.0,
-        pool_type="thread"
-    )
-    ```
-- **Integration**:
-  - `streamer.py`: NTP synchronization, audio streaming, and timing-critical mDNS browsing with player synchronization (blocking I/O and precision timing)
-  - `player.py`: Audio playback, timing-critical streamer synchronization, mDNS broadcasting, audio stream receiving, and deprecated shairport-sync service monitoring (blocking I/O, precision timing, network I/O, and subprocess management)
+- Follow simplicity as a design goal, e.g. "the least buggy code is the code never written"
+- Work in comprehensive increments that incl. code, tests and docs changes in a single commit

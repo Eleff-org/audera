@@ -1,0 +1,25 @@
+# Applies to `tests/docker/systemd/Dockerfile`, which builds from the repo root. The other two
+# Dockerfiles build from their own directories, so Docker never consults this file for them.
+#
+# Deny everything, then re-include, so a file added at the root later stays out of the image until
+# somebody names it. `**` rather than `*`, since `*` does not match across `/`.
+**
+
+!pyproject.toml
+!uv.lock
+!README.md
+
+!audera
+!audera/**
+!brand
+!brand/**
+!tests
+!tests/**
+!os/dietpi/lib/common.sh
+!os/dietpi/lib/streamer.sh
+
+# Re-excluded after the re-inclusions, since a later pattern wins. Byte caches are built against
+# the host's interpreter.
+**/__pycache__
+**/*.pyc
+**/.pytest_cache

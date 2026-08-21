@@ -6,3 +6,7 @@ build
 plans
 audera.egg-info
 testing*.py
+.env
+.claude
+tmp
+*.log

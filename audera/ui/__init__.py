@@ -1,5 +1,4 @@
-""" User-interfaces """
+"""Audera NiceGUI apps
 
-from audera.ui import player
-
-__all__ = ['player']
+WiFi setup wizard and Audera app
+"""
