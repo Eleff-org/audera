@@ -1,12 +1,16 @@
 """DSP configuration-layer"""
 
 import json
+import logging
 import os
 from typing import Union
 
 from audera import io
 from audera.dal import path
+from audera.errors import StorageError
 from audera.models import dsp
+
+logger = logging.getLogger(__name__)
 
 PATH: Union[str, os.PathLike] = os.path.join(path.HOME, 'dsp')
 
@@ -40,15 +44,25 @@ def get(player_id: str) -> dsp.DSPConfig:
     ----------
     player_id: `str`
         The player identifier.
+
+    Raises
+    ------
+    `audera.errors.StorageError`
+        When the DSP file cannot be read or holds invalid JSON.
     """
     file_path = os.path.join(PATH, path.to_filename(player_id))
-    with open(file_path, 'r') as f:
-        data = json.load(f)
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as exc:
+        raise StorageError('Unable to read DSP configuration [%s]: %s' % (file_path, exc)) from exc
     return dsp.DSPConfig.from_dict(data['dsp'])
 
 
 def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
     """Creates or reads the DSP configuration file and returns the `DSPConfig` object.
+
+    A present-but-corrupt file is not overwritten: the seed is returned and the corruption logged.
 
     Parameters
     ----------
@@ -56,7 +70,11 @@ def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
         An instance of an `audera.models.dsp.DSPConfig` object.
     """
     if exists(dsp_config.player_id):
-        return get(dsp_config.player_id)
+        try:
+            return get(dsp_config.player_id)
+        except StorageError:
+            logger.exception('DSP file is unreadable; returning seed without rewriting')
+            return dsp_config
     else:
         return create(dsp_config)
 

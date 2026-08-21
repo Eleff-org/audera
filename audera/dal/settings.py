@@ -7,6 +7,7 @@ from typing import Callable, Union
 
 from audera import io
 from audera.dal import path
+from audera.errors import StorageError
 from audera.models import settings
 
 logger = logging.getLogger(__name__)
@@ -47,15 +48,26 @@ def create(settings_: settings.Settings) -> settings.Settings:
 
 
 def get() -> settings.Settings:
-    """Returns the settings configuration as a `Settings` object."""
+    """Returns the settings configuration as a `Settings` object.
+
+    Raises
+    ------
+    `audera.errors.StorageError`
+        When the settings file cannot be read or holds invalid JSON.
+    """
     file_path = os.path.join(PATH, FILE_NAME)
-    with open(file_path, 'r') as f:
-        data = json.load(f)
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+    except (OSError, ValueError) as exc:
+        raise StorageError('Unable to read settings [%s]: %s' % (file_path, exc)) from exc
     return settings.Settings.from_dict(data['settings'])
 
 
 def get_or_create(settings_: settings.Settings) -> settings.Settings:
     """Creates or reads the settings configuration file and returns the `Settings` object.
+
+    A present-but-corrupt file is not overwritten: the seed is returned and the corruption logged.
 
     Parameters
     ----------
@@ -63,7 +75,11 @@ def get_or_create(settings_: settings.Settings) -> settings.Settings:
         An instance of a `Settings` object.
     """
     if exists():
-        return get()
+        try:
+            return get()
+        except StorageError:
+            logger.exception('settings file is unreadable; returning seed without rewriting')
+            return settings_
     else:
         return create(settings_)
 

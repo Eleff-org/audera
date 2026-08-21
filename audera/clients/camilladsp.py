@@ -2,6 +2,7 @@
 
 import json
 import math
+import time
 
 import websockets.exceptions
 import websockets.sync.client
@@ -48,9 +49,13 @@ class CamillaDSPClient:
         """
         payload = {command: value} if value is not None else command
         try:
+            # `open_timeout` bounds only the handshake; without a read deadline a peer that never
+            # replies blocks `recv()` forever. Cap the exchange like `SnapserverClient._call`.
+            deadline = time.monotonic() + 30
             with websockets.sync.client.connect(self._url, open_timeout=5) as ws:
                 ws.send(json.dumps(payload))
-                response = json.loads(ws.recv())
+                remaining = deadline - time.monotonic()
+                response = json.loads(ws.recv(timeout=min(10, remaining)))
         except (OSError, TimeoutError, ConnectionError, websockets.exceptions.WebSocketException) as exc:
             raise Unreachable('CamillaDSP unreachable [%s]: %s' % (command, exc)) from exc
         if isinstance(response, dict) and 'Invalid' in response:

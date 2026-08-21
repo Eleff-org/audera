@@ -195,6 +195,51 @@ async def test_identical_full_status_does_not_drop_pending_dirty():
     assert b._prev_snapshot == b.cache.snapshot()
 
 
+async def test_full_status_prunes_volumes_for_removed_clients():
+    """A client dropped by a full ``Server.GetStatus`` must not leak a stale ``cache.volumes`` entry.
+
+    Regression: ``_load_volumes`` merged into ``cache.volumes`` without pruning, so a client removed
+    by a wholesale status refresh (as opposed to a ``Client.OnDisconnect``) left its entry behind.
+    """
+    from unittest.mock import patch
+
+    from audera.ui.streamer import broker as bmod
+
+    b = _bare_broker()
+
+    def _status_with(ids):
+        return {
+            'server': {
+                'groups': [
+                    {
+                        'id': 'g1',
+                        'clients': [
+                            {
+                                'id': i,
+                                'connected': True,
+                                'host': {'ip': 'x'},
+                                'config': {'name': '', 'volume': {'percent': 50, 'muted': False}},
+                            }
+                            for i in ids
+                        ],
+                    }
+                ],
+                'streams': [],
+            }
+        }
+
+    with patch.object(bmod.volume_dal, 'get_all', return_value={'a': 10, 'b': 20}):
+        await b._apply_full_status(_status_with(['a', 'b']))
+    assert set(b.cache.volumes) == {'a', 'b'}
+
+    with patch.object(bmod.volume_dal, 'get_all', return_value={'a': 10}):
+        await b._apply_full_status(_status_with(['a']))
+
+    assert 'b' not in b.cache.volumes
+    assert set(b.cache.volumes) == {'a'}
+    assert [p.id for p in b.cache.clients] == ['a']
+
+
 async def test_dirty_not_delivered_when_change_reverts_during_debounce():
     """If the cache returns to the last delivered snapshot before the timer fires, skip callbacks."""
     from audera.ui.streamer.broker import _DEBOUNCE_SECONDS

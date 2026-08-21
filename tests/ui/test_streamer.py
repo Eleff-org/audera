@@ -29,6 +29,7 @@ from audera.services import system
 from audera.ui import components, features
 from audera.ui.streamer import broker, commands
 from audera.ui.streamer.pages import Page, current, index
+from audera.ui.streamer.pages import dsp as dsp_page
 from audera.ui.streamer.pages.dsp import _band_summary
 
 _ElementT = TypeVar('_ElementT', bound=ui.element)
@@ -843,6 +844,44 @@ async def test_sources_tab_unclaimed_plexamp_shows_setup_required_and_the_claim_
     user.find('Sources').click()
     assert _chip(user, 'PlexAmp') == 'setup required'
     await user.should_see(marker='plex-connect')
+
+
+async def test_claim_flow_releases_in_flight_when_a_rebuild_deletes_the_panel(
+    audera_home, mock_snapserver_empty, mock_stream_status, monkeypatch, user: User
+):
+    """A mid-claim Sources rebuild that deletes the claim panel must release `_claim_in_flight`.
+
+    Regression: the poll's `is_deleted` branches only cancelled their timer, so the flag stayed
+    `True` forever. With the Sources tab's activation repaint suppressed while a claim is in flight,
+    that wedged the tab until a full page reload. Deletion is a terminal path and must clear it.
+    """
+    _seed_sources('AirPlay', 'PlexAmp')
+    monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'unclaimed')
+    monkeypatch.setattr(streamer_plex, '_create_plex_pin', lambda: (123, 'CODE'))
+    monkeypatch.setattr(streamer_plex, '_poll_plex_pin', lambda pin_id: None)  # never authorizes
+    # The harness swaps `ui.navigate` for its own `user.navigate` on nearly every attribute access,
+    # and that stub opens a string target as a page — so a real click would drive the simulated
+    # browser to the external Plex auth URL and 404. Stub the object the code actually reaches.
+    monkeypatch.setattr(user.navigate, 'to', lambda *args, **kwargs: None)
+
+    Page().load()
+    await user.open('/')
+    page = _page(user)
+    user.find('Sources').click()
+    await user.should_see(marker='plex-connect')
+
+    user.find(marker='plex-connect').click()
+    await _settled(lambda: page._claim_in_flight is True)
+
+    # Delete the status label the poll writes to, standing in for the fan-out Sources rebuild that
+    # the claim's own PlexAmp restart triggers. The next poll tick must treat it as terminal.
+    with user:
+        labels = [el for el in _elements(user, kind=ui.label) if el.text == 'Waiting for Plex authorization…']
+        assert len(labels) == 1
+        labels[0].delete()
+
+    await _settled(lambda: page._claim_in_flight is False)
+    assert page._claim_in_flight is False
 
 
 async def test_sources_tab_claimed_plexamp_without_a_claim_conf_shows_its_stream_status(
@@ -2236,6 +2275,35 @@ async def test_dsp_page_unknown_player_shows_message(audera_home, mock_snapserve
     Page().load()
     await user.open('/player/nope/dsp')
     await user.should_see('Player not found or unreachable.')
+
+
+async def test_dsp_page_offloads_the_snapserver_read_off_the_event_loop(
+    audera_home, mock_snapserver_with_client, mock_camilladsp_dsp, monkeypatch, user: User
+):
+    """The DSP page must not block the shared event loop on the Snapserver read.
+
+    Regression: `render` was a synchronous builder calling `get_clients()` inline, so a slow or
+    unreachable Snapserver froze every connected browser for the client's open/read timeout. The
+    render path (and its route) is now async and the read is offloaded via `asyncio.to_thread`.
+    """
+    assert asyncio.iscoroutinefunction(dsp_page.render)
+    assert asyncio.iscoroutinefunction(Page.dsp)
+
+    offloaded: list = []
+    real_to_thread = asyncio.to_thread
+
+    async def _tracking(func, *args, **kwargs):
+        offloaded.append(func)
+        return await real_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, 'to_thread', _tracking)
+    Page().load()
+    await user.open('/player/abc123/dsp')
+    await user.should_see('Bands (0)')
+
+    # `get_clients` is patched onto the class by the fixture, so match the bound method by its
+    # underlying function rather than by name.
+    assert any(getattr(func, '__func__', None) is SnapserverClient.get_clients for func in offloaded)
 
 
 @pytest.mark.parametrize(

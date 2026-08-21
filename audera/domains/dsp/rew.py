@@ -80,14 +80,19 @@ def _filter_to_band(filter_: Any, enabled: bool) -> Optional[Band]:
     freq = parameters.get('freq')
     if band_type not in _SUPPORTED_TYPES or freq is None:
         return None
-    return Band(
-        id=uuid.uuid4().hex,
-        type=band_type,
-        freq=float(freq),
-        gain=0.0 if band_type in PASS_TYPES else float(parameters.get('gain', 0.0)),
-        q=float(parameters.get('q', DEFAULT_Q)),
-        enabled=enabled,
-    )
+    # The numeric fields may not coerce (e.g. `freq: "abc"`); skip the malformed row with `None`
+    # so `parse_rew` doesn't abort the whole import.
+    try:
+        return Band(
+            id=uuid.uuid4().hex,
+            type=band_type,
+            freq=float(freq),
+            gain=0.0 if band_type in PASS_TYPES else float(parameters.get('gain', 0.0)),
+            q=float(parameters.get('q', DEFAULT_Q)),
+            enabled=enabled,
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_rew(text: str) -> RewImport:

@@ -9,7 +9,7 @@ audera streamer start
 Starts the streamer. If the device is not connected to a network, runs the Wi-Fi onboarding wizard first (`audera.ui.setup`), then launches the streamer web UI (`audera.ui.streamer.app`).
 
 ```bash
-audera streamer conf <filename> [--playback-format {S16LE,S32LE}]
+audera streamer conf <filename> [--playback-format {S16LE,S32LE}] [--playback-device DEVICE]
 ```
 
 Prints a bundled streamer config file (rendered from `audera/cli/conf.py`) to stdout. Used during provisioning to write configs to their target paths.
@@ -24,6 +24,8 @@ Available files:
 | `go-librespot.yml` | `/var/lib/snapserver/.config/go-librespot/config.yml` |
 
 `--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require.
+
+`--playback-device` sets the CamillaDSP playback ALSA device (`camilladsp.yml` only; default `hw:0`). A Pi 5's HDMI sink needs `plughw:0`.
 
 `snapserver.conf` is rendered from `~/.audera/sources.json` (`dal.sources.get_enabled()`), falling back to the bootstrap set (`dal.sources.DEFAULT_ENABLED`) when nothing has been recorded. The file survives a reflash, so a reprovision that emitted the bootstrap set instead would ship a conf naming a stream the operator had turned off and Snapserver would reassign every group onto it at the first client connect.
 
@@ -42,7 +44,7 @@ audera player start
 Starts the player. If the device is not connected to a network, runs the Wi-Fi onboarding wizard first (`audera.ui.setup`). No web UI is started — the player is managed from the streamer.
 
 ```bash
-audera player conf <filename> [--playback-format {S16LE,S32LE}]
+audera player conf <filename> [--playback-format {S16LE,S32LE}] [--playback-device DEVICE]
 ```
 
 Prints a bundled player config file (rendered from `audera/cli/conf.py`) to stdout. Used during provisioning to write configs to their target paths.
@@ -54,6 +56,8 @@ Available files:
 | `camilladsp.yml` | `/etc/camilladsp/config.yml` |
 
 `--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require.
+
+`--playback-device` sets the CamillaDSP playback ALSA device (`camilladsp.yml` only; default `hw:0`). A Pi 5's HDMI sink needs `plughw:0`.
 
 ## Dispatch
 

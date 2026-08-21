@@ -173,12 +173,19 @@ def clear_setup(id: str) -> None:
 
 
 def _document() -> dict:
-    """Returns the whole configuration document, or an empty one when the file is absent."""
+    """Returns the whole configuration document, or an empty one when the file is absent or corrupt.
+
+    A corrupt file degrades to an empty document rather than raising, like the absent-file path.
+    """
     file_path = os.path.abspath(os.path.join(PATH, FILE_NAME))
     if not os.path.isfile(file_path):
         return {'sources': {}}
-    with open(file_path, 'r') as f:
-        return json.load(f)
+    try:
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        logger.exception('sources file is unreadable; degrading to an empty document')
+        return {'sources': {}}
 
 
 def _save(ids: list[str]) -> list[str]:

@@ -55,9 +55,9 @@ class Page:
         """Renders the main dashboard page."""
         await index.render(self)
 
-    def dsp(self, player_id: str) -> None:
+    async def dsp(self, player_id: str) -> None:
         """Renders the full-page parametric-EQ editor for a single player."""
-        dsp.render(self, player_id)
+        await dsp.render(self, player_id)
 
     # The refreshable tabs stay `@ui.refreshable` *methods* so each `Page` instance keys
     # its own refresh targets (NiceGUI filters targets by `instance`); their bodies live in
@@ -94,11 +94,11 @@ async def _index() -> None:
     await page.index()
 
 
-def _dsp(player_id: str) -> None:
+async def _dsp(player_id: str) -> None:
     """The `/player/{player_id}/dsp` route. One `Page` per client, published for `current()`."""
     page = Page()
     app.storage.client['page'] = page
     client = context.client
     _registry[client.id] = page
     client.on_disconnect(lambda: _registry.pop(client.id, None))
-    page.dsp(player_id)
+    await page.dsp(player_id)

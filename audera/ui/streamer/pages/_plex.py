@@ -272,10 +272,11 @@ def _build_claim_flow(page: 'Page') -> None:
         poll_timer: list[ui.timer] = []
 
         async def _poll_auth():
-            # The tab was refreshed out from under the flow; stop polling rather than write
-            # to a deleted label.
+            # The tab was refreshed out from under the flow; stop polling and clear the flag so a
+            # mid-claim Sources rebuild can't wedge the tab.
             if status_label.is_deleted:
                 poll_timer[0].cancel()
+                page._claim_in_flight = False
                 return
 
             if asyncio.get_event_loop().time() > deadline:
@@ -314,8 +315,10 @@ def _build_claim_flow(page: 'Page') -> None:
             port_timer: list[ui.timer] = []
 
             async def _poll_port():
+                # Same terminal cleanup as the `_poll_auth` branch above.
                 if status_label.is_deleted:
                     port_timer[0].cancel()
+                    page._claim_in_flight = False
                     return
 
                 # Both branches below shell out to `systemctl`, so a synchronous call would block

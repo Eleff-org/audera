@@ -51,6 +51,56 @@ def test_set_client_latency(client):
     assert isinstance(result, dict)
 
 
+def test_get_clients_tolerates_partial_status(monkeypatch):
+    """A partial client frame degrades to defaults; a frame without an id is skipped, not a KeyError.
+
+    Pure parse test (no container): `get_status` is stubbed with a payload missing nested keys.
+    """
+    snap = SnapserverClient('127.0.0.1', 1780)
+    status = {
+        'server': {
+            'groups': [
+                {
+                    'id': 'g1',
+                    'clients': [
+                        {'id': 'ok'},  # no host/config/connected/volume -> all defaulted
+                        {'host': {'ip': '1.2.3.4'}},  # no id -> skipped
+                    ],
+                }
+            ],
+            'streams': [],
+        }
+    }
+    monkeypatch.setattr(snap, 'get_status', lambda: status)
+
+    result = snap.get_clients()
+
+    assert [p.id for p in result] == ['ok']
+    parsed = result[0]
+    assert parsed.connected is False
+    assert parsed.volume == 0
+    assert parsed.muted is False
+    assert parsed.group_id == 'g1'
+    assert parsed.port == 0
+
+
+def test_get_stream_status_tolerates_partial_status(monkeypatch):
+    """A stream without an id is skipped and a stream without a status degrades to ''."""
+    snap = SnapserverClient('127.0.0.1', 1780)
+    status = {
+        'server': {
+            'streams': [
+                {'id': 's1', 'status': 'playing'},
+                {'status': 'idle'},  # no id -> skipped
+                {'id': 's2'},  # no status -> ''
+            ]
+        }
+    }
+    monkeypatch.setattr(snap, 'get_status', lambda: status)
+
+    assert snap.get_stream_status() == {'s1': 'playing', 's2': ''}
+
+
 def test_call_id_matching_under_notification_pressure(snapserver_container):
     """_call must return the response matching the request id, not a notification.
 

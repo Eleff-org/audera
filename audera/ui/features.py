@@ -138,7 +138,10 @@ def selected(settings: Settings, key: str) -> str:
     key: `str`
         The feature key to resolve.
     """
-    return settings.features.get(key, get_feature(key).default.value)
+    # Normalize through `Feature.option` so a since-retired persisted value falls back to the
+    # default rather than leaking out raw.
+    feature = get_feature(key)
+    return feature.option(settings.features.get(key, feature.default.value)).value
 
 
 def flag_enabled(settings: Settings, key: str, option: str) -> bool:

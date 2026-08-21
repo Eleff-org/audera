@@ -1,7 +1,21 @@
 import os
 
+import pytest
+
 import audera.dal.dsp as dsp_dal
+from audera.errors import StorageError
 from audera.models.dsp import Band, DSPConfig
+
+
+def _write_corrupt(player_id: str) -> str:
+    """Writes an unparseable DSP file for `player_id` and returns its path."""
+    from audera.dal import path
+
+    os.makedirs(dsp_dal.PATH, exist_ok=True)
+    file_path = os.path.join(dsp_dal.PATH, path.to_filename(player_id))
+    with open(file_path, 'w') as f:
+        f.write('{ not json')
+    return file_path
 
 
 def _make_dsp(player_id='abc123') -> DSPConfig:
@@ -113,3 +127,21 @@ def test_dsp_get_or_create_idempotent_after_edit(audera_home):
 
     # A second open re-reads the edited config — it never re-mints an empty one.
     assert dsp_dal.get_or_create(DSPConfig(player_id='abc123')) == edited
+
+
+def test_dsp_get_raises_storage_error_on_corrupt_file(audera_home):
+    _write_corrupt('abc123')
+    with pytest.raises(StorageError):
+        dsp_dal.get('abc123')
+
+
+def test_dsp_get_or_create_returns_seed_without_clobbering_corrupt_file(audera_home):
+    file_path = _write_corrupt('abc123')
+    seed = _make_dsp(player_id='abc123')
+
+    result = dsp_dal.get_or_create(seed)
+
+    assert result == seed
+    # The corrupt file is left byte-for-byte untouched, never overwritten with the seed.
+    with open(file_path, 'r') as f:
+        assert f.read() == '{ not json'

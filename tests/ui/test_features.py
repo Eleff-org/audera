@@ -38,7 +38,17 @@ def test_player_grouping_resolves_to_by_player_when_the_key_predates_the_feature
 
 
 def test_option_resolves_an_unmatched_value_to_the_default():
-    # `selected()` returns whatever is persisted, so a retired option value reaches the registry
-    # intact and `option()` is what maps it back onto a renderable option.
+    # `option()` is the normalizer `selected()` routes an unmatched value through — it maps any
+    # value nothing matches back onto the default option.
     feature = features.get_feature(features.PLAYER_SELECTION_KEY)
     assert feature.option('does_not_exist') == feature.default
+
+
+def test_selected_normalizes_a_retired_persisted_value_to_the_default():
+    # A value persisted for a since-retired option must resolve to the default rather than leak out
+    # raw, so `flag_enabled` compares against a real option and never a stale one.
+    settings = _settings(features={features.PLAYER_SELECTION_KEY: 'RETIRED_XYZ'})
+    default = features.get_feature(features.PLAYER_SELECTION_KEY).default.value
+
+    assert features.selected(settings, features.PLAYER_SELECTION_KEY) == default
+    assert features.flag_enabled(settings, features.PLAYER_SELECTION_KEY, default) is True

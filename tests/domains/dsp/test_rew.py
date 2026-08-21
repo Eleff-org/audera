@@ -77,6 +77,29 @@ def test_parse_skips_supported_type_missing_freq():
     assert result.skipped == ['f1']
 
 
+@pytest.mark.parametrize(
+    'parameters',
+    [
+        {'freq': 'not-a-number', 'q': 1.0, 'gain': 3.0},
+        {'freq': 1000.0, 'q': 'bad', 'gain': 3.0},
+        {'freq': 1000.0, 'q': 1.0, 'gain': 'bad'},
+    ],
+    ids=['freq', 'q', 'gain'],
+)
+def test_parse_skips_malformed_numeric_field_without_crashing(parameters):
+    # A supported `type` with a non-numeric field must be skipped, not abort the whole import:
+    # `parse_rew` only ever caught `yaml.YAMLError`, so the float coercion crashed it.
+    text = _yaml(
+        {
+            'good': _biquad('Peaking', freq=1000.0, q=1.0, gain=3.0),
+            'bad': _biquad('Peaking', **parameters),
+        }
+    )
+    result = parse_rew(text)
+    assert [band.freq for band in result.bands] == [1000.0]
+    assert result.skipped == ['bad']
+
+
 @pytest.mark.parametrize('band_type', ['Lowpass', 'Highpass'])
 def test_parse_pass_filter_gain_is_zero(band_type):
     (band,) = parse_rew(_yaml({'f1': _biquad(band_type, freq=1000.0, q=0.9, gain=3.0)})).bands

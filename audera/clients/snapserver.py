@@ -85,19 +85,27 @@ class SnapserverClient:
         clients = []
         for group in status.get('server', {}).get('groups', []):
             for client in group.get('clients', []):
-                config_name = client.get('config', {}).get('name', '').strip()
-                host_ip = _normalize_host_ip(client['host']['ip'])
+                # Skip a frame with no `id`; every other field uses `.get(...)` so a partial
+                # payload degrades to a defaulted entry instead of a `KeyError`.
+                client_id = client.get('id')
+                if not client_id:
+                    continue
+                host = client.get('host', {})
+                config = client.get('config', {})
+                volume = config.get('volume', {})
+                config_name = config.get('name', '').strip()
+                host_ip = _normalize_host_ip(host.get('ip', ''))
                 clients.append(
                     player.Player(
-                        id=client['id'],
+                        id=client_id,
                         host=host_ip,
-                        port=client['host'].get('port', 0),
-                        connected=client['connected'],
-                        volume=client['config']['volume']['percent'],
-                        muted=client['config']['volume']['muted'],
-                        group_id=group['id'],
-                        name=config_name if config_name else client['host'].get('name', client['host']['ip']),
-                        latency_ms=client['config'].get('latency', 0),
+                        port=host.get('port', 0),
+                        connected=client.get('connected', False),
+                        volume=volume.get('percent', 0),
+                        muted=volume.get('muted', False),
+                        group_id=group.get('id', ''),
+                        name=config_name if config_name else host.get('name', host_ip),
+                        latency_ms=config.get('latency', 0),
                     )
                 )
         return clients
@@ -126,7 +134,14 @@ class SnapserverClient:
         `'disabled'`.
         """
         status = self.get_status()
-        return {stream['id']: stream['status'] for stream in status.get('server', {}).get('streams', [])}
+        stream_status = {}
+        for stream in status.get('server', {}).get('streams', []):
+            # Skip a stream with no `id`; it can't be keyed. `status` defaults to '' for a partial frame.
+            stream_id = stream.get('id')
+            if not stream_id:
+                continue
+            stream_status[stream_id] = stream.get('status', '')
+        return stream_status
 
     def set_client_volume(self, client_id: str, percent: int, muted: bool = False) -> dict:
         """Sets the volume for a Snapcast client.

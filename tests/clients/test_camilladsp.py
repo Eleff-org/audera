@@ -1,7 +1,37 @@
 import pytest
+import websockets.sync.client
 
 from audera.clients import CamillaDSPClient
-from audera.errors import ServiceError
+from audera.errors import ServiceError, Unreachable
+
+
+def test_call_reads_with_a_deadline_and_maps_timeout(monkeypatch):
+    """A peer that accepts the socket but never replies must raise `Unreachable`, not hang.
+
+    Pure test (no container): the connection is stubbed so `recv` sees the read deadline the fix
+    adds. Without a `timeout` argument `recv` would block forever; the stub asserts one is passed
+    and simulates the silent-socket timeout, which `_call` must translate to `Unreachable`.
+    """
+
+    class _StalledWS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def send(self, _payload):
+            pass
+
+        def recv(self, timeout=None):
+            assert timeout is not None, 'ws.recv must be called with a read deadline'
+            raise TimeoutError('peer accepted the socket but never replied')
+
+    monkeypatch.setattr(websockets.sync.client, 'connect', lambda *a, **k: _StalledWS())
+
+    client = CamillaDSPClient(host='127.0.0.1', port=1234)
+    with pytest.raises(Unreachable):
+        client.get_volume()
 
 
 @pytest.fixture(scope='session')

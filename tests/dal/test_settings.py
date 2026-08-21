@@ -1,8 +1,20 @@
 import json
 import os
 
+import pytest
+
 import audera.dal.settings as settings_dal
+from audera.errors import StorageError
 from audera.models.settings import Settings
+
+
+def _write_corrupt() -> str:
+    """Writes an unparseable settings file and returns its path."""
+    os.makedirs(settings_dal.PATH, exist_ok=True)
+    file_path = os.path.join(settings_dal.PATH, settings_dal.FILE_NAME)
+    with open(file_path, 'w') as f:
+        f.write('{ not json')
+    return file_path
 
 
 def _settings(features: dict | None = None) -> Settings:
@@ -74,6 +86,24 @@ def test_settings_load_without_features_key_backward_compatible(audera_home):
 
     result = settings_dal.get()
     assert result.features == {}
+
+
+def test_settings_get_raises_storage_error_on_corrupt_file(audera_home):
+    _write_corrupt()
+    with pytest.raises(StorageError):
+        settings_dal.get()
+
+
+def test_settings_get_or_create_returns_seed_without_clobbering_corrupt_file(audera_home):
+    file_path = _write_corrupt()
+    seed = _settings(features={'volume': 'db'})
+
+    result = settings_dal.get_or_create(seed)
+
+    assert result == seed
+    # The corrupt file is left byte-for-byte untouched, never overwritten with the seed.
+    with open(file_path, 'r') as f:
+        assert f.read() == '{ not json'
 
 
 def test_settings_delete(audera_home):

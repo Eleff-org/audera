@@ -55,6 +55,17 @@ def test_sources_a_failed_write_leaves_the_previous_file_readable(audera_home, m
         assert json.load(f) == {'sources': {'enabled': ['AirPlay', 'Spotify']}}
 
 
+def test_sources_corrupt_file_degrades_to_the_default(audera_home):
+    # A corrupt file degrades exactly like an absent one: the sources layer never hard-fails a
+    # read, it falls back to `DEFAULT_ENABLED`.
+    os.makedirs(sources_dal.PATH, exist_ok=True)
+    with open(os.path.join(sources_dal.PATH, sources_dal.FILE_NAME), 'w') as f:
+        f.write('{ not json')
+
+    assert sources_dal.get_enabled() == list(sources_dal.DEFAULT_ENABLED)
+    assert not sources_dal.is_recorded()
+
+
 def test_sources_setup_state_round_trip(audera_home):
     # Without a record, the card re-derived `setup required` from a live probe every render, and a
     # backend that was slow to answer read as unclaimed.

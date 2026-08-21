@@ -34,7 +34,7 @@ def _band_summary(band: Band) -> str:
     return ' · '.join(parts)
 
 
-def render(page: 'Page', player_id: str) -> None:
+async def render(page: 'Page', player_id: str) -> None:
     """Renders the full-page parametric-EQ editor for a single player.
 
     Bands are the source of truth; they are compiled to a live CamillaDSP pipeline
@@ -50,7 +50,9 @@ def render(page: 'Page', player_id: str) -> None:
 
     snap = _snapserver(page.settings)
     try:
-        clients = snap.get_clients()
+        # Off-thread so a slow/unreachable Snapserver can't freeze the single NiceGUI event
+        # loop (and every other connected browser) for the client's open/read timeout.
+        clients = await asyncio.to_thread(snap.get_clients)
     except Exception:
         clients = []
     live = next((client for client in clients if client.id == player_id), None)

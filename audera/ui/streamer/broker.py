@@ -171,8 +171,9 @@ class EventBroker:
             for client_id, vol in results:
                 dal_volumes[client_id] = vol
 
-        for p in connected:
-            self.cache.volumes[p.id] = dal_volumes.get(p.id)
+        # Rebuild rather than merge: a full `Server.GetStatus` replaces `clients` wholesale, so a
+        # dropped client would otherwise leave a stale entry.
+        self.cache.volumes = {p.id: dal_volumes.get(p.id) for p in connected}
 
     async def _apply_full_status(self, status: dict) -> None:
         if self._debounce_handle is not None:
