@@ -13,15 +13,18 @@ from pathlib import Path
 
 from nicegui import app, ui
 
-# ---- Brand token values (duplicated from tokens.css) ----
-# Quasar's color slots are driven from the `--q-*` custom properties set in
-# `_PAGE_CSS`, straight from the tokens, so no Python hex is needed there. These
-# three remain because they feed consumers that cannot resolve a CSS `var()`: the
-# header's inline `style=` and the ECharts canvas in `response_plot.py`. Keep them
-# in sync with brand/tokens.css.
+# ---- Brand token values (duplicated from tokens.css for app.colors) ----
+# Quasar's color API takes hex strings, not CSS var() references, so these are
+# stated once here and must stay in sync with brand/tokens.css. NiceGUI applies
+# the Quasar brand as inline CSS variables on the root element at startup, and an
+# inline style beats a stylesheet `:root {}` rule — so a page-CSS `--q-primary`
+# override never wins. `app.colors()` is the only setter Quasar honors; the hexes
+# below feed it, plus the header's inline `style=` and the ECharts canvas.
 INK = '#1A1A18'
+INK_3 = '#7A7A74'
 PAPER = '#FAFAF8'
 PAPER_2 = '#F3F2EF'
+UP = '#5A7A4A'
 
 
 def _brand_dir() -> Path:
@@ -46,14 +49,21 @@ def _fonts_dir() -> Path:
 
 
 def apply_defaults() -> None:
-    """Registers brand static files as NiceGUI assets.
+    """Registers brand static files and sets Quasar color slots.
 
-    Must be called once from ``run()`` before ``ui.run()``. Quasar's color slots
-    are set from the tokens in ``_PAGE_CSS`` (``--q-primary`` etc.), so no
-    ``app.colors()`` call is needed.
+    Must be called once from ``run()`` before ``ui.run()``. Quasar's brand colors
+    are set through ``app.colors()`` (not a page-CSS ``:root`` override), because
+    NiceGUI applies them as inline root-element variables that a stylesheet rule
+    cannot beat.
     """
     app.add_static_files('/brand', str(_brand_dir()))
     app.add_static_files('/brand/fonts', str(_fonts_dir()))
+    app.colors(
+        primary=INK,
+        secondary=INK_3,
+        accent=INK,
+        positive=UP,
+    )
 
 
 # Page-level CSS that wires up the light brand palette. Injected once per page
@@ -65,16 +75,9 @@ _PAGE_CSS = """
      above, so both apps and the website share one set. Do not restate them
      here. */
 
-  /* Quasar color slots, driven straight from the brand tokens so tokens.css
-     stays the single source of truth. Quasar reads these custom properties at
-     runtime; this replaces an app.colors() call restating the same hex in
-     Python. Linked after Quasar's defaults, so this :root block wins. */
-  :root {
-    --q-primary: var(--ink);
-    --q-secondary: var(--ink-3);
-    --q-accent: var(--ink);
-    --q-positive: var(--up);
-  }
+  /* Quasar color slots (--q-primary etc.) are set in Python via app.colors();
+     a stylesheet :root override would lose to the inline root-element variables
+     NiceGUI writes at startup. See apply_defaults(). */
 
   /* Light palette */
   body {
