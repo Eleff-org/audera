@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -42,26 +41,6 @@ class Band(BaseModel):
     q: float = DEFAULT_Q
     enabled: bool = True
 
-    @classmethod
-    def from_dict(cls, dict_object: dict) -> 'Band':
-        """Returns a `Band` object from a `dict`."""
-        return cls.model_validate(dict_object)
-
-    def to_dict(self) -> dict:
-        """Returns a `Band` object as a `dict`."""
-        return {
-            'id': self.id,
-            'type': self.type,
-            'freq': self.freq,
-            'gain': self.gain,
-            'q': self.q,
-            'enabled': self.enabled,
-        }
-
-    def __repr__(self) -> str:
-        """Returns a `Band` object as a json-formatted `str`."""
-        return json.dumps(self.to_dict(), indent=2)
-
 
 class DSPConfig(BaseModel):
     """A `class` that represents a parametric-EQ configuration.
@@ -87,33 +66,12 @@ class DSPConfig(BaseModel):
     bands: list[Band] = Field(default_factory=list)
     enabled: bool = True
 
-    @classmethod
-    def from_dict(cls, dict_object: dict) -> 'DSPConfig':
-        """Returns a `DSPConfig` object from a `dict`."""
-        return cls.model_validate(dict_object)
-
-    def to_dict(self) -> dict:
-        """Returns a `DSPConfig` object as a `dict`."""
-        return {
-            'player_id': self.player_id,
-            'preamp_db': self.preamp_db,
-            'bands': [band.to_dict() for band in self.bands],
-            'enabled': self.enabled,
-        }
-
-    def __repr__(self) -> str:
-        """Returns a `DSPConfig` object as a json-formatted `str`."""
-        return json.dumps(self.to_dict(), indent=2)
-
 
 class Preset(BaseModel):
     """A `class` that represents a named, reusable set of parametric-EQ bands.
 
     A preset is its own entity (not a flavored `DSPConfig`): a display name plus a
     list of bands that can be cloned and appended onto any player's configuration.
-    Unlike `Band`/`DSPConfig`, it serializes via pydantic directly
-    (`model_dump()`/`model_validate`) — a brand-new type with no hand-written on-disk
-    shape to preserve.
 
     Attributes
     ----------

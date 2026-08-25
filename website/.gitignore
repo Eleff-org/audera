@@ -1,9 +1,5 @@
-# Zensical build output
-site/
+# Static-site build output (assembled by build.py, uploaded to Pages)
+_site/
 
-# Build-copied brand assets (sourced from brand/ at repo root)
-docs/stylesheets/brand.css
-docs/stylesheets/fonts/
-
-# Build-copied developer docs (sourced from docs/dev/ at repo root)
-docs/developer/
+# Brand assets copied in at build time (sourced from brand/ at repo root)
+brand/

@@ -4,6 +4,7 @@ import pytest
 
 import audera.dal.sources as sources_dal
 from audera.clients import SnapserverClient
+from audera.clients.snapserver import groups_from_status, players_from_status, stream_status_from_status
 from audera.domains.sources import default_source
 from audera.models.player import Group, Player
 
@@ -99,6 +100,43 @@ def test_get_stream_status_tolerates_partial_status(monkeypatch):
     monkeypatch.setattr(snap, 'get_status', lambda: status)
 
     assert snap.get_stream_status() == {'s1': 'playing', 's2': ''}
+
+
+def test_wrappers_agree_with_shared_parsers(monkeypatch):
+    """The wrapper methods and the shared ``*_from_status`` parsers agree on one fixture dict.
+
+    The broker parses the status dict it already holds via the shared functions, while the client
+    parses a live ``get_status()``; both must produce the same objects for the same frame.
+    """
+    status = {
+        'server': {
+            'groups': [
+                {
+                    'id': 'g1',
+                    'name': 'Living Room',
+                    'stream_id': 'AirPlay',
+                    'muted': False,
+                    'volume': {'percent': 80},
+                    'clients': [
+                        {
+                            'id': 'c1',
+                            'connected': True,
+                            'host': {'ip': '10.0.0.2', 'name': 'Kitchen', 'port': 1704},
+                            'config': {'name': 'Kitchen', 'latency': 5, 'volume': {'percent': 60, 'muted': False}},
+                        }
+                    ],
+                }
+            ],
+            'streams': [{'id': 'AirPlay', 'status': 'playing'}],
+        }
+    }
+    snap = SnapserverClient('127.0.0.1', 1780)
+    monkeypatch.setattr(snap, 'get_status', lambda: status)
+
+    assert snap.get_clients() == players_from_status(status)
+    assert snap.get_groups() == groups_from_status(status)
+    assert snap.get_stream_status() == stream_status_from_status(status)
+    assert stream_status_from_status(status) == {'AirPlay': 'playing'}
 
 
 def test_call_id_matching_under_notification_pressure(snapserver_container):

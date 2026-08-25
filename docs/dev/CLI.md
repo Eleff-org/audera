@@ -1,4 +1,4 @@
-# Audera CLI Reference
+# CLI Reference
 
 ## Streamer
 

@@ -50,9 +50,9 @@ def test_a_gated_function_runs_instead_of_raising():
 def test_the_image_ships_no_audera_unit_files():
     """`/etc/systemd/system/` ships no unit, so provisioning installs everything the lane asserts on.
 
-    `write_streamer_units()` installs every unit the other modules assert on, so a unit baked into the
-    image would be one the tests read but provisioning never wrote. The units the device gets from apt
-    are in `/usr/lib/systemd/system/`.
+    `provision()` renders every unit the other modules assert on from `audera.cli.conf`, so a unit baked
+    into the image would be one the tests read but provisioning never wrote. The units the device gets
+    from apt are in `/usr/lib/systemd/system/`.
     """
     units = sorted(p.name for p in Path('/etc/systemd/system').glob('*.service'))
     assert units == []

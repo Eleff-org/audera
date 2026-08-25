@@ -24,6 +24,93 @@ def _normalize_host_ip(raw: str) -> str:
     return raw
 
 
+def players_from_status(status: dict) -> List[player.Player]:
+    """Parses a `Server.GetStatus` frame into `audera.models.player.Player` objects.
+
+    Every field uses `.get(...)`; a client frame with no `id` is skipped so a partial payload
+    degrades to a defaulted entry instead of a `KeyError`. Shared with the event broker, which
+    holds the status dict from its persistent socket and must not open a second connection.
+
+    Parameters
+    ----------
+    status: `dict`
+        A `Server.GetStatus` result frame.
+    """
+    clients = []
+    for group in status.get('server', {}).get('groups', []):
+        for client in group.get('clients', []):
+            client_id = client.get('id')
+            if not client_id:
+                continue
+            host = client.get('host', {})
+            config = client.get('config', {})
+            volume = config.get('volume', {})
+            config_name = config.get('name', '').strip()
+            host_ip = _normalize_host_ip(host.get('ip', ''))
+            clients.append(
+                player.Player(
+                    id=client_id,
+                    host=host_ip,
+                    port=host.get('port', 0),
+                    connected=client.get('connected', False),
+                    volume=volume.get('percent', 0),
+                    muted=volume.get('muted', False),
+                    group_id=group.get('id', ''),
+                    name=config_name if config_name else host.get('name', host_ip),
+                    latency_ms=config.get('latency', 0),
+                )
+            )
+    return clients
+
+
+def groups_from_status(status: dict) -> List[player.Group]:
+    """Parses a `Server.GetStatus` frame into `audera.models.player.Group` objects.
+
+    A group frame with no `id` is skipped; every other field uses `.get(...)`.
+
+    Parameters
+    ----------
+    status: `dict`
+        A `Server.GetStatus` result frame.
+    """
+    groups = []
+    for group in status.get('server', {}).get('groups', []):
+        group_id = group.get('id')
+        if not group_id:
+            continue
+        groups.append(
+            player.Group(
+                id=group_id,
+                name=group.get('name', ''),
+                client_ids=[c.get('id') for c in group.get('clients', []) if c.get('id')],
+                stream_id=group.get('stream_id', ''),
+                muted=group.get('muted', False),
+                volume=group.get('volume', {}).get('percent', 100),
+            )
+        )
+    return groups
+
+
+def stream_status_from_status(status: dict) -> dict[str, str]:
+    """Parses a `Server.GetStatus` frame into a `stream_id -> status` map.
+
+    The status is Snapserver's own value for the stream, one of `'playing'`, `'idle'`, or
+    `'disabled'`. A stream with no `id` is skipped; `status` defaults to '' for a partial frame.
+
+    Parameters
+    ----------
+    status: `dict`
+        A `Server.GetStatus` result frame.
+    """
+    stream_status = {}
+    for stream in status.get('server', {}).get('streams', []):
+        stream_id = stream.get('id')
+        if not stream_id:
+            continue
+        stream_status[stream_id] = stream.get('status', '')
+    return stream_status
+
+
 class SnapserverClient:
     """A synchronous client for the Snapcast JSON-RPC 2.0 WebSocket API.
 
@@ -81,51 +168,11 @@ class SnapserverClient:
 
     def get_clients(self) -> List[player.Player]:
         """Returns all Snapcast clients as `audera.models.player.Player` objects."""
-        status = self.get_status()
-        clients = []
-        for group in status.get('server', {}).get('groups', []):
-            for client in group.get('clients', []):
-                # Skip a frame with no `id`; every other field uses `.get(...)` so a partial
-                # payload degrades to a defaulted entry instead of a `KeyError`.
-                client_id = client.get('id')
-                if not client_id:
-                    continue
-                host = client.get('host', {})
-                config = client.get('config', {})
-                volume = config.get('volume', {})
-                config_name = config.get('name', '').strip()
-                host_ip = _normalize_host_ip(host.get('ip', ''))
-                clients.append(
-                    player.Player(
-                        id=client_id,
-                        host=host_ip,
-                        port=host.get('port', 0),
-                        connected=client.get('connected', False),
-                        volume=volume.get('percent', 0),
-                        muted=volume.get('muted', False),
-                        group_id=group.get('id', ''),
-                        name=config_name if config_name else host.get('name', host_ip),
-                        latency_ms=config.get('latency', 0),
-                    )
-                )
-        return clients
+        return players_from_status(self.get_status())
 
     def get_groups(self) -> List[player.Group]:
         """Returns all Snapcast groups as `audera.models.player.Group` objects."""
-        status = self.get_status()
-        groups = []
-        for group in status.get('server', {}).get('groups', []):
-            groups.append(
-                player.Group(
-                    id=group['id'],
-                    name=group.get('name', ''),
-                    client_ids=[c['id'] for c in group.get('clients', [])],
-                    stream_id=group.get('stream_id', ''),
-                    muted=group.get('muted', False),
-                    volume=group.get('volume', {}).get('percent', 100),
-                )
-            )
-        return groups
+        return groups_from_status(self.get_status())
 
     def get_stream_status(self) -> dict[str, str]:
         """Returns the status of every Snapcast stream, keyed by stream id.
@@ -133,15 +180,7 @@ class SnapserverClient:
         The status is Snapserver's own value for the stream, one of `'playing'`, `'idle'`, or
         `'disabled'`.
         """
-        status = self.get_status()
-        stream_status = {}
-        for stream in status.get('server', {}).get('streams', []):
-            # Skip a stream with no `id`; it can't be keyed. `status` defaults to '' for a partial frame.
-            stream_id = stream.get('id')
-            if not stream_id:
-                continue
-            stream_status[stream_id] = stream.get('status', '')
-        return stream_status
+        return stream_status_from_status(self.get_status())
 
     def set_client_volume(self, client_id: str, percent: int, muted: bool = False) -> dict:
         """Sets the volume for a Snapcast client.

@@ -13,16 +13,15 @@ from pathlib import Path
 
 from nicegui import app, ui
 
-# ---- Brand token values (duplicated from tokens.css for app.colors) ----
-# Quasar's color API takes hex strings, not CSS var() references, so these
-# are stated once here and must stay in sync with brand/tokens.css.
+# ---- Brand token values (duplicated from tokens.css) ----
+# Quasar's color slots are driven from the `--q-*` custom properties set in
+# `_PAGE_CSS`, straight from the tokens, so no Python hex is needed there. These
+# three remain because they feed consumers that cannot resolve a CSS `var()`: the
+# header's inline `style=` and the ECharts canvas in `response_plot.py`. Keep them
+# in sync with brand/tokens.css.
 INK = '#1A1A18'
-INK_2 = '#4A4A46'
-INK_3 = '#7A7A74'
-INK_4 = '#A0A09A'
 PAPER = '#FAFAF8'
 PAPER_2 = '#F3F2EF'
-UP = '#5A7A4A'
 
 
 def _brand_dir() -> Path:
@@ -47,18 +46,14 @@ def _fonts_dir() -> Path:
 
 
 def apply_defaults() -> None:
-    """Registers brand static files and sets Quasar color slots.
+    """Registers brand static files as NiceGUI assets.
 
-    Must be called once from ``run()`` before ``ui.run()``.
+    Must be called once from ``run()`` before ``ui.run()``. Quasar's color slots
+    are set from the tokens in ``_PAGE_CSS`` (``--q-primary`` etc.), so no
+    ``app.colors()`` call is needed.
     """
     app.add_static_files('/brand', str(_brand_dir()))
     app.add_static_files('/brand/fonts', str(_fonts_dir()))
-    app.colors(
-        primary=INK,
-        secondary=INK_3,
-        accent=INK,
-        positive=UP,
-    )
 
 
 # Page-level CSS that wires up the light brand palette. Injected once per page
@@ -69,6 +64,17 @@ _PAGE_CSS = """
   /* Font faces (@font-face) are declared once in brand/tokens.css, linked
      above, so both apps and the website share one set. Do not restate them
      here. */
+
+  /* Quasar color slots, driven straight from the brand tokens so tokens.css
+     stays the single source of truth. Quasar reads these custom properties at
+     runtime; this replaces an app.colors() call restating the same hex in
+     Python. Linked after Quasar's defaults, so this :root block wins. */
+  :root {
+    --q-primary: var(--ink);
+    --q-secondary: var(--ink-3);
+    --q-accent: var(--ink);
+    --q-positive: var(--up);
+  }
 
   /* Light palette */
   body {

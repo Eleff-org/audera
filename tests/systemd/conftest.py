@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import raise_with_logs
+
 ROOT = Path(__file__).resolve().parents[2]
 
 # `inside/` is uncollectable outside the container rather than deselected by marker. The inner modules
@@ -75,12 +77,7 @@ def _wait_for_systemd(container, timeout: float = _BOOT_TIMEOUT) -> None:
             return
         time.sleep(1)
 
-    try:
-        stdout, stderr = container.get_logs()
-        log_text = f'\nstdout: {stdout.decode(errors="replace")[-2000:]}\nstderr: {stderr.decode(errors="replace")[-2000:]}'
-    except Exception:
-        log_text = ' (container logs unavailable)'
-    raise TimeoutError(f'systemd not ready after {timeout}s; last state {state!r}.{log_text}')
+    raise_with_logs(container, f'systemd not ready after {timeout}s; last state {state!r}.', timeout)
 
 
 @pytest.fixture(scope='session')

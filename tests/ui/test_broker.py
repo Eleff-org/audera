@@ -240,6 +240,96 @@ async def test_full_status_prunes_volumes_for_removed_clients():
     assert [p.id for p in b.cache.clients] == ['a']
 
 
+async def test_partial_client_frame_degrades_instead_of_raising():
+    """A client frame missing ``config``/``volume`` must degrade to a defaulted entry, not ``KeyError``.
+
+    Regression: the broker used to re-parse status frames with hard subscripts, so a partial frame
+    the client tolerates raised and dropped the socket into a silent reconnect loop.
+    """
+    from unittest.mock import patch
+
+    from audera.ui.streamer import broker as bmod
+
+    b = _bare_broker()
+
+    status = {
+        'server': {
+            'groups': [
+                {
+                    'id': 'g1',
+                    'clients': [
+                        {'id': 'c1', 'connected': True, 'host': {'ip': '10.0.0.2'}},
+                    ],
+                }
+            ],
+            'streams': [],
+        }
+    }
+
+    with patch.object(bmod.volume_dal, 'get_all', return_value={}):
+        await b._apply_full_status(status)
+
+    assert [p.id for p in b.cache.clients] == ['c1']
+    player = b.cache.clients[0]
+    assert player.volume == 0
+    assert player.muted is False
+    assert player.host == '10.0.0.2'
+
+
+async def test_group_volume_change_triggers_dirty():
+    """A change to only a group's volume must fire the dirty callback.
+
+    Regression: the hand-maintained snapshot omitted group ``volume``, so a group-volume change
+    left the UI stale with no error. The model-derived snapshot includes it.
+    """
+    from unittest.mock import patch
+
+    from audera.ui.streamer import broker as bmod
+    from audera.ui.streamer.broker import _DEBOUNCE_SECONDS
+
+    b = _bare_broker()
+
+    def _status_with_group_volume(vol):
+        return {
+            'server': {
+                'groups': [
+                    {
+                        'id': 'g1',
+                        'name': 'Living Room',
+                        'stream_id': 'AirPlay',
+                        'muted': False,
+                        'volume': {'percent': vol},
+                        'clients': [
+                            {
+                                'id': 'c1',
+                                'connected': True,
+                                'host': {'ip': '10.0.0.2'},
+                                'config': {'name': '', 'volume': {'percent': 50, 'muted': False}},
+                            }
+                        ],
+                    }
+                ],
+                'streams': [{'id': 'AirPlay', 'status': 'idle'}],
+            }
+        }
+
+    with patch.object(bmod.volume_dal, 'get_all', return_value={'c1': 50}):
+        await b._apply_full_status(_status_with_group_volume(80))
+    b._maybe_signal()
+    b._signal_dirty()  # flush the seed change so the next change is isolated to group volume
+
+    dirty = asyncio.Event()
+    b.on_dirty(lambda: dirty.set())
+
+    with patch.object(bmod.volume_dal, 'get_all', return_value={'c1': 50}):
+        await b._apply_full_status(_status_with_group_volume(40))
+    b._maybe_signal()
+
+    await asyncio.wait_for(dirty.wait(), timeout=_DEBOUNCE_SECONDS + 1.0)
+    assert dirty.is_set()
+    assert b.cache.groups[0].volume == 40
+
+
 async def test_dirty_not_delivered_when_change_reverts_during_debounce():
     """If the cache returns to the last delivered snapshot before the timer fires, skip callbacks."""
     from audera.ui.streamer.broker import _DEBOUNCE_SECONDS

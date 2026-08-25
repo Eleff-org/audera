@@ -82,8 +82,3 @@ main_file = ""
 # single value, so `-m systemd` on the command line overrides this rather than appending to it.
 addopts = "-m 'not systemd'"
 markers = ["systemd: requires real systemd as PID 1, in a privileged container"]
-
-[dependency-groups]
-site = [
-    "zensical>=0.0.53",
-]

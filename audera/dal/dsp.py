@@ -56,7 +56,7 @@ def get(player_id: str) -> dsp.DSPConfig:
             data = json.load(f)
     except (OSError, ValueError) as exc:
         raise StorageError('Unable to read DSP configuration [%s]: %s' % (file_path, exc)) from exc
-    return dsp.DSPConfig.from_dict(data['dsp'])
+    return dsp.DSPConfig.model_validate(data['dsp'])
 
 
 def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
@@ -88,7 +88,7 @@ def save(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:
         An instance of an `audera.models.dsp.DSPConfig` object.
     """
     file_path = os.path.join(PATH, path.to_filename(dsp_config.player_id))
-    io.write_text(file_path, json.dumps({'dsp': dsp_config.to_dict()}, indent=2))
+    io.write_text(file_path, json.dumps({'dsp': dsp_config.model_dump()}, indent=2))
     return dsp_config
 
 

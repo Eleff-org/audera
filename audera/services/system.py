@@ -1,16 +1,17 @@
 """Systemd unit management"""
 
+import logging
 import subprocess
 
 from audera.errors import ServiceError, Unreachable
-from audera.services import logging, platform
+from audera.services import platform
 
 # Bounds every call. A `systemctl` verb that has not returned in 15 seconds is hung.
 TIMEOUT: float = 15
 
 # `CalledProcessError.__str__` carries the argv and the exit status but never `stderr`, so a
 # failure's reason is logged here, into the `audera-streamer` journal.
-LOGGER = logging.logger(name=__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 @platform.requires('dietpi')

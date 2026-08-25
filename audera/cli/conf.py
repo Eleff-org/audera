@@ -1,18 +1,58 @@
-"""Bundled service configuration files, rendered from code.
+"""Bundled service configuration and unit files, rendered from code.
 
-This module is the single source of truth for the configuration files that
-``audera {streamer,player} conf <filename>`` emits. Keeping them in code (rather
-than as data files) lets the CamillaDSP playback format and the Snapserver source
-list be parameterized while the remaining files stay byte-for-byte stable.
+This module is the single source of truth for every configuration file *and* systemd unit that
+``audera {streamer,player} conf <filename>`` emits. Provisioning redirects each render into place
+with ``>``; the CLI never writes a file itself, and the shell renders no whole file of its own (only
+in-place ``sed`` edits of OS-owned files stay in shell). Keeping the artifacts in code lets the
+ports, paths, and hostnames that used to live as inline shell literals be sourced from
+`audera.settings` and the constants below, so a value cannot silently disagree across the split.
 """
 
 from typing import Literal, Sequence
 
 from audera.domains.sources import default_source, source_lines
+from audera.settings import settings
 
 # The Snapserver configuration's target path. Provisioning writes it through a shell redirect;
 # the Sources tab re-renders it when a source is toggled.
 SNAPSERVER_CONF: str = '/etc/snapserver.conf'
+
+# Snapserver's `$HOME`, set on its unit so every forked backend inherits it, and the parent of the
+# go-librespot config directory. Also the `datadir` the rendered conf pins, so `server.json` (player
+# names, volumes, latencies, groups, stream assignments) does not follow a change to `$HOME`.
+SNAPSERVER_HOME: str = '/var/lib/snapserver'
+
+# CamillaDSP's config and volume-statefile paths, named by both `camilladsp.service` and the
+# `camilladsp.yml` redirect. Both roles write the same two files.
+CAMILLADSP_CONFIG: str = '/etc/camilladsp/config.yml'
+CAMILLADSP_STATEFILE: str = '/etc/camilladsp/state.yml'
+
+# The ALSA pcm name PlexAmp plays into, shared by `render_asound` (which names the pcm) and the
+# `plexamp-audio-uuid` drop-in (which is `S` + this name, PlexAmp's own device-id encoding). The two
+# must byte-match or PlexAmp routes to a device the fifo does not feed.
+PLEXAMP_PCM: str = 'plexamp_output'
+
+# The mDNS hostnames nginx serves and the certificate covers. `audera.local` fronts the streamer UI;
+# `plexamp.local` fronts PlexAmp headless, published by `plexamp-mdns`.
+AUDERA_HOSTNAME: str = 'audera.local'
+PLEXAMP_HOSTNAME: str = 'plexamp.local'
+
+# The units each role's provisioning installs, on their on-disk file names. Read by the systemd lane
+# to know which unit files a flash writes; a unit added to a role's renderers is added here too.
+# `nqptp` is absent from both: it comes from apt, and only its stop-budget drop-in is Audera's.
+STREAMER_UNITS: tuple[str, ...] = (
+    'snapserver',
+    'snapclient',
+    'camilladsp',
+    'plexamp',
+    'plexamp-mdns',
+    'audera-streamer',
+)
+PLAYER_UNITS: tuple[str, ...] = (
+    'snapclient',
+    'camilladsp',
+    'audera-player',
+)
 
 
 def render_camilladsp(playback_format: Literal['S16LE', 'S32LE'] = 'S32LE', playback_device: str = 'hw:0') -> str:
@@ -225,7 +265,7 @@ enabled = true
 bind_to_address = 0.0.0.0
 
 # which port the server should listen on
-port = 1780
+port = {settings.snapserver_port}
 
 # Publish HTTP service via mDNS as '_snapcast-http._tcp'
 #publish_http = true
@@ -454,31 +494,332 @@ def render_asound() -> str:
     `str`
         The rendered ALSA configuration.
     """
-    return r"""
-pcm.snapcast_format {
+    return f"""
+pcm.snapcast_format {{
     type plug
-    slave {
+    slave {{
         pcm "snapcast_raw"
         format "S16_LE"
         rate 48000
         channels 2
-    }
-}
+    }}
+}}
 
-pcm.snapcast_raw {
+pcm.snapcast_raw {{
     type file
     slave.pcm "null"
     file "/tmp/snapfifo"
     format "raw"
-}
+}}
 
-pcm.plexamp_output {
+pcm.{PLEXAMP_PCM} {{
     type plug
     slave.pcm "snapcast_format"
-    hint {
+    hint {{
         show on
         description "Snapcast"
-    }
-}
+    }}
+}}
 
+"""
+
+
+def render_snapserver_service() -> str:
+    """Renders the `snapserver.service` systemd unit (streamer only).
+
+    Returns
+    -------
+    `str`
+        The rendered unit file.
+    """
+    return f"""[Unit]
+Description=Snapcast server
+# nqptp because snapserver forks shairport-sync for the airplay:// source, and that fork
+#   needs the PTP clock already holding UDP 319/320. After= on a disabled unit is a no-op.
+After=network.target sound.target nqptp.service
+
+[Service]
+# systemd sets no HOME for a unit with no User=, and everything snapserver forks inherits that.
+#   go-librespot exits before flag.Parse computing its --config_dir default via Go's
+#   os.UserConfigDir(), which errors when neither XDG_CONFIG_HOME nor HOME is set, so
+#   --config_dir does not help. Snapserver then re-forks the dead backend on stdout EOF with no
+#   backoff, roughly ten times a second and never reaping, until the device runs out of PIDs.
+#   HOME satisfies both branches of os.UserConfigDir() and HOME/.config/go-librespot is where
+#   provisioning rendered config.yml.
+# Snapserver reads HOME too: its datadir defaults to HOME/.config/snapserver/ in the foreground,
+#   so this line would move server.json, which holds every player name, volume, latency, group,
+#   and stream assignment. The rendered conf states datadir outright, which prevents it.
+Environment=HOME={SNAPSERVER_HOME}
+ExecStart=/usr/bin/snapserver -c {SNAPSERVER_CONF}
+Restart=on-failure
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_snapclient_service(role: Literal['streamer', 'player']) -> str:
+    """Renders the `snapclient.service` systemd unit, role-branched.
+
+    The streamer's snapclient reads the local Snapserver and orders after it; the player's has
+    neither, since it reaches a Snapserver over the network. The streamer also carries a stop
+    budget, matching the units Audera toggles; the player's snapclient is never toggled.
+
+    Parameters
+    ----------
+    role : `Literal['streamer', 'player']`
+        The device role.
+
+    Returns
+    -------
+    `str`
+        The rendered unit file.
+    """
+    after = 'network-online.target time-sync.target sound.target avahi-daemon.service'
+    host = ''
+    stop = ''
+    if role == 'streamer':
+        after += ' snapserver.service'
+        host = '--host 127.0.0.1 '
+        stop = '\nTimeoutStopSec=5'
+    return f"""[Unit]
+Description=Snapcast client
+Wants=avahi-daemon.service
+After={after}
+
+[Service]
+ExecStart=/usr/bin/snapclient {host}--soundcard hw:Loopback,0 --sampleformat 48000:32:*
+Restart=on-failure{stop}
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_camilladsp_service() -> str:
+    """Renders the `camilladsp.service` systemd unit (identical for both roles).
+
+    Captures from the ALSA loopback and plays to the physical DAC; the daemon persists volume in
+    its statefile. The WebSocket control port is sourced from settings; `--address 0.0.0.0` stays
+    literal, being the DSP websocket bind rather than the UI bind.
+
+    Returns
+    -------
+    `str`
+        The rendered unit file.
+    """
+    return f"""[Unit]
+Description=CamillaDSP
+After=sound.target snapclient.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/camilladsp {CAMILLADSP_CONFIG} --statefile {CAMILLADSP_STATEFILE} -p {settings.camilladsp_port} --address 0.0.0.0
+Restart=always
+RestartSec=5
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_plexamp_service() -> str:
+    """Renders the `plexamp.service` systemd unit (streamer only).
+
+    `ExecStartPre` retries a `plex.tv` DNS lookup thirty times; the `$(seq 1 30)` and `$i` must
+    reach the unit as text, for the shell systemd starts. This renderer emits them literally (no
+    interpolation), which is what the shell's quoted heredoc did.
+
+    Returns
+    -------
+    `str`
+        The rendered unit file.
+    """
+    return """[Unit]
+Description=PlexAmp Headless
+After=network-online.target nss-lookup.target
+Wants=network-online.target nss-lookup.target
+
+[Service]
+Environment=HOME=/root
+WorkingDirectory=/opt/plexamp
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 30); do getent hosts plex.tv > /dev/null 2>&1 && break || sleep 2; done'
+ExecStart=/bin/bash -c 'export CLIENT_NAME=Audera; exec /usr/bin/node /opt/plexamp/js/index.js'
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_plexamp_mdns_service() -> str:
+    """Renders the `plexamp-mdns.service` systemd unit (streamer only).
+
+    Returns
+    -------
+    `str`
+        The rendered unit file.
+    """
+    return """[Unit]
+Description=Publish plexamp.local mDNS hostname
+After=avahi-daemon.service network-online.target
+Requires=avahi-daemon.service
+
+[Service]
+ExecStart=/usr/local/bin/plexamp-mdns.sh
+Restart=on-failure
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_plexamp_mdns_helper() -> str:
+    """Renders the `plexamp-mdns.sh` helper `plexamp-mdns.service` executes (streamer only).
+
+    Publishes `plexamp.local` over mDNS. The `$(hostname -I | awk …)` reaches the file as text,
+    for the shell systemd starts.
+
+    Returns
+    -------
+    `str`
+        The rendered helper script.
+    """
+    return f"""#!/bin/bash
+exec avahi-publish -a -R {PLEXAMP_HOSTNAME} $(hostname -I | awk '{{print $1}}')
+"""
+
+
+def render_audera_streamer_service() -> str:
+    """Renders the `audera-streamer.service` systemd unit (streamer only).
+
+    Returns
+    -------
+    `str`
+        The rendered unit file.
+    """
+    return """[Unit]
+Description=Audera streamer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/audera streamer start
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_audera_player_service() -> str:
+    """Renders the `audera-player.service` systemd unit (player only).
+
+    A one-shot that starts `audera player start` on boot; the player UI's own process supervises
+    itself, so this does not restart.
+
+    Returns
+    -------
+    `str`
+        The rendered unit file.
+    """
+    return """[Unit]
+Description=Audera player
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/audera player start
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def render_nqptp_timeout() -> str:
+    """Renders the `nqptp` stop-budget drop-in (streamer only).
+
+    `nqptp.service` ships with DietPi's `shairport-sync-airplay2` package, so its stop budget is a
+    drop-in apt cannot replace rather than a unit Audera owns. It needs the same budget as the
+    units Audera writes: toggling AirPlay off runs `disable --now nqptp` through the seam.
+
+    Returns
+    -------
+    `str`
+        The rendered drop-in.
+    """
+    return """[Service]
+TimeoutStopSec=5
+"""
+
+
+def render_plexamp_audio_uuid() -> str:
+    """Renders PlexAmp's `audioDeviceUuid` drop-in (streamer only).
+
+    PlexAmp encodes an ALSA device id as `S` + the pcm name, so this must byte-match
+    `render_asound`'s pcm. Written with no trailing newline, exactly as PlexAmp stores it.
+
+    Returns
+    -------
+    `str`
+        The rendered device id, without a trailing newline.
+    """
+    return f'S{PLEXAMP_PCM}'
+
+
+def render_nginx_site() -> str:
+    """Renders the nginx reverse-proxy site (streamer only).
+
+    Fronts the streamer UI on `audera.local` and PlexAmp headless on `plexamp.local` over TLS. The
+    proxied ports are sourced from settings; the `$host`/`$remote_addr`/`$http_upgrade` are nginx's
+    own variables and reach the file as text.
+
+    Returns
+    -------
+    `str`
+        The rendered nginx site.
+    """
+    return f"""server {{
+    listen 443 ssl;
+    server_name {AUDERA_HOSTNAME};
+
+    ssl_certificate     /etc/ssl/certs/audera.local.crt;
+    ssl_certificate_key /etc/ssl/private/audera.local.key;
+
+    location / {{
+        proxy_pass http://127.0.0.1:{settings.server_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }}
+}}
+
+server {{
+    listen 443 ssl;
+    server_name {PLEXAMP_HOSTNAME};
+
+    ssl_certificate     /etc/ssl/certs/audera.local.crt;
+    ssl_certificate_key /etc/ssl/private/audera.local.key;
+
+    location / {{
+        proxy_pass http://127.0.0.1:{settings.plexamp_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }}
+}}
 """

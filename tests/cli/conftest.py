@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from audera.dal import sources as sources_dal
-
 
 def _entrypoint() -> list[str]:
     """Returns the argv that runs the CLI, preferring the installed console script.
@@ -36,32 +34,22 @@ ENTRY = _entrypoint()
 
 
 @pytest.fixture
-def audera_cli(tmp_path, monkeypatch):
+def audera_cli(audera_home_process):
     """Runs the installed `audera` console script against an isolated home.
 
     Provisioning calls the CLI as a process, so it is tested that way, through argparse. An
     in-process call can pass arguments argparse forbids.
 
-    Isolating the home takes both `HOME` and `USERPROFILE`. `audera/dal/path.py` computes `HOME`
-    from `expanduser('~')` at import, so the child never sees `tests/conftest.py`'s monkeypatched
-    `PATH`, and `ntpath.expanduser` reads `USERPROFILE` and then `HOMEDRIVE` + `HOMEPATH`, never
-    `HOME`. With `HOME` alone the child read the developer's own `~/.audera`.
-
-    Tests seed that home through `dal.sources`, pointed at the same directory the child resolves,
-    rather than through `conftest.py`'s `audera_home`, whose monkeypatched module attribute no
-    other process can see.
+    The isolated home and its `HOME`/`USERPROFILE` environment come from `conftest.py`'s
+    `audera_home_process`, which also points `dal.sources` at the same directory the child resolves so
+    a test can seed the home in-process.
     """
-    home = tmp_path / 'home'
-    (home / '.audera').mkdir(parents=True)
-    monkeypatch.setattr(sources_dal, 'PATH', str(home / '.audera'))
+    _, env = audera_home_process
 
-    env = {**os.environ, 'HOME': str(home), 'USERPROFILE': str(home)}
-    env.pop('HOMEDRIVE', None)
-    env.pop('HOMEPATH', None)
-
-    def run(*args: str) -> subprocess.CompletedProcess:
+    def run(*args: str, env_overrides: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         # `text=True` for its universal-newline translation, since `sys.stdout.write` emits `\r\n`
-        # on Windows.
-        return subprocess.run([*ENTRY, *args], capture_output=True, text=True, env=env, timeout=60)
+        # on Windows. `env_overrides` reaches the child as `AUDERA_`-prefixed settings, which is the
+        # only way to prove from a process that a rendered value is sourced rather than hardcoded.
+        return subprocess.run([*ENTRY, *args], capture_output=True, text=True, env={**env, **(env_overrides or {})}, timeout=60)
 
     return run

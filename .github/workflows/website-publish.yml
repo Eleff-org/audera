@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build website
+    name: Build site
     runs-on: ubuntu-latest
 
     steps:
@@ -33,29 +33,16 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install site dependencies
-        run: uv sync --group site --frozen
+      - name: Build site
+        run: uv run --no-project python website/build.py
 
-      - name: Copy brand assets
-        run: |
-          cp brand/tokens.css website/docs/stylesheets/brand.css
-          mkdir -p website/docs/stylesheets/fonts
-          cp brand/fonts/*.woff2 website/docs/stylesheets/fonts/
-
-      - name: Copy developer docs
-        run: |
-          mkdir -p website/docs/developer
-          cp docs/dev/DEVELOPMENT.md website/docs/developer/development.md
-          cp docs/dev/PROVISION.md website/docs/developer/provisioning.md
-          cp docs/dev/CLI.md website/docs/developer/cli.md
-
-      - name: Build website
-        run: cd website && uv run zensical build
+      - name: Verify site
+        run: uv run --no-project python website/verify.py
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # 5.0.0
         with:
-          path: website/site
+          path: website/_site
 
   deploy:
     name: Deploy to GitHub Pages

@@ -72,15 +72,17 @@ BRANCH_URL="${BRANCH//#/%23}"
 
 SETUP_URL="https://raw.githubusercontent.com/Eleff-org/audera/${BRANCH_URL}/os/dietpi/${DEVICE}/automation/setup.sh"
 
-SED_STRIP="sed -i '/^echo.*Restarting/d; /^sleep 5\$/d; /^[[:space:]]*reboot[[:space:]]*\$/d' /tmp/audera_setup.sh"
-
 FETCH_CMD="curl -fsSL '${SETUP_URL}' -o /tmp/audera_setup.sh"
 
+# setup.sh's third argument is its reboot flag: 0 for --no-reboot / --wipe-networks (the operator
+# wants the device left running for inspection or a network wipe), 1 otherwise.
 if [[ "$WIPE_NETWORKS" -eq 1 || "$NO_REBOOT" -eq 1 ]]; then
-    SETUP_CMD="${FETCH_CMD} && ${SED_STRIP} && bash /tmp/audera_setup.sh '${BRANCH}' '${AUDIO_DEVICE}'"
+    REBOOT_FLAG='0'
 else
-    SETUP_CMD="${FETCH_CMD} && bash /tmp/audera_setup.sh '${BRANCH}' '${AUDIO_DEVICE}'"
+    REBOOT_FLAG='1'
 fi
+
+SETUP_CMD="${FETCH_CMD} && bash /tmp/audera_setup.sh '${BRANCH}' '${AUDIO_DEVICE}' '${REBOOT_FLAG}'"
 
 WIPE_CMD="nohup bash -c '
   nmcli -t -f UUID con show | while IFS= read -r uuid; do

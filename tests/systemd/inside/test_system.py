@@ -179,7 +179,7 @@ def test_check_false_returns_the_returncode_and_stdout_contract(failing_unit):
 def test_a_drop_in_is_inert_until_daemon_reload(idle_unit):
     """A drop-in has no effect until `daemon-reload`.
 
-    Every writer in Audera (`write_streamer_units`, `_restart_plexamp_with_claim`,
+    Every writer in Audera (provisioning's rendered units, `_restart_plexamp_with_claim`,
     `_remove_claim_override`) writes a file and then reloads, and off a real manager that reload is
     indistinguishable from a no-op. Here the drop-in is on disk, systemd's answer for the property it
     sets is unchanged, and only the reload moves it.

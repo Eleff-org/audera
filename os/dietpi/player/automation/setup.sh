@@ -12,6 +12,11 @@ fi
 
 AUDIO_DEVICE="$2"
 
+# Whether to reboot at the end (default 1). provision.sh passes 0 for --no-reboot / --wipe-networks
+#   so the operator can inspect the device; an explicit argument rather than provision.sh editing
+#   these lines out of this script by regex.
+REBOOT="${3:-1}"
+
 # Fetch and load shared config-injection helpers
 curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
 source /tmp/audera_config_lib.sh
@@ -25,7 +30,6 @@ GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
 CAMILLADSP_VERSION="3.0.1"
 CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
 CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
-CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 
 
 # Start console logging
@@ -98,42 +102,20 @@ chmod 644 "$CAMILLADSP_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
 
 # Install systemd service units
+#   Each unit is rendered by the CLI and redirected into place. `snapclient.service` is role-branched:
+#   the player's has no `--host` and no ordering after a local snapserver, since it reaches one over the
+#   network. A render that exits non-zero leaves a zero-byte unit and `set -e` aborts before `systemctl`.
 echo
 echo ">>> Installing systemd service units"
 
 # snapclient service — outputs to ALSA loopback; CamillaDSP reads from the paired device
-cat > /etc/systemd/system/snapclient.service <<EOF
-[Unit]
-Description=Snapcast client
-Wants=avahi-daemon.service
-After=network-online.target time-sync.target sound.target avahi-daemon.service
-
-[Service]
-ExecStart=/usr/bin/snapclient --soundcard hw:Loopback,0 --sampleformat 48000:32:*
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
+audera player conf snapclient.service    > /etc/systemd/system/snapclient.service
 
 # camilladsp service — captures from ALSA loopback, plays to physical DAC (hw:0)
-write_camilladsp_service "$CAMILLADSP_CONFIG" "$CAMILLADSP_STATEFILE"
+audera player conf camilladsp.service    > /etc/systemd/system/camilladsp.service
 
 # audera-player service — one-shot that starts audera player on boot
-cat > /etc/systemd/system/audera-player.service <<'EOF'
-[Unit]
-Description=Audera player
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/audera player start
-RemainAfterExit=no
-
-[Install]
-WantedBy=multi-user.target
-EOF
+audera player conf audera-player.service > /etc/systemd/system/audera-player.service
 
 systemctl daemon-reload
 systemctl enable snapclient camilladsp audera-player
@@ -188,7 +170,9 @@ echo
 echo -e "[  ${GREEN}OK${RESET}  ] The Audera player setup & installation completed successfully"
 
 # Restart
-echo
-echo ">>> Restarting the Audera player in 5 [sec.] ..."
-sleep 5
-reboot
+if [[ "${REBOOT:-1}" == "1" ]]; then
+    echo
+    echo ">>> Restarting the Audera player in 5 [sec.] ..."
+    sleep 5
+    reboot
+fi

@@ -156,32 +156,88 @@ def player_setup(mock: bool = False, **_) -> None:
     setup.run(role='player')
 
 
-def _emit_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'], playback_device: str = 'hw:0') -> None:
-    """Writes a bundled config file, rendered from `audera.cli.conf`, to stdout.
+def _emit_conf(
+    filename: str,
+    role: Literal['streamer', 'player'],
+    playback_format: Literal['S16LE', 'S32LE'],
+    playback_device: str = 'hw:0',
+) -> None:
+    """Writes a bundled config or unit file, rendered from `audera.cli.conf`, to stdout.
+
+    Every device config and systemd unit is rendered here so Python is the single source of truth
+    and the shell only redirects. `role` scopes the dispatch: a name valid for the other role is
+    rejected exactly as an unknown one is, so `audera player conf snapserver.conf` cannot emit a
+    streamer artifact onto a player.
 
     Parameters
     ----------
     filename : `str`
-        The config file name to render.
+        The config or unit file name to render.
+    role : `Literal['streamer', 'player']`
+        The device role, from the `audera streamer` / `audera player` subject.
     playback_format : `Literal['S16LE', 'S32LE']`
         The CamillaDSP playback device format (only applies to `camilladsp.yml`).
     playback_device : `str`
         The CamillaDSP playback ALSA device (only applies to `camilladsp.yml`).
     """
+    # Shared by both roles: the same two files a player and a streamer each render.
     if filename == 'camilladsp.yml':
         sys.stdout.write(conf.render_camilladsp(playback_format, playback_device))
-    elif filename == 'snapserver.conf':
-        # The recorded enabled set, not `DEFAULT_ENABLED`. `~/.audera/sources.json` survives a
-        # reprovision, so rendering the bootstrap default would ship a conf naming AirPlay to a
-        # device running PlexAmp, and Snapserver would reassign every group off the stream it no
-        # longer serves. `get_enabled()` degrades an unrecorded set to `DEFAULT_ENABLED`.
-        sys.stdout.write(conf.render_snapserver(sources_dal.get_enabled()))
-    elif filename == 'go-librespot.yml':
-        sys.stdout.write(conf.render_go_librespot())
-    elif filename == 'asound.conf':
-        sys.stdout.write(conf.render_asound())
-    else:
-        raise SystemExit(f'Unknown config file: {filename!r}')
+        return
+    if filename == 'camilladsp.service':
+        sys.stdout.write(conf.render_camilladsp_service())
+        return
+    if filename == 'snapclient.service':
+        # Role-branched: the streamer's snapclient reads the local snapserver and orders after it;
+        # the player's has neither.
+        sys.stdout.write(conf.render_snapclient_service(role))
+        return
+
+    if role == 'streamer':
+        if filename == 'snapserver.conf':
+            # The recorded enabled set, not `DEFAULT_ENABLED`. `~/.audera/sources.json` survives a
+            # reprovision, so rendering the bootstrap default would ship a conf naming AirPlay to a
+            # device running PlexAmp, and Snapserver would reassign every group off the stream it no
+            # longer serves. `get_enabled()` degrades an unrecorded set to `DEFAULT_ENABLED`.
+            sys.stdout.write(conf.render_snapserver(sources_dal.get_enabled()))
+            return
+        if filename == 'go-librespot.yml':
+            sys.stdout.write(conf.render_go_librespot())
+            return
+        if filename == 'asound.conf':
+            sys.stdout.write(conf.render_asound())
+            return
+        if filename == 'snapserver.service':
+            sys.stdout.write(conf.render_snapserver_service())
+            return
+        if filename == 'plexamp.service':
+            sys.stdout.write(conf.render_plexamp_service())
+            return
+        if filename == 'plexamp-mdns.service':
+            sys.stdout.write(conf.render_plexamp_mdns_service())
+            return
+        if filename == 'plexamp-mdns.sh':
+            sys.stdout.write(conf.render_plexamp_mdns_helper())
+            return
+        if filename == 'audera-streamer.service':
+            sys.stdout.write(conf.render_audera_streamer_service())
+            return
+        if filename == 'nqptp-timeout.conf':
+            sys.stdout.write(conf.render_nqptp_timeout())
+            return
+        if filename == 'plexamp-audio-uuid':
+            sys.stdout.write(conf.render_plexamp_audio_uuid())
+            return
+        if filename == 'nginx-site':
+            sys.stdout.write(conf.render_nginx_site())
+            return
+
+    if role == 'player':
+        if filename == 'audera-player.service':
+            sys.stdout.write(conf.render_audera_player_service())
+            return
+
+    raise SystemExit(f'Unknown {role} config file: {filename!r}')
 
 
 def streamer_conf(
@@ -211,7 +267,7 @@ def streamer_conf(
     ```
 
     """
-    _emit_conf(filename, playback_format, playback_device)
+    _emit_conf(filename, 'streamer', playback_format, playback_device)
 
 
 def streamer_units(disabled: bool = False, **_) -> None:
@@ -269,4 +325,4 @@ def player_conf(filename: str, playback_format: Literal['S16LE', 'S32LE'] = 'S32
     ```
 
     """
-    _emit_conf(filename, playback_format, playback_device)
+    _emit_conf(filename, 'player', playback_format, playback_device)
