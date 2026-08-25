@@ -125,9 +125,12 @@ def systemd_container(systemd_image):
     container = DockerContainer(systemd_image).with_kwargs(
         privileged=True,
         cgroupns='host',
-        tmpfs={'/run': '', '/run/lock': ''},
         extra_hosts={'plex.tv': '127.0.0.1'},
     )
+    # `/run` and `/run/lock` go through `with_tmpfs_mount` (which populates `self.tmpfs`) rather than
+    #   `with_kwargs`; testcontainers >= 4.15 passes `tmpfs=self.tmpfs` to `create()` itself, so smuggling
+    #   it through `_kwargs` too raises "got multiple values for keyword argument 'tmpfs'".
+    container.with_tmpfs_mount('/run').with_tmpfs_mount('/run/lock')
     container.with_volume_mapping('/sys/fs/cgroup', '/sys/fs/cgroup', 'rw')
 
     with container:
