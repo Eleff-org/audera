@@ -5,7 +5,7 @@ open-protocols to your own hardware for multi-room synchronous playback.
 """
 
 from audera import dal, models
-from audera.services import ap, logging, netifaces, platform, system
+from audera.services import ap, netifaces, platform, system
 from audera.settings import settings
 
 __all__ = [
@@ -14,7 +14,6 @@ __all__ = [
     'netifaces',
     'models',
     'dal',
-    'logging',
     'system',
 ]
 

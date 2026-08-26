@@ -13,8 +13,9 @@
 
 /* ---- Font faces (self-hosted variable woff2, latin subset) ----
    Declared once here so every consumer shares one set: the NiceGUI apps (via
-   theme.py's link) and the website (via the brand.css copy). url() is relative
-   to this stylesheet, so `fonts/<file>` resolves under both. */
+   theme.py's link) and the website (which links this file directly, copied to
+   _site/brand/ at build). url() is relative to this stylesheet, so
+   `fonts/<file>` resolves under both. */
 @font-face {
   font-family: 'Fraunces';
   font-style: italic;
@@ -77,7 +78,8 @@
   --wordmark-size: 24px;
 
   /* ---- Shape ---- */
-  --radius: 0px;
+  --radius: 0px;         /* app default: every element is square */
+  --radius-media: 12px;  /* marketing/hero imagery only; the app stays square */
 
   /* ---- Motion ---- */
   --duration: 250ms;

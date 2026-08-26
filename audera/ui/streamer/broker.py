@@ -1,8 +1,9 @@
 """Event broker between device state and the UI.
 
 Receives events from two sources: Snapserver notifications over a persistent WebSocket, and
-player volumes from the volume DAL. Caches clients, groups, stream status, and volumes.
-Signals registered callbacks when the cached state changes.
+player volumes from the volume DAL. Caches clients, groups, stream status, and volumes, parsing
+status frames via `clients.snapserver`'s shared frame parsers. Signals registered callbacks when
+the cached state changes.
 
 Writes use short-lived connections via ``SnapserverClient._call`` because Snapserver's
 ``excludeSession`` excludes the writing socket from notifications.
@@ -20,7 +21,7 @@ import websockets.asyncio.client
 
 import audera
 from audera.clients import CamillaDSPClient, SnapserverClient
-from audera.clients.snapserver import _normalize_host_ip
+from audera.clients.snapserver import groups_from_status, players_from_status, stream_status_from_status
 from audera.dal import volume as volume_dal
 from audera.models.player import Group, Player
 
@@ -46,60 +47,19 @@ class Cache:
         self.volumes: dict[str, int | None] = {}
 
     def snapshot(self) -> tuple:
-        clients = tuple(
-            (c.id, c.host, c.port, c.connected, c.volume, c.muted, c.group_id, c.name, c.latency_ms) for c in self.clients
-        )
+        """Change-detection key over every cached field.
+
+        Each model is serialized via `dict(model)`, which on a pydantic v2 model yields **all**
+        fields (including `exclude=True` ones like `Player.name`/`latency_ms` and group `volume`),
+        so a newly added field is always in change detection. The result is only ever compared with
+        `==` (never hashed), so a list-valued field such as `Group.client_ids` is fine.
+        """
         return (
-            clients,
-            tuple((g.id, g.stream_id, g.muted) for g in self.groups),
+            tuple(tuple(sorted(dict(c).items())) for c in self.clients),
+            tuple(tuple(sorted(dict(g).items())) for g in self.groups),
             tuple(sorted(self.stream_status.items())),
             tuple(sorted(self.volumes.items())),
         )
-
-
-def _players_from_status(status: dict) -> list[Player]:
-    """Parses the full server status into Player objects, same logic as SnapserverClient.get_clients."""
-    clients = []
-    for group in status.get('server', {}).get('groups', []):
-        for client in group.get('clients', []):
-            config_name = client.get('config', {}).get('name', '').strip()
-            host_ip = _normalize_host_ip(client['host']['ip'])
-            clients.append(
-                Player(
-                    id=client['id'],
-                    host=host_ip,
-                    port=client['host'].get('port', 0),
-                    connected=client['connected'],
-                    volume=client['config']['volume']['percent'],
-                    muted=client['config']['volume']['muted'],
-                    group_id=group['id'],
-                    name=config_name if config_name else client['host'].get('name', client['host']['ip']),
-                    latency_ms=client['config'].get('latency', 0),
-                )
-            )
-    return clients
-
-
-def _groups_from_status(status: dict) -> list[Group]:
-    """Parses the full server status into Group objects."""
-    groups = []
-    for group in status.get('server', {}).get('groups', []):
-        groups.append(
-            Group(
-                id=group['id'],
-                name=group.get('name', ''),
-                client_ids=[c['id'] for c in group.get('clients', [])],
-                stream_id=group.get('stream_id', ''),
-                muted=group.get('muted', False),
-                volume=group.get('volume', {}).get('percent', 100),
-            )
-        )
-    return groups
-
-
-def _streams_from_status(status: dict) -> dict[str, str]:
-    """Parses the full server status into a stream_id -> status word map."""
-    return {stream['id']: stream['status'] for stream in status.get('server', {}).get('streams', [])}
 
 
 class EventBroker:
@@ -179,9 +139,9 @@ class EventBroker:
         if self._debounce_handle is not None:
             self._debounce_handle.cancel()
             self._debounce_handle = None
-        self.cache.clients = _players_from_status(status)
-        self.cache.groups = _groups_from_status(status)
-        self.cache.stream_status = _streams_from_status(status)
+        self.cache.clients = players_from_status(status)
+        self.cache.groups = groups_from_status(status)
+        self.cache.stream_status = stream_status_from_status(status)
         await self._load_volumes()
 
     async def _reseed_via_short_lived(self) -> None:

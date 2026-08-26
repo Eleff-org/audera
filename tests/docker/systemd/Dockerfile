@@ -110,15 +110,14 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --all-extras --no-install-project
 
-# Provisioning is the fixture here: the image ships no Audera unit files, and the shell functions in
-# `streamer.sh` (plus `common.sh`'s `write_camilladsp_service`, which one of them calls) install
-# them. Named one by one rather than copying `lib/`, which would pull in `config.sh` silently.
+# Provisioning is the fixture here: the image ships no Audera unit files, and `provision()` renders
+# them from `audera.cli.conf` and shells to `streamer.sh`'s `activate_streamer_units` to enable them.
+# `streamer.sh` is named one by one rather than copying `lib/`, which would pull in `config.sh` silently.
 COPY audera ./audera
 # `brand/tokens.css` and `brand/fonts` are `force-include`d into the wheel by pyproject.toml, so the
 # project install below fails to build without them.
 COPY brand ./brand
 COPY tests ./tests
-COPY os/dietpi/lib/common.sh ./os/dietpi/lib/common.sh
 COPY os/dietpi/lib/streamer.sh ./os/dietpi/lib/streamer.sh
 
 # Installs the project, which `_plex.py` needs: it calls `importlib.metadata.version('audera')` at

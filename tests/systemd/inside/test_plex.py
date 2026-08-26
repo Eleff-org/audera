@@ -25,7 +25,7 @@ from audera.services import system
 from audera.ui.streamer.pages import _plex
 from tests.systemd.inside.conftest import unit_state
 
-# Every test here provisions. `plexamp.service` is written by `write_streamer_units`, and the image
+# Every test here provisions. `plexamp.service` is rendered by `render_plexamp_service`, and the image
 # ships no Audera unit file.
 pytestmark = pytest.mark.usefixtures('provisioned')
 

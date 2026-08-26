@@ -50,29 +50,6 @@ install_camilladsp() {
     mkdir -p /etc/camilladsp
 }
 
-# Writes the camilladsp systemd service unit, captures from ALSA loopback, plays to
-#   physical DAC (hw:0). Volume is persisted by the daemon via --statefile.
-#   TimeoutStopSec=5 matches `lib/streamer.sh`'s `write_streamer_units`.
-write_camilladsp_service() {
-    local config_path="$1"
-    local statefile_path="$2"
-    cat > /etc/systemd/system/camilladsp.service <<EOF
-[Unit]
-Description=CamillaDSP
-After=sound.target snapclient.service
-StartLimitIntervalSec=0
-
-[Service]
-ExecStart=/usr/local/bin/camilladsp $config_path --statefile $statefile_path -p 1234 --address 0.0.0.0
-Restart=always
-RestartSec=5
-TimeoutStopSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-}
-
 # Installs uv if it is not already present
 install_uv() {
     if ! command -v uv &> /dev/null; then

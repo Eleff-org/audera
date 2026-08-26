@@ -1,16 +1,13 @@
 # Getting started
 
-Unlike proprietary systems like Sonos, WiiM, or Bluesound, which require cloud authentication and proprietary hardware, **Audera** is fully **private**, **open-source**, and runs on your **own** `Raspberry Pi` hardware.
-
 To get started with **Audera**, you will need a `Raspberry Pi` device, an audio system with a free `HDMI` or `RCA` input or a spare set of stereo speakers (the old set in your basement would work great!), and a compatible source device or music library to cast into the **Audera** ecosystem.
 
-!!! note
-
-    We recommend starting with a **Streamer** first. The Streamer acts as both the hub / control plane for any connected **Player** and as a player itself.
+> [!NOTE]
+> We recommend starting with a **Streamer** first. The Streamer acts as both the hub / control plane for any connected **Player** and as a player itself.
 
 ## Devices
 
-Audera consists of two types of devices, a **Streamer** (one per household) and a **Player** (multiple per household). The **Streamer** hosts a local web app for managing devices (incl. latency adjustment), sources (`AirPlay 2`, `Spotify Connect`, and `Plexamp`), player groups and streams, and per-player DSP pipelines.
+**Audera** consists of two types of devices, a **Streamer** (one per household) and a **Player** (multiple per household). The **Streamer** hosts a local web app for managing devices (incl. latency adjustment), sources (`AirPlay 2`, `Spotify Connect`, and `Plexamp`), player groups and streams, and per-player DSP pipelines.
 
 ## Selecting hardware
 
@@ -25,6 +22,9 @@ Depending on the audio system you want to integrate **Audera** with, you may nee
 - For a spare set of passive stereo speakers, add a [Raspberry Pi DigiAMP+](https://www.raspberrypi.com/products/digiamp-plus/).
 
 ## Provisioning
+
+> [!NOTE]
+> For a complete guide to provisioning, see the [provisioning docs](dev/PROVISION.md).
 
 1. Flash an SD card with the latest `DietPi OS` for your `Raspberry Pi` device. The official [Raspberry Pi Imager](https://www.raspberrypi.com/software/) supports `DietPi OS` natively. In **Choose OS**, select **Other general-purpose OS**, then scroll down and select **DietPi**.
 2. Complete the first-boot process on your `Raspberry Pi` device. You will likely need to set up Wi-Fi credentials, pick your locale, and select your keyboard layout. You do not need to install any additional software during the first boot.
@@ -49,10 +49,6 @@ Depending on the audio system you want to integrate **Audera** with, you may nee
       --host <IP> `
       --audio-device hdmi
     ```
-
-    !!! note
-
-        For a complete guide to provisioning, see the [provisioning docs](../developer/provisioning.md).
 
 6. After provisioning completes, the `Raspberry Pi` device restarts into **Wi-Fi Setup** mode.
 7. On your phone, open your **Wi-Fi** settings and scan until you see a new `audera-{unique-identifier}` network, where the unique-identifier is a random string of letters and numbers.

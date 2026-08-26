@@ -61,7 +61,7 @@ def get() -> settings.Settings:
             data = json.load(f)
     except (OSError, ValueError) as exc:
         raise StorageError('Unable to read settings [%s]: %s' % (file_path, exc)) from exc
-    return settings.Settings.from_dict(data['settings'])
+    return settings.Settings.model_validate(data['settings'])
 
 
 def get_or_create(settings_: settings.Settings) -> settings.Settings:
@@ -92,7 +92,7 @@ def save(settings_: settings.Settings) -> settings.Settings:
     settings_: `audera.models.settings.Settings`
         An instance of a `Settings` object.
     """
-    io.write_text(os.path.join(PATH, FILE_NAME), json.dumps({'settings': settings_.to_dict()}, indent=2))
+    io.write_text(os.path.join(PATH, FILE_NAME), json.dumps({'settings': settings_.model_dump()}, indent=2))
     _notify_observers()
     return settings_
 

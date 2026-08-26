@@ -16,14 +16,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "duckdb>=1.5.1",
+    "duckdb>=1.5.5",
     "pydantic>=2.0",
-    "pydantic-settings>=2.0",
+    "pydantic-settings>=2.15.0",
     "netifaces>=0.11.0",
-    "nicegui>=3.10.0",
-    "python-dotenv>=1.2.2",
+    "nicegui>=3.16.0",
+    "python-dotenv>=1.2.3",
     "httpx>=0.28.1",
-    "websockets>=16.0",
+    "websockets>=17.0.1",
     "pyyaml>=6.0",
     "camilladsp-plot @ git+https://github.com/HEnquist/pycamilladsp-plot@v3.0.2",
 ]
@@ -35,7 +35,7 @@ dev = [
     "ty>=0.0.29",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24.0",
-    "testcontainers>=4.14.2",
+    "testcontainers>=4.15.0",
     "respx>=0.23.1",
 ]
 
@@ -82,8 +82,3 @@ main_file = ""
 # single value, so `-m systemd` on the command line overrides this rather than appending to it.
 addopts = "-m 'not systemd'"
 markers = ["systemd: requires real systemd as PID 1, in a privileged container"]
-
-[dependency-groups]
-site = [
-    "zensical>=0.0.53",
-]

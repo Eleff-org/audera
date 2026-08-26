@@ -5,7 +5,7 @@ def test_dsp_config_legacy_dict_drops_retired_keys():
     """A config written by an earlier release loads and re-serializes without its retired keys.
 
     Deployed devices carry `~/.audera/dsp/{player_id}.json` files from before the parametric-EQ
-    rewrite. A `to_dict()` that echoed the unknown keys would keep re-writing a `pipeline` the
+    rewrite. A `model_dump()` that echoed the unknown keys would keep re-writing a `pipeline` the
     compiler no longer reads.
     """
     legacy = {
@@ -18,7 +18,7 @@ def test_dsp_config_legacy_dict_drops_retired_keys():
         'volume': 40.0,
         'enabled': True,
     }
-    result = DSPConfig.from_dict(legacy).to_dict()
+    result = DSPConfig.model_validate(legacy).model_dump()
     assert set(result.keys()) == {'player_id', 'preamp_db', 'bands', 'enabled'}
     for retired in ('id', 'dsp_id', 'pipeline', 'loudness_enabled', 'loudness_reference_level', 'volume'):
         assert retired not in result

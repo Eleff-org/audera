@@ -99,7 +99,15 @@ def test_units_requires_a_selection(audera_cli):
 def test_conf_rejects_an_unknown_filename(audera_cli):
     result = audera_cli('streamer', 'conf', 'nope.conf')
     assert result.returncode == 1
-    assert "Unknown config file: 'nope.conf'" in result.stderr
+    assert "Unknown streamer config file: 'nope.conf'" in result.stderr
+
+
+def test_conf_rejects_a_cross_role_filename(audera_cli):
+    # A name valid for the other role is rejected exactly as an unknown one is, so a player can
+    # never emit a streamer's snapserver.conf onto itself.
+    result = audera_cli('player', 'conf', 'snapserver.conf')
+    assert result.returncode == 1
+    assert "Unknown player config file: 'snapserver.conf'" in result.stderr
 
 
 def test_a_subject_is_required(audera_cli):
@@ -170,6 +178,99 @@ def test_conf_camilladsp_playback_device_override(audera_cli, subject):
     # Playback device becomes plughw:0; capture device stays hw:Loopback,1.
     assert '    device: "plughw:0"\n' in out
     assert '    device: "hw:Loopback,1"\n' in out
+
+
+# The systemd units and the nginx/PlexAmp artifacts provisioning redirects into place. The systemd
+# lane renders these from `conf.render_*` directly, so a process test is the only coverage of
+# `_emit_conf`'s dispatch: a name mapped to the wrong renderer, or to none, ships a wrong or empty
+# file the shell redirects verbatim.
+
+_STREAMER_ARTIFACTS = [
+    ('snapserver.service', conf.render_snapserver_service),
+    ('camilladsp.service', conf.render_camilladsp_service),
+    ('plexamp.service', conf.render_plexamp_service),
+    ('plexamp-mdns.service', conf.render_plexamp_mdns_service),
+    ('plexamp-mdns.sh', conf.render_plexamp_mdns_helper),
+    ('audera-streamer.service', conf.render_audera_streamer_service),
+    ('nqptp-timeout.conf', conf.render_nqptp_timeout),
+    ('nginx-site', conf.render_nginx_site),
+]
+
+
+@pytest.mark.parametrize(('filename', 'renderer'), _STREAMER_ARTIFACTS, ids=[name for name, _ in _STREAMER_ARTIFACTS])
+def test_conf_streamer_artifacts_emit_what_their_renderers_produce(audera_cli, filename, renderer):
+    result = audera_cli('streamer', 'conf', filename)
+    assert result.returncode == 0
+    assert result.stdout == renderer()
+
+
+@pytest.mark.parametrize('subject', ['streamer', 'player'])
+def test_conf_snapclient_service_is_role_branched(audera_cli, subject):
+    """`snapclient.service` renders per role: the streamer's reads the local Snapserver, the player's not.
+
+    A player that emitted the streamer's unit would point its snapclient at a loopback Snapserver that
+    is not there and order after a `snapserver.service` it never installs.
+    """
+    result = audera_cli(subject, 'conf', 'snapclient.service')
+    assert result.returncode == 0
+    assert result.stdout == conf.render_snapclient_service(subject)
+    if subject == 'streamer':
+        assert '--host 127.0.0.1' in result.stdout
+        assert 'snapserver.service' in result.stdout
+    else:
+        assert '--host' not in result.stdout
+        assert 'snapserver.service' not in result.stdout
+
+
+def test_conf_player_emits_the_player_service(audera_cli):
+    result = audera_cli('player', 'conf', 'audera-player.service')
+    assert result.returncode == 0
+    assert result.stdout == conf.render_audera_player_service()
+
+
+def test_conf_camilladsp_service_sources_the_port_from_settings(audera_cli):
+    """The DSP WebSocket port is `settings.camilladsp_port`, not a shell literal.
+
+    Overriding `AUDERA_CAMILLADSP_PORT` moves the `-p` in the rendered unit, which the hardcoded
+    `1234` this replaced — one of four inline shell literals that had to silently agree — could not.
+    """
+    assert '-p 1234 ' in audera_cli('streamer', 'conf', 'camilladsp.service').stdout
+
+    overridden = audera_cli('streamer', 'conf', 'camilladsp.service', env_overrides={'AUDERA_CAMILLADSP_PORT': '9999'}).stdout
+    assert '-p 9999 ' in overridden
+    assert '-p 1234 ' not in overridden
+
+
+def test_conf_nginx_site_sources_the_ui_port_from_settings(audera_cli):
+    """The proxied UI port is `settings.server_port`, not the literal `80` the heredoc carried."""
+    assert 'proxy_pass http://127.0.0.1:80;' in audera_cli('streamer', 'conf', 'nginx-site').stdout
+
+    overridden = audera_cli('streamer', 'conf', 'nginx-site', env_overrides={'AUDERA_SERVER_PORT': '8443'}).stdout
+    assert 'proxy_pass http://127.0.0.1:8443;' in overridden
+    assert 'proxy_pass http://127.0.0.1:80;' not in overridden
+
+
+def test_conf_plexamp_service_keeps_the_dns_retry_loop_literal(audera_cli):
+    """The `$(seq 1 30)` retry and `$i` reach the unit as text, for the shell systemd starts.
+
+    A renderer that interpolated them would emit a unit the shell cannot loop, so PlexAmp would launch
+    before `plex.tv` resolves.
+    """
+    out = audera_cli('streamer', 'conf', 'plexamp.service').stdout
+    assert 'for i in $(seq 1 30); do' in out
+
+
+def test_conf_plexamp_audio_uuid_has_no_trailing_newline(audera_cli):
+    """The device id is `S` + `render_asound`'s pcm, stored verbatim with no trailing newline.
+
+    PlexAmp reads the file byte-for-byte, so a stray newline or a pcm that does not byte-match the
+    `asound.conf` name routes audio to a device the snapfifo does not feed.
+    """
+    result = audera_cli('streamer', 'conf', 'plexamp-audio-uuid')
+    assert result.returncode == 0
+    assert result.stdout == f'S{conf.PLEXAMP_PCM}'
+    assert not result.stdout.endswith('\n')
+    assert f'pcm.{conf.PLEXAMP_PCM} ' in audera_cli('streamer', 'conf', 'asound.conf').stdout
 
 
 # The `start`/`setup` verbs launch a blocking server, so process tests cover only argparse wiring.

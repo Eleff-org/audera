@@ -24,7 +24,7 @@ When `pages.py` outgrows a few hundred lines, split it into a `pages/` package: 
 Consume the brand tokens per `brand/AGENTS.md`; UI adds three rules:
 
 - Never hard-code hex. Use `var(--token)` in CSS/Tailwind or the `theme.*` constants in Python.
-- `components/theme.py` is the sole adapter: the only file that calls `app.colors()` or `app.add_static_files()` for brand assets.
+- `components/theme.py` is the sole adapter: the only file that calls `app.add_static_files()` for brand assets and the only one that sets Quasar's `--q-*` color slots (in `_PAGE_CSS`, from the tokens).
 - Light palette only; no dark mode.
 
 ## Style

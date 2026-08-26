@@ -14,12 +14,14 @@ from pathlib import Path
 from nicegui import app, ui
 
 # ---- Brand token values (duplicated from tokens.css for app.colors) ----
-# Quasar's color API takes hex strings, not CSS var() references, so these
-# are stated once here and must stay in sync with brand/tokens.css.
+# Quasar's color API takes hex strings, not CSS var() references, so these are
+# stated once here and must stay in sync with brand/tokens.css. NiceGUI applies
+# the Quasar brand as inline CSS variables on the root element at startup, and an
+# inline style beats a stylesheet `:root {}` rule — so a page-CSS `--q-primary`
+# override never wins. `app.colors()` is the only setter Quasar honors; the hexes
+# below feed it, plus the header's inline `style=` and the ECharts canvas.
 INK = '#1A1A18'
-INK_2 = '#4A4A46'
 INK_3 = '#7A7A74'
-INK_4 = '#A0A09A'
 PAPER = '#FAFAF8'
 PAPER_2 = '#F3F2EF'
 UP = '#5A7A4A'
@@ -49,7 +51,10 @@ def _fonts_dir() -> Path:
 def apply_defaults() -> None:
     """Registers brand static files and sets Quasar color slots.
 
-    Must be called once from ``run()`` before ``ui.run()``.
+    Must be called once from ``run()`` before ``ui.run()``. Quasar's brand colors
+    are set through ``app.colors()`` (not a page-CSS ``:root`` override), because
+    NiceGUI applies them as inline root-element variables that a stylesheet rule
+    cannot beat.
     """
     app.add_static_files('/brand', str(_brand_dir()))
     app.add_static_files('/brand/fonts', str(_fonts_dir()))
@@ -69,6 +74,10 @@ _PAGE_CSS = """
   /* Font faces (@font-face) are declared once in brand/tokens.css, linked
      above, so both apps and the website share one set. Do not restate them
      here. */
+
+  /* Quasar color slots (--q-primary etc.) are set in Python via app.colors();
+     a stylesheet :root override would lose to the inline root-element variables
+     NiceGUI writes at startup. See apply_defaults(). */
 
   /* Light palette */
   body {

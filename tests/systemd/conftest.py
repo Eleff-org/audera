@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers import raise_with_logs
+
 ROOT = Path(__file__).resolve().parents[2]
 
 # `inside/` is uncollectable outside the container rather than deselected by marker. The inner modules
@@ -75,12 +77,7 @@ def _wait_for_systemd(container, timeout: float = _BOOT_TIMEOUT) -> None:
             return
         time.sleep(1)
 
-    try:
-        stdout, stderr = container.get_logs()
-        log_text = f'\nstdout: {stdout.decode(errors="replace")[-2000:]}\nstderr: {stderr.decode(errors="replace")[-2000:]}'
-    except Exception:
-        log_text = ' (container logs unavailable)'
-    raise TimeoutError(f'systemd not ready after {timeout}s; last state {state!r}.{log_text}')
+    raise_with_logs(container, f'systemd not ready after {timeout}s; last state {state!r}.', timeout)
 
 
 @pytest.fixture(scope='session')
@@ -128,9 +125,12 @@ def systemd_container(systemd_image):
     container = DockerContainer(systemd_image).with_kwargs(
         privileged=True,
         cgroupns='host',
-        tmpfs={'/run': '', '/run/lock': ''},
         extra_hosts={'plex.tv': '127.0.0.1'},
     )
+    # `/run` and `/run/lock` go through `with_tmpfs_mount` (which populates `self.tmpfs`) rather than
+    #   `with_kwargs`; testcontainers >= 4.15 passes `tmpfs=self.tmpfs` to `create()` itself, so smuggling
+    #   it through `_kwargs` too raises "got multiple values for keyword argument 'tmpfs'".
+    container.with_tmpfs_mount('/run').with_tmpfs_mount('/run/lock')
     container.with_volume_mapping('/sys/fs/cgroup', '/sys/fs/cgroup', 'rw')
 
     with container:

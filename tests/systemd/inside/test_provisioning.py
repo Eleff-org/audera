@@ -9,10 +9,11 @@ The unit state mirroring `dal.sources.DEFAULT_ENABLED` is recorded as an obligat
 AirPlay and `nqptp` left disabled would present as a working streamer with a silent stream, invisibly
 on the Sources tab, which reads the enabled set rather than the unit.
 
-Two other claims cover the extraction's regression risks. `write_streamer_units` moved heredocs out of
-`setup.sh`'s top level into a function with locals, so an unquoted heredoc that no longer interpolates
-writes a unit with a literal `$snapserver_home` in it, and `plexamp.service`'s quoted heredoc has to
-keep the opposite property.
+The unit files, the mDNS helper, and the `nqptp` drop-in are now rendered by `audera streamer conf`
+and redirected into place by `setup.sh`, so the heredoc-quoting failures this module once guarded
+(an unquoted heredoc that stopped interpolating, `plexamp.service`'s literal `$(seq 1 30)` expanding
+at write time) no longer exist. Byte-equality of every rendered artifact is covered by `tests/cli`;
+this module covers what the manager does with the files once they are on disk.
 
 This module covers the artifacts rather than the flash. Not the apt block, the pins, the DietPi repo,
 the three-layer `shairport-sync` neutralization, `dietpi.txt`, or the reboot tail; those are still
@@ -30,9 +31,6 @@ from audera.cli import conf
 from audera.dal import sources as sources_dal
 from audera.domains.sources import CATALOG
 from tests.systemd.inside.conftest import (
-    CAMILLADSP_CONFIG,
-    CAMILLADSP_STATEFILE,
-    SNAPSERVER_HOME,
     WRITTEN_UNITS,
     provision,
     unit_state,
@@ -52,7 +50,7 @@ SOURCE_UNITS = tuple(unit for source in CATALOG for unit in source.units)
 INFRASTRUCTURE = tuple(unit for unit in WRITTEN_UNITS if unit not in set(SOURCE_UNITS))
 FROM_APT = tuple(unit for unit in SOURCE_UNITS if unit not in set(WRITTEN_UNITS))
 
-# `plexamp-mdns.service`'s ExecStart target, written by `write_plexamp_mdns_helper`.
+# `plexamp-mdns.service`'s ExecStart target, rendered by `render_plexamp_mdns_helper`.
 _MDNS_HELPER = '/usr/local/bin/plexamp-mdns.sh'
 
 # Where `nqptp`'s stop budget goes, and the reason it is a drop-in: apt owns the unit.
@@ -113,7 +111,7 @@ def freshly_provisioned(audera_home) -> Iterator[None]:
 
 
 @pytest.fixture
-def recorded_home(tmp_path, monkeypatch) -> str:
+def recorded_home(audera_home_process) -> str:
     """Points the data-access layer and the provisioning shell at one `~/.audera`, and returns the `HOME`.
 
     `activate_streamer_units` reads the recorded set by shelling out to `audera streamer units`, a process
@@ -121,10 +119,12 @@ def recorded_home(tmp_path, monkeypatch) -> str:
     module attribute, which reaches this process only, so a test that recorded a set through the
     data-access layer and provisioned would watch the shell read the container's empty home and pass for
     the wrong reason.
+
+    The child-home scaffolding is `conftest.py`'s `audera_home_process`, which creates `home/.audera`
+    and points `sources_dal.PATH` at it; only the `HOME` string is taken, since `provision(home=...)`
+    passes it into the shell's environment itself.
     """
-    home = tmp_path / 'home'
-    (home / '.audera').mkdir(parents=True)
-    monkeypatch.setattr(sources_dal, 'PATH', str(home / '.audera'))
+    home, _ = audera_home_process
     return str(home)
 
 
@@ -137,11 +137,6 @@ def _fragment_path(unit: str) -> str:
         timeout=_TIMEOUT,
         check=False,
     ).stdout.strip()
-
-
-def _unit_text(unit: str) -> str:
-    """Returns the unit file's contents as provisioning wrote them."""
-    return Path(f'/etc/systemd/system/{unit}.service').read_text(encoding='utf-8')
 
 
 @pytest.mark.parametrize('unit', sorted({*WRITTEN_UNITS, *SOURCE_UNITS}))
@@ -170,8 +165,8 @@ def test_provisioning_installs_a_unit_systemd_can_load(unit: str):
 def test_infrastructure_is_enabled_and_running(unit: str):
     """Infrastructure units are both enabled and started, unconditionally.
 
-    Derived from the writer rather than listed, so the set is whatever provisioning installs and no
-    source claims, the definition `os/dietpi/AGENTS.md` uses. A unit added to `write_streamer_units` for
+    Derived from the renderers rather than listed, so the set is whatever provisioning installs and no
+    source claims, the definition `os/dietpi/AGENTS.md` uses. A unit added to `conf.STREAMER_UNITS` for
     a source without being added to `CATALOG` therefore lands here and is asserted running, which a
     source unit is not.
     """
@@ -258,70 +253,10 @@ def test_provisioning_seeds_no_enabled_set():
     assert sources_dal.get_enabled() == list(sources_dal.DEFAULT_ENABLED)
 
 
-@pytest.mark.parametrize(
-    ('unit', 'interpolated'),
-    [
-        ('snapserver', (SNAPSERVER_HOME, conf.SNAPSERVER_CONF)),
-        ('camilladsp', (CAMILLADSP_CONFIG, CAMILLADSP_STATEFILE)),
-    ],
-)
-def test_the_unquoted_heredocs_still_interpolate_after_the_extraction(unit: str, interpolated: tuple[str, ...]):
-    """The unquoted heredocs still interpolate the writer's arguments.
-
-    These units are written from `<<EOF` rather than `<<'EOF'` so the writer's arguments reach them. Moving
-    the heredocs out of `setup.sh`'s top level and into a function turned the values they read from globals
-    into locals, and a quoting mistake made during that move writes a unit containing the literal
-    `$snapserver_home`.
-
-    systemd loads such a unit without complaint, since it is valid syntax, and the failure surfaces only in
-    the journal, as a snapserver that starts and immediately exits for want of a config file at a path
-    named `$snapserver_config`.
-
-    Presence of the values is not sufficient on its own, since a unit could carry both the expanded value
-    and an unexpanded reference, so no `$` may survive anywhere in these two files. Neither carries an
-    environment variable reference or a comment containing one today.
-    """
-    text = _unit_text(unit)
-
-    for value in interpolated:
-        assert value in text, f"{unit}.service does not name {value}, so the writer's argument did not reach it"
-    assert '$' not in text, f'{unit}.service kept an unexpanded reference: {text}'
-
-
-def test_plexamps_heredoc_keeps_the_shell_it_must_not_expand():
-    """The quoted heredoc keeps the shell it must not expand.
-
-    `plexamp.service`'s `ExecStartPre` retries a DNS lookup for `plex.tv` thirty times, and `$(seq 1 30)`
-    has to reach the unit file as text, for the shell systemd starts rather than for the shell that wrote
-    the file. Its heredoc is therefore `<<'EOF'` while the two above it are not.
-
-    Unquoted, the writer runs `seq` at flash time and pastes its thirty newline-separated lines into the
-    unit, so `ExecStartPre=` ends at `for i in 1` and the remaining twenty-nine become directives named `2`
-    through `30`. Measured: systemd rejects that with `LoadState=bad-setting`, but only in the journal.
-    `activate_streamer_units` disables `plexamp`, and `disable` on an unparseable unit still exits zero, so
-    the flash completes clean and the fault surfaces later as a claim flow stuck at `setup required`.
-
-    Both the file's bytes and the manager's parse are asserted, since the parse decides what the shell
-    receives: systemd splits `ExecStartPre` into argv and the literal has to survive that split intact.
-    """
-    text = _unit_text('plexamp')
-    assert '$(seq 1 30)' in text, f'the retry loop was expanded when the unit was written: {text}'
-    assert 'for i in 1' not in text, f'`seq` ran at write time, so `ExecStartPre` ends after one word: {text}'
-
-    parsed = subprocess.run(
-        ['systemctl', 'show', 'plexamp', '-p', 'ExecStartPre', '--value'],
-        capture_output=True,
-        text=True,
-        timeout=_TIMEOUT,
-        check=False,
-    ).stdout
-    assert '$(seq 1 30)' in parsed, f'systemd did not receive the retry loop: {parsed}'
-
-
 def test_the_mdns_helper_the_unit_names_is_installed_and_executable():
     """`plexamp-mdns.service`'s `ExecStart` target is installed and executable.
 
-    `write_plexamp_mdns_helper` moved into the library with the units because
+    The helper is rendered by `render_plexamp_mdns_helper` alongside the units because
     `index._enable_source(PlexAmp)` runs `enable --now plexamp-mdns`, and a host carrying the unit but not
     its `ExecStart` target fails that step: the unit starts, `/usr/local/bin/plexamp-mdns.sh` is not there,
     systemd reports `status=203/EXEC`, and `plexamp.local` is never published.
@@ -344,7 +279,7 @@ def test_nqptps_stop_budget_is_a_drop_in_apt_cannot_replace():
     directly. Its unit file belongs to DietPi's `shairport-sync-airplay2` package, and apt replaces the
     files it owns, so a budget written into the unit would be lost at the next upgrade.
 
-    Both halves are asserted: the drop-in is where `write_streamer_units` writes it, and there is no
+    Both halves are asserted: the drop-in is where provisioning writes it, and there is no
     `/etc/systemd/system/nqptp.service` beside it. `test_index.py` asserts the value systemd ends up with;
     this asserts the file it comes from.
     """

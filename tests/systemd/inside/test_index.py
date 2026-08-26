@@ -73,8 +73,8 @@ GO_LIBRESPOT = '/usr/local/bin/go-librespot'
 STUBBORN_BACKEND = '/usr/local/bin/stubborn-backend'
 
 # `nqptp` is provisioned as a drop-in rather than as a unit, since the device gets the unit itself from
-# DietPi's `shairport-sync-airplay2` package, so `WRITTEN_UNITS`, which reads the writer's heredocs,
-# cannot see it. It is also the one unit whose stop an operator triggers directly, by toggling AirPlay
+# DietPi's `shairport-sync-airplay2` package, so `WRITTEN_UNITS`, sourced from `conf.STREAMER_UNITS`,
+# does not name it. It is also the one unit whose stop an operator triggers directly, by toggling AirPlay
 # off, so it is the one this module wedges.
 UNITS_UNDER_A_STOP_BUDGET = (*WRITTEN_UNITS, 'nqptp')
 
@@ -455,9 +455,9 @@ async def test_a_second_toggle_waits_for_the_first(page, notifications):
 def test_every_audera_unit_stops_within_the_seams_budget(unit: str):
     """No unit may take longer to stop than the seam that stops it is willing to wait.
 
-    `os/dietpi/lib/streamer.sh`'s `write_streamer_units` sets the budget and says why. The comparison is
-    against `system.TIMEOUT` rather than the literal five seconds, so changing the seam's budget moves
-    what this asserts.
+    `audera.cli.conf`'s unit renderers set the budget and say why. The comparison is against
+    `system.TIMEOUT` rather than the literal five seconds, so changing the seam's budget moves what this
+    asserts.
 
     `LoadState` first, because `systemctl show` answers for a unit that does not exist with empty values,
     and an empty `TimeoutStopUSec` is what a typo in the unit list looks like.

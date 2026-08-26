@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Audera</title>
+    <!-- Real brand tokens + fonts (url() in tokens.css resolves fonts/ relative to itself). -->
+    <link rel="stylesheet" href="brand/tokens.css">
+    <style>
+        /* Standalone hero page, built straight on the brand tokens — wider page,
+     warmer letter-style copy on the left, phone on the right, scrolls as copy
+     grows. No framework. */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html {
+            -webkit-text-size-adjust: 100%;
+        }
+
+        body {
+            margin: 0;
+            background: var(--paper);
+            color: var(--ink-2);
+            font-family: var(--font-sans);
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+        }
+
+        ::selection {
+            background: var(--accent-wash);
+            color: var(--ink);
+        }
+
+        a {
+            color: inherit;
+        }
+
+        /* ---- Page shell — widened from 1120 → 1240, less top whitespace ---- */
+        .hero {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 32px clamp(20px, 5vw, 48px) clamp(48px, 7vw, 96px);
+        }
+
+        /* ---- Bespoke light nav ---- */
+        .nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 8px 0 clamp(28px, 4vw, 48px);
+        }
+
+        .nav__mark {
+            font-family: var(--font-display);
+            font-style: italic;
+            font-variation-settings: 'opsz' 40, 'SOFT' 100, 'wght' 300;
+            font-size: 26px;
+            color: var(--ink-3);
+            letter-spacing: -0.01em;
+        }
+
+        .nav__links {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+        }
+
+        .nav__links a {
+            color: var(--ink-3);
+            font-size: 14px;
+            text-decoration: none;
+            transition: color var(--duration) var(--ease);
+        }
+
+        .nav__links a:hover {
+            color: var(--ink);
+        }
+
+        /* ---- Two-column row: copy left, phone right ---- */
+        .row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+            grid-template-areas:
+                "intro media"
+                "rest  media";
+            column-gap: clamp(32px, 4vw, 56px);
+            align-items: start;
+        }
+
+        .intro {
+            grid-area: intro;
+        }
+
+        .media {
+            grid-area: media;
+            align-self: center;
+        }
+
+        .rest {
+            grid-area: rest;
+        }
+
+        /* ---- Display headline — full Fraunces italic (split tagline dropped) ---- */
+        .tagline {
+            margin: 0 0 clamp(24px, 3vw, 34px);
+            font-family: var(--font-display);
+            font-style: italic;
+            font-variation-settings: 'opsz' 72, 'SOFT' 100, 'wght' 300;
+            color: var(--ink);
+            font-size: clamp(40px, 5.6vw, 60px);
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            max-width: 16ch;
+        }
+
+        /* ---- Body copy ---- */
+        .body {
+            font-size: 16px;
+            line-height: 1.75;
+            color: var(--ink-2);
+            font-weight: 300;
+            max-width: 52ch;
+            margin: 0 0 22px;
+        }
+
+        .body strong {
+            color: var(--ink);
+            font-weight: 600;
+        }
+
+        .body a {
+            color: var(--ink);
+            text-decoration: none;
+            border-bottom: 1px solid var(--rule-strong);
+            transition: border-color var(--duration) var(--ease);
+        }
+
+        .body a:hover {
+            border-bottom-color: var(--ink);
+        }
+
+        /* ---- Underline CTA ---- */
+        .cta-row {
+            margin-top: clamp(30px, 4vw, 40px);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 32px;
+        }
+
+        .cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--ink);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            padding: 10px 0;
+            text-decoration: none;
+            border-bottom: 1.5px solid var(--ink);
+            transition: box-shadow var(--duration) var(--ease);
+        }
+
+        .cta:hover {
+            box-shadow: inset 0 -2px 0 0 var(--ink);
+        }
+
+        /* ---- Phone screenshot ---- */
+        .media {
+            display: flex;
+            justify-content: center;
+            margin: 0;
+        }
+
+        .shot {
+            width: 100%;
+            max-width: 260px;
+            height: auto;
+            border-radius: var(--radius-media);
+            border: 1px solid var(--rule);
+            box-shadow: 0 28px 64px -24px rgba(0, 0, 0, 0.32);
+        }
+
+        /* ---- Mobile: single column, phone sits between the intro and the rest ---- */
+        @media screen and (max-width: 900px) {
+            .hero {
+                padding: 20px 20px clamp(40px, 8vw, 64px);
+            }
+
+            .nav__mark {
+                font-size: 21px;
+            }
+
+            .row {
+                grid-template-columns: minmax(0, 1fr);
+                grid-template-areas:
+                    "intro"
+                    "media"
+                    "rest";
+                row-gap: clamp(24px, 6vw, 36px);
+            }
+
+            .intro .tagline {
+                font-size: clamp(35px, 8.4vw, 48px);
+                max-width: none;
+                margin-bottom: 14px;
+            }
+
+            .body {
+                max-width: none;
+            }
+
+            .media {
+                align-self: auto;
+            }
+
+            /* Square crop of the top of the screenshot, faded to nothing at the bottom —
+       saves vertical space and hands the eye off to the copy below. The mask fades
+       the border with it, so drop the box-shadow (unmasked) to avoid a hard edge. */
+            .shot {
+                aspect-ratio: 1 / 1;
+                height: auto;
+                object-fit: cover;
+                object-position: top center;
+                border-radius: var(--radius-media);
+                box-shadow: none;
+                -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+                mask-image: linear-gradient(to bottom, #000 55%, transparent);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="hero">
+        <header class="nav">
+            <span class="nav__mark">Audera</span>
+            <nav class="nav__links">
+                <a
+                    href="https://github.com/Eleff-org/audera/blob/remove-fragility-and-complexity/docs/README.md">Docs</a>
+                <a href="https://github.com/Eleff-org/audera">GitHub ↗</a>
+            </nav>
+        </header>
+
+        <div class="row">
+            <div class="intro">
+                <h1 class="tagline">A new era of composable audio systems</h1>
+                <p class="body lead-line">We built <strong>Audera</strong> to listen to music in any room, from any
+                    source, on
+                    DIY-friendly components and speakers - <em>open-source plans coming soon</em>.</p>
+            </div>
+
+            <figure class="media">
+                <img class="shot" src="assets/players.png"
+                    alt="The Audera players screen on a phone: Office, Basement, Garage, and Living Room, all playing the same song in sync.">
+            </figure>
+
+            <div class="rest">
+                <p class="body"><strong>Audera</strong> leverages open standards
+                    (<a href="https://github.com/snapcast/snapcast">Snapcast</a>,
+                    <a href="https://github.com/HEnquist/camilladsp">CamillaDSP</a>) to provide
+                    DSP-corrected, multi-room, synchronized audio playback.
+                </p>
+
+                <p class="body">Unlike proprietary systems like Sonos, WiiM, Roon, Bluesound, or Bose,
+                    which may require cloud accounts and proprietary hardware, <strong>Audera</strong> is
+                    <strong>fully private</strong>, <strong>open-source</strong>, and runs on your <strong>own</strong>
+                    <a href="https://www.raspberrypi.com/products/">Raspberry Pi</a> hardware.
+                </p>
+
+                <div class="cta-row">
+                    <a class="cta"
+                        href="https://github.com/Eleff-org/audera/blob/remove-fragility-and-complexity/docs/getting-started.md">Get
+                        started →</a>
+                </div>
+            </div>
+        </div>
+    </main>
+</body>
+
+</html>

@@ -156,6 +156,36 @@ def has_supported_security_type(supported_security_types: Union[List[str], None]
     return False
 
 
+def _split_terse(line: str) -> List[str]:
+    r"""Splits an nmcli --terse line on unescaped ':', unescaping '\:' and '\\'.
+
+    `nmcli --terse` delimits fields with ':' and backslash-escapes any literal ':' or '\' inside a
+    field, so a naive `line.split(':')` mis-parses an SSID like `Cafe:Guest` (emitted as `Cafe\:Guest`).
+
+    Parameters
+    ----------
+    line: `str`
+        A single `nmcli --terse` output line.
+    """
+    fields: List[str] = []
+    current: List[str] = []
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == '\\' and i + 1 < len(line):
+            current.append(line[i + 1])
+            i += 2
+        elif ch == ':':
+            fields.append(''.join(current))
+            current = []
+            i += 1
+        else:
+            current.append(ch)
+            i += 1
+    fields.append(''.join(current))
+    return fields
+
+
 @platform.requires('dietpi')
 async def get_wifi_networks(interface: Literal['wlan0'] = 'wlan0') -> Dict[str, List[str]]:
     """Returns a dictionary of network SSIDs and their security types.
@@ -192,7 +222,7 @@ async def get_wifi_networks(interface: Literal['wlan0'] = 'wlan0') -> Dict[str, 
         for line in output.split('\n'):
             if not line:
                 continue
-            parts = line.split(':')
+            parts = _split_terse(line)
             ssid = parts[0].strip()
             security = parts[1].strip() if len(parts) > 1 else ''
             if ssid and ssid != '--':

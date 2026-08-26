@@ -56,27 +56,9 @@ _UNASSIGNED_MESSAGE = 'Snapserver has not said what this player is listening to.
 # What the chip reads for a flow that exists but raised when queried.
 _SETUP_REQUIRED = 'setup required'
 
-
-class _SetupFlow(NamedTuple):
-    """A `class` that represents a source's post-enable configuration flow.
-
-    Attributes
-    ----------
-    state: `Callable[[], str | None]`
-        The chip label while the flow is incomplete, or `None` once it is done. A label rather
-        than a `bool` so a flow can distinguish its own incomplete states without the tab learning
-        what they are.
-    build: `Callable[['Page', str | None], None]`
-        Renders the flow's panel on the source's card, given that same label.
-    """
-
-    state: Callable[[], str | None]
-    build: Callable[['Page', str | None], None]
-
-
-# Keyed on `SourceDefinition.setup`, the catalog's discriminator, so the card builder never learns
-# what `'plex_claim'` means.
-_SETUP_FLOWS: dict[str, _SetupFlow] = {'plex_claim': _SetupFlow(_plex.setup_state, _plex.build_setup_panel)}
+# The catalog's only post-enable configuration flow, keyed on `SourceDefinition.setup`. Inlined
+# rather than tabled: one discriminator, one pair of `_plex` handlers.
+_SETUP_FLOW = 'plex_claim'
 
 
 def _close_dialog(page: 'Page') -> None:
@@ -301,13 +283,12 @@ def _setup_state(source: SourceDefinition) -> str | None:
         # reprovision stops the source's units, which makes every live probe report the setup as
         # undone. The record is discarded when the source is disabled.
         return None
-    flow = _SETUP_FLOWS.get(source.setup)
-    if flow is None:
+    if source.setup != _SETUP_FLOW:
         # Fail open: this build has no flow for the discriminator, so the card shows the stream's
         # real status rather than staying in `setup required`.
         return None
     try:
-        return flow.state()
+        return _plex.setup_state()
     except Exception:
         # Fail closed: a flow that raised reports nothing about whether it is done.
         return _SETUP_REQUIRED
@@ -389,10 +370,8 @@ def _build_source_card(
 
         ui.label(source.description).classes('text-sm text-gray-500')
 
-        if is_enabled and source.setup:
-            flow = _SETUP_FLOWS.get(source.setup)
-            if flow is not None:
-                flow.build(page, pending)
+        if is_enabled and source.setup == _SETUP_FLOW:
+            _plex.build_setup_panel(page, pending)
 
     async def _on_change(e) -> None:
         # The claim-in-flight refusal below reverts the switch, which re-enters here; a change back

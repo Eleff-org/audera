@@ -1,7 +1,10 @@
+import os
 import time
 from pathlib import Path
 
 import pytest
+
+from tests.helpers import raise_with_logs
 
 pytest_plugins = ['nicegui.testing.user_plugin']
 
@@ -19,10 +22,7 @@ def _wait_for_http(container, internal_port: int, path: str = '/', timeout: floa
             return
         except Exception:
             time.sleep(1)
-    stdout, stderr = container.get_logs()
-    raise TimeoutError(
-        f'HTTP {url} not ready after {timeout}s.\nstdout: {stdout.decode()[-2000:]}\nstderr: {stderr.decode()[-2000:]}'
-    )
+    raise_with_logs(container, f'HTTP {url} not ready after {timeout}s.', timeout)
 
 
 def _wait_for_client(host: str, port: int, timeout: float = 90) -> None:
@@ -53,6 +53,29 @@ def audera_home(tmp_path, monkeypatch):
         (tmp_path / subdir).mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(module + '.PATH', dest)
     return tmp_path
+
+
+@pytest.fixture
+def audera_home_process(tmp_path, monkeypatch):
+    """Isolates `~/.audera` for a child process, returning `(home, env)`.
+
+    A child resolves `~/.audera` from its environment, not from `audera_home`'s monkeypatched module
+    attribute, which reaches this process only. `audera/dal/path.py` computes `HOME` from
+    `expanduser('~')` at import, and `ntpath.expanduser` reads `USERPROFILE` then `HOMEDRIVE` +
+    `HOMEPATH`, never `HOME`; so isolating the home takes `HOME`/`USERPROFILE` set and
+    `HOMEDRIVE`/`HOMEPATH` popped. `sources_dal.PATH` is pointed at the same directory the child
+    resolves so a test can seed that home in-process and have the child read it.
+    """
+    from audera.dal import sources as sources_dal
+
+    home = tmp_path / 'home'
+    (home / '.audera').mkdir(parents=True)
+    monkeypatch.setattr(sources_dal, 'PATH', str(home / '.audera'))
+
+    env = {**os.environ, 'HOME': str(home), 'USERPROFILE': str(home)}
+    env.pop('HOMEDRIVE', None)
+    env.pop('HOMEPATH', None)
+    return home, env
 
 
 @pytest.fixture(scope='session')
@@ -131,12 +154,7 @@ def _wait_for_websocket(container, internal_port: int, timeout: float = 60) -> N
                 return
         except Exception:
             time.sleep(1)
-    try:
-        stdout, stderr = container.get_logs()
-        log_text = f'\nstdout: {stdout.decode()[-2000:]}\nstderr: {stderr.decode()[-2000:]}'
-    except Exception:
-        log_text = ' (container logs unavailable)'
-    raise TimeoutError(f'WebSocket {url} not ready after {timeout}s.{log_text}')
+    raise_with_logs(container, f'WebSocket {url} not ready after {timeout}s.', timeout)
 
 
 @pytest.fixture(scope='session')

@@ -1,4 +1,4 @@
-# Provisioning an Audera Device
+# Provisioning
 
 `os/dietpi/setup/provision.sh` provisions a streamer or player over SSH by fetching and running the appropriate `setup.sh` from a given Git branch.
 

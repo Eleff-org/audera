@@ -12,6 +12,11 @@ fi
 
 AUDIO_DEVICE="$2"
 
+# Whether to reboot at the end (default 1). provision.sh passes 0 for --no-reboot / --wipe-networks
+#   so the operator can inspect the device; an explicit argument rather than provision.sh editing
+#   these lines out of this script by regex.
+REBOOT="${3:-1}"
+
 # Fetch and load shared config-injection helpers
 curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
 source /tmp/audera_config_lib.sh
@@ -29,7 +34,6 @@ GIT_REPO_URL="https://github.com/Eleff-org/audera.git"
 CAMILLADSP_VERSION="3.0.1"
 CAMILLADSP_CONFIG_DIR="/etc/camilladsp"
 CAMILLADSP_CONFIG="$CAMILLADSP_CONFIG_DIR/config.yml"
-CAMILLADSP_STATEFILE="$CAMILLADSP_CONFIG_DIR/state.yml"
 
 SNAPSERVER_CONFIG="/etc/snapserver.conf"
 SNAPSERVER_HOME="/var/lib/snapserver"
@@ -235,16 +239,39 @@ chmod 644 "$CAMILLADSP_CONFIG"
 echo -e "[  ${GREEN}OK${RESET}  ] CamillaDSP configured successfully"
 
 # Create plexamp-mdns helper
+#   The helper `plexamp-mdns.service` runs to publish `plexamp.local`. Installed before the units so
+#   `activate_streamer_units`' `enable --now plexamp-mdns` finds its ExecStart target present.
 echo
 echo ">>> Creating plexamp-mdns helper"
-write_plexamp_mdns_helper
+audera streamer conf plexamp-mdns.sh > /usr/local/bin/plexamp-mdns.sh
+chmod +x /usr/local/bin/plexamp-mdns.sh
 echo -e "[  ${GREEN}OK${RESET}  ] plexamp-mdns helper created"
 
+# Pre-configure the PlexAmp audio device to route through the snapfifo pipe
+#   The uuid is `S` + `render_asound`'s pcm name; the CLI renders it with no trailing newline, exactly
+#   as PlexAmp stores it. The data directories PlexAmp expects are created first.
+echo
+echo ">>> Configuring the PlexAmp audio device"
+mkdir -p /root/.local/share/Plexamp/Offline
+mkdir -p /root/.local/share/Plexamp/Settings
+mkdir -p /root/.cache/Plexamp/log
+audera streamer conf plexamp-audio-uuid > "/root/.local/share/Plexamp/Settings/%40Plexamp%3Asettings%3AaudioDeviceUuid"
+echo -e "[  ${GREEN}OK${RESET}  ] PlexAmp audio device configured"
+
 # Install systemd service units
+#   Each unit is rendered by the CLI and redirected into place; a render that exits non-zero leaves a
+#   zero-byte unit, and `set -e` aborts the flash before `activate_streamer_units` runs `systemctl`.
+#   `nqptp`'s stop budget is a drop-in because apt owns `nqptp.service` (DietPi's shairport-sync-airplay2).
 echo
 echo ">>> Installing systemd service units"
-
-write_streamer_units "$SNAPSERVER_HOME" "$SNAPSERVER_CONFIG" "$CAMILLADSP_CONFIG" "$CAMILLADSP_STATEFILE"
+audera streamer conf snapserver.service      > /etc/systemd/system/snapserver.service
+audera streamer conf snapclient.service      > /etc/systemd/system/snapclient.service
+audera streamer conf camilladsp.service      > /etc/systemd/system/camilladsp.service
+audera streamer conf plexamp.service         > /etc/systemd/system/plexamp.service
+audera streamer conf plexamp-mdns.service    > /etc/systemd/system/plexamp-mdns.service
+audera streamer conf audera-streamer.service > /etc/systemd/system/audera-streamer.service
+mkdir -p /etc/systemd/system/nqptp.service.d
+audera streamer conf nqptp-timeout.conf      > /etc/systemd/system/nqptp.service.d/timeout.conf
 activate_streamer_units
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
@@ -297,41 +324,7 @@ echo -e "[  ${GREEN}OK${RESET}  ] TLS certificate generated"
 # Configure nginx reverse proxy
 echo
 echo ">>> Configuring nginx"
-cat > /etc/nginx/sites-available/audera.local <<'EOF'
-server {
-    listen 443 ssl;
-    server_name audera.local;
-
-    ssl_certificate     /etc/ssl/certs/audera.local.crt;
-    ssl_certificate_key /etc/ssl/private/audera.local.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:80;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-
-server {
-    listen 443 ssl;
-    server_name plexamp.local;
-
-    ssl_certificate     /etc/ssl/certs/audera.local.crt;
-    ssl_certificate_key /etc/ssl/private/audera.local.key;
-
-    location / {
-        proxy_pass http://127.0.0.1:32500;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-EOF
+audera streamer conf nginx-site > /etc/nginx/sites-available/audera.local
 ln -sf /etc/nginx/sites-available/audera.local /etc/nginx/sites-enabled/audera.local
 rm -f /etc/nginx/sites-enabled/default
 systemctl enable nginx
@@ -362,7 +355,9 @@ echo
 echo -e "[  ${GREEN}OK${RESET}  ] The Audera streamer setup & installation completed successfully"
 
 # Restart
-echo
-echo ">>> Restarting the Audera streamer in 5 [sec.] ..."
-sleep 5
-reboot
+if [[ "${REBOOT:-1}" == "1" ]]; then
+    echo
+    echo ">>> Restarting the Audera streamer in 5 [sec.] ..."
+    sleep 5
+    reboot
+fi

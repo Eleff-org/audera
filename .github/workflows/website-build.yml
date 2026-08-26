@@ -3,9 +3,9 @@ name: Website build check
 on:
   push:
     branches: [main]
-    paths: ['brand/**', 'website/**', 'docs/dev/**']
+    paths: ['brand/**', 'website/**']
   pull_request:
-    paths: ['brand/**', 'website/**', 'docs/dev/**']
+    paths: ['brand/**', 'website/**']
 
 jobs:
   build:
@@ -26,21 +26,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install site dependencies
-        run: uv sync --group site --frozen
+      - name: Build site
+        run: uv run --no-project python website/build.py
 
-      - name: Copy brand assets
-        run: |
-          cp brand/tokens.css website/docs/stylesheets/brand.css
-          mkdir -p website/docs/stylesheets/fonts
-          cp brand/fonts/*.woff2 website/docs/stylesheets/fonts/
-
-      - name: Copy developer docs
-        run: |
-          mkdir -p website/docs/developer
-          cp docs/dev/DEVELOPMENT.md website/docs/developer/development.md
-          cp docs/dev/PROVISION.md website/docs/developer/provisioning.md
-          cp docs/dev/CLI.md website/docs/developer/cli.md
-
-      - name: Build website
-        run: cd website && uv run zensical build
+      - name: Verify site
+        run: uv run --no-project python website/verify.py

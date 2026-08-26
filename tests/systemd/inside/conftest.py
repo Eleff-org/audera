@@ -16,7 +16,6 @@ which is not guaranteed identically across them.
 
 import contextlib
 import os
-import re
 import subprocess
 import threading
 import time
@@ -33,6 +32,7 @@ from audera.models.player import Group, Player
 from audera.ui.streamer import commands
 from audera.ui.streamer.pages import index
 from audera.ui.streamer.pages._clients import _load_settings
+from tests.helpers import poll_until
 
 # The properties `unit_state` reads, as one `systemctl show` call. Named explicitly rather than
 # taking the full property dump, which is around two hundred lines per unit.
@@ -63,57 +63,26 @@ _PROPERTIES = (
 # before the driver's own `docker exec` gives up.
 _TIMEOUT: float = 15
 
-# The four values `os/dietpi/streamer/automation/setup.sh` passes `write_streamer_units`, and the
-# two directories it creates before calling it. Restated here because nothing else in this image sets
-# them, and asserted against the script itself by `tests/systemd/inside/test_provisioning.py`.
+# The paths `provision()` renders into, matching what `os/dietpi/streamer/automation/setup.sh`
+# redirects the CLI into. Restated here because nothing else in this image sets them.
 #
-# `COMMON_SH` and `STREAMER_SH` are public because the modules read the files too.
-COMMON_SH = '/app/os/dietpi/lib/common.sh'
+# `STREAMER_SH` is public because `provision()` sources it for `activate_streamer_units`, the one
+# shell function left after the unit writers moved into `audera streamer conf`.
 STREAMER_SH = '/app/os/dietpi/lib/streamer.sh'
 SNAPSERVER_HOME = '/var/lib/snapserver'
 GO_LIBRESPOT_CONFIG_DIR = f'{SNAPSERVER_HOME}/.config/go-librespot'
 CAMILLADSP_CONFIG_DIR = '/etc/camilladsp'
 CAMILLADSP_CONFIG = f'{CAMILLADSP_CONFIG_DIR}/config.yml'
-CAMILLADSP_STATEFILE = f'{CAMILLADSP_CONFIG_DIR}/state.yml'
 
 # The real snapclient, which the image moves off `/usr/bin/snapclient` so that the path
 # `snapclient.service` names keeps the idle stub. Only `listening_player` runs it.
 SNAPCLIENT = '/usr/local/bin/snapclient-real'
 
-# Every unit provisioning installs, read out of the writers rather than listed. The heredocs in these
-# two files are the only description of a provisioned device's unit set, so a unit added there is
-# covered without a test file having to be updated. `test_index.py` parameterizes a stop budget over
-# it and `test_provisioning.py` removes and then re-asserts it, so it lives here rather than in either.
-#
-# `common.sh` writes `camilladsp.service`, which the player installs too; `streamer.sh` writes the other
-# five. The order across the two decides only the order of the parameterized ids below, since every
-# consumer of `WRITTEN_UNITS` tests membership or sorts first.
-_UNIT_WRITERS = (COMMON_SH, STREAMER_SH)
-
-# The trailing ` <<` matches a heredoc write and nothing else, which keeps the `nqptp` drop-in
-# (`cat > /etc/systemd/system/nqptp.service.d/timeout.conf`) from also matching as a unit.
-_UNIT_WRITE = re.compile(r'cat > /etc/systemd/system/(\S+)\.service <<')
-
-
-def _written_units(path: str) -> tuple[str, ...]:
-    """Returns the units one library file installs, and refuses to return none.
-
-    Per file rather than over the union, since the union is non-empty as soon as either file matches:
-    a check on it would have passed the day `streamer.sh` was split out of `common.sh` with the
-    derivation still pointed at `common.sh` alone, leaving five of six units unasserted.
-    """
-    units = tuple(_UNIT_WRITE.findall(Path(path).read_text(encoding='utf-8')))
-    if not units:
-        raise RuntimeError(f'no unit writes matched in {path}, so every derivation from it would silently cover nothing')
-    return units
-
-
-WRITTEN_UNITS = tuple(unit for path in _UNIT_WRITERS for unit in _written_units(path))
-
-# A unit written by both files has two descriptions, and the parameterizations below would run it
-# twice and pass. That is what an extraction copied rather than moved looks like.
-if len(set(WRITTEN_UNITS)) != len(WRITTEN_UNITS):
-    raise RuntimeError(f'a unit is written by more than one library file, so it has two descriptions: {WRITTEN_UNITS}')
+# Every unit provisioning installs, on its on-disk file name. Sourced from `conf.STREAMER_UNITS`, the
+# Python single source of truth the device redirects into place, so a unit added to the streamer's
+# renderers is covered here without a test file having to be updated. `test_index.py` parameterizes a
+# stop budget over it and `test_provisioning.py` removes and then re-asserts it, so it lives here.
+WRITTEN_UNITS = conf.STREAMER_UNITS
 
 # Provisioning installs six units, enables five and starts five, each a round trip to the manager.
 # Generous, because the failure this bounds is a wedged `systemctl`.
@@ -166,12 +135,7 @@ def await_unit_state(unit: str, active_state: str, timeout: float = 2) -> dict[s
     rather than a timeout. The budget is short because every caller is racing the start limit's
     trailing interval, so a wrong state has to fail before that window closes.
     """
-    deadline = time.monotonic() + timeout
-    while True:
-        state = unit_state(unit)
-        if state.get('ActiveState') == active_state or time.monotonic() >= deadline:
-            return state
-        time.sleep(0.05)
+    return poll_until(lambda: unit_state(unit), lambda state: state.get('ActiveState') == active_state, timeout, 0.05)
 
 
 def pids_for(pattern: str) -> dict[int, str]:
@@ -201,12 +165,7 @@ def await_pids(pattern: str, timeout: float = 5) -> dict[int, str]:
     process to die before completing the job, and polling `still_alive` after a stop would hide the
     leak it exists to find.
     """
-    deadline = time.monotonic() + timeout
-    while True:
-        pids = pids_for(pattern)
-        if pids or time.monotonic() >= deadline:
-            return pids
-        time.sleep(0.05)
+    return poll_until(lambda: pids_for(pattern), bool, timeout, 0.05)
 
 
 def still_alive(before: dict[int, str]) -> dict[int, str]:
@@ -256,12 +215,7 @@ def await_no_new_zombies(before: list[str], timeout: float = 5) -> list[str]:
     `os/dietpi/AGENTS.md` records snapserver re-forking a failed backend around ten times a second and
     reaping none of them, so the set is never empty and never the same twice.
     """
-    deadline = time.monotonic() + timeout
-    while True:
-        new = [row for row in zombies_for() if row not in before]
-        if not new or time.monotonic() >= deadline:
-            return new
-        time.sleep(0.05)
+    return poll_until(lambda: [row for row in zombies_for() if row not in before], lambda new: not new, timeout, 0.05)
 
 
 def ppid_of(pid: int) -> int:
@@ -312,19 +266,10 @@ def await_process_tree(pid: int, timeout: float = 5) -> dict[int, str]:
     a moment and its payload a moment later. Snapshotting the tree of one and then asserting nothing
     survived the stop would say nothing about the process that matters.
 
-    Settles on two consecutive identical reads rather than counting, which needs no per-unit expected
-    size and is immediate for a unit that forks nothing.
+    Settles on two consecutive identical reads (`poll_until`'s `stable=2`) rather than counting, which
+    needs no per-unit expected size and is immediate for a unit that forks nothing.
     """
-    deadline = time.monotonic() + timeout
-    previous: dict[int, str] = {}
-    while True:
-        tree = process_tree(pid)
-        if tree and tree.keys() == previous.keys():
-            return tree
-        if time.monotonic() >= deadline:
-            return tree
-        previous = tree
-        time.sleep(0.05)
+    return poll_until(lambda: process_tree(pid), bool, timeout, 0.05, stable=2)
 
 
 def stream_status() -> dict[str, str]:
@@ -342,12 +287,7 @@ def stream_status() -> dict[str, str]:
 
 def await_stream_status(timeout: float = _SNAPSERVER_TIMEOUT) -> dict[str, str]:
     """Polls `stream_status` until Snapserver answers, returning an empty dict if the deadline passes."""
-    deadline = time.monotonic() + timeout
-    while True:
-        status = stream_status()
-        if status or time.monotonic() >= deadline:
-            return status
-        time.sleep(0.25)
+    return poll_until(stream_status, bool, timeout, 0.25)
 
 
 def groups() -> list[Group]:
@@ -443,27 +383,22 @@ def sampling_main_pid(unit: str, interval: float = 0.01) -> Iterator[list[int]]:
 def provision(home: str | None = None) -> None:
     """Brings the container to the state a freshly flashed streamer boots in.
 
-    The image ships no Audera unit file, so everything the modules here assert on is installed by the
-    device's own `os/dietpi/lib/streamer.sh`, invoked with the arguments
-    `os/dietpi/streamer/automation/setup.sh` passes it.
+    The image ships no Audera unit file, so everything the modules here assert on is rendered here the
+    way `os/dietpi/streamer/automation/setup.sh` renders it: every config file, unit file, mDNS helper,
+    the `nqptp` drop-in, and PlexAmp's `audioDeviceUuid` come from `audera.cli.conf`, which is the
+    device's single source of truth (the device redirects `audera streamer conf <name>` into the same
+    paths). The Snapserver configuration is rendered from `get_enabled()`, as the CLI renders it.
 
-    `common.sh` is sourced alongside it, as `setup.sh` sources both: `write_streamer_units` calls its
-    `write_camilladsp_service`, which the player's setup calls too.
-
-    Three things happen in Python instead, since on the device they are `audera streamer conf`
-    redirects rather than shell functions: the two configuration directories, the rendered
-    `snapserver.conf`, and the rendered go-librespot and CamillaDSP configurations. The Snapserver
-    configuration is rendered from `get_enabled()`, as the CLI the device redirects renders it.
+    Writing the artifacts in Python rather than shelling `audera streamer conf` per file keeps this
+    fast and reads the renderers directly; the bytes are identical either way, and the CLI's own
+    render-and-redirect is covered by `tests/cli`. Only `activate_streamer_units` is left to the shell,
+    because it orchestrates `systemctl` rather than writing a file, and it is sourced from
+    `streamer.sh` and invoked as a bare command, as `setup.sh` invokes it.
 
     Nothing writes `sources.json`, matching the device's behaviour: `get_enabled()` degrades an absent
     file to `DEFAULT_ENABLED`, which keeps the enabled set and the conf in agreement with no file to
     seed. A test that toggles a source creates the file itself, under the `audera_home` the fixture
     points the data-access layer at.
-
-    The three shell functions are invoked as bare commands, as `setup.sh` invokes them. `set -e` is
-    suppressed inside a function called in condition context, so wrapping one in
-    `if write_streamer_units; then` would stop this script failing on a failure that would not stop
-    `setup.sh` either.
 
     Parameters
     ----------
@@ -480,17 +415,37 @@ def provision(home: str | None = None) -> None:
     Path(GO_LIBRESPOT_CONFIG_DIR, 'config.yml').write_text(conf.render_go_librespot(), encoding='utf-8')
     Path(CAMILLADSP_CONFIG).write_text(conf.render_camilladsp(), encoding='utf-8')
 
+    # The streamer's unit files, on the on-disk names `WRITTEN_UNITS` enumerates. Each is rendered by
+    # the same function the CLI dispatches to, so a divergence between the two would fail `tests/cli`.
+    Path('/etc/systemd/system/snapserver.service').write_text(conf.render_snapserver_service(), encoding='utf-8')
+    Path('/etc/systemd/system/snapclient.service').write_text(conf.render_snapclient_service('streamer'), encoding='utf-8')
+    Path('/etc/systemd/system/camilladsp.service').write_text(conf.render_camilladsp_service(), encoding='utf-8')
+    Path('/etc/systemd/system/plexamp.service').write_text(conf.render_plexamp_service(), encoding='utf-8')
+    Path('/etc/systemd/system/plexamp-mdns.service').write_text(conf.render_plexamp_mdns_service(), encoding='utf-8')
+    Path('/etc/systemd/system/audera-streamer.service').write_text(conf.render_audera_streamer_service(), encoding='utf-8')
+
+    # The mDNS helper the unit names, executable so `enable --now plexamp-mdns` does not fail 203/EXEC.
+    helper = Path('/usr/local/bin/plexamp-mdns.sh')
+    helper.write_text(conf.render_plexamp_mdns_helper(), encoding='utf-8')
+    helper.chmod(0o755)
+
+    # The `nqptp` stop-budget drop-in: apt owns `nqptp.service`, so its budget is a drop-in beside it.
+    os.makedirs('/etc/systemd/system/nqptp.service.d', exist_ok=True)
+    Path('/etc/systemd/system/nqptp.service.d/timeout.conf').write_text(conf.render_nqptp_timeout(), encoding='utf-8')
+
+    # PlexAmp's audio-device id, `S` + `render_asound`'s pcm, with no trailing newline as PlexAmp stores it.
+    for directory in ('Offline', 'Settings'):
+        os.makedirs(f'/root/.local/share/Plexamp/{directory}', exist_ok=True)
+    os.makedirs('/root/.cache/Plexamp/log', exist_ok=True)
+    Path('/root/.local/share/Plexamp/Settings/%40Plexamp%3Asettings%3AaudioDeviceUuid').write_text(
+        conf.render_plexamp_audio_uuid(), encoding='utf-8'
+    )
+
     subprocess.run(
         [
             '/bin/bash',
             '-c',
-            f'set -e\n'
-            f'source {COMMON_SH}\n'
-            f'source {STREAMER_SH}\n'
-            f'write_plexamp_mdns_helper\n'
-            f'write_streamer_units {SNAPSERVER_HOME} {conf.SNAPSERVER_CONF} '
-            f'{CAMILLADSP_CONFIG} {CAMILLADSP_STATEFILE}\n'
-            f'activate_streamer_units\n',
+            f'set -e\nsource {STREAMER_SH}\nactivate_streamer_units\n',
         ],
         capture_output=True,
         text=True,
@@ -552,16 +507,19 @@ def listening_player(provisioned) -> Iterator[str]:
 
     `--player stdout` rather than `file`, matching `tests/docker/snapserver/entrypoint.sh`.
     """
+
+    def _no_client(connected: list[Group]) -> list[Group]:
+        raise RuntimeError(f'no snapclient reached Snapserver within {_SNAPSERVER_TIMEOUT}s: {stream_status()}')
+
     process = subprocess.Popen([SNAPCLIENT, '--host', '127.0.0.1', '--player', 'stdout'], stdout=subprocess.DEVNULL)
     try:
-        deadline = time.monotonic() + _SNAPSERVER_TIMEOUT
-        while True:
-            connected = [group for group in groups() if group.client_ids]
-            if connected:
-                break
-            if time.monotonic() >= deadline:
-                raise RuntimeError(f'no snapclient reached Snapserver within {_SNAPSERVER_TIMEOUT}s: {stream_status()}')
-            time.sleep(0.25)
+        connected = poll_until(
+            lambda: [group for group in groups() if group.client_ids],
+            bool,
+            _SNAPSERVER_TIMEOUT,
+            0.25,
+            on_timeout=_no_client,
+        )
         yield connected[0].id
     finally:
         process.terminate()

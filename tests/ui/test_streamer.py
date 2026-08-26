@@ -113,8 +113,15 @@ def _drag_slider(slider: ui.slider, value: int) -> None:
     is the event the volume controls use for persistence (so a broker push cannot echo back). This
     helper fires the right event for tests that assert on persistence.
     """
+    # Select the app's persistence listener over NiceGUI's own built-in value-sync handler. Both sit
+    # on `update:modelValue`; the built-in is a closure defined inside NiceGUI's `ValueElement`,
+    # while the app handler lives in the `audera` package. Discriminate by the handler's defining
+    # module rather than its literal name, so an internal rename of NiceGUI's handler cannot silently
+    # break the match.
     for listener in slider._event_listeners.values():
-        if listener.type == 'update:modelValue' and getattr(listener.handler, '__name__', '') != 'handle_change':
+        if listener.type != 'update:modelValue':
+            continue
+        if not (getattr(listener.handler, '__module__', '') or '').startswith('nicegui'):
             slider._handle_event({'listener_id': listener.id, 'args': value})
             return
     raise AssertionError('no update:model-value listener found on slider')
@@ -617,6 +624,15 @@ def _elements(user: User, **kwargs) -> list:
     return sorted(found, key=lambda element: element.id)
 
 
+def _entity_markers(user: User, marker: str, prefix: str) -> list[str]:
+    """Per-entity markers for elements carrying `marker`, in render order.
+
+    Resolves each element's entity marker by `prefix` rather than a positional `_markers[1]`, so
+    the assertion doesn't depend on how many markers NiceGUI attaches or in what order.
+    """
+    return [next(m for m in element._markers if m.startswith(prefix)) for element in _elements(user, marker=marker)]
+
+
 def _only(user: User, kind: type[_ElementT], marker: str) -> _ElementT:
     """Returns the one element of `kind` carrying `marker`.
 
@@ -641,7 +657,7 @@ async def test_sources_tab_renders_a_card_per_catalog_entry(audera_home, mock_sn
         await user.should_see(source.label)
         await user.should_see(source.description)
     # Render order is catalog order, which puts AirPlay, the bootstrap source, first.
-    assert [card._markers[1] for card in _elements(user, marker='source-card')] == [
+    assert _entity_markers(user, marker='source-card', prefix='source-card-') == [
         f'source-card-{source.id}' for source in CATALOG
     ]
 
@@ -1097,9 +1113,10 @@ async def test_sources_tab_enable_waits_for_snapserver_before_repainting_the_chi
     await user.open('/')
     user.find('Sources').click()
 
-    # The readiness wait uses a direct SnapserverClient.get_stream_status call, which shares
-    # the mock_stream_status dict. Simulate Snapserver coming up after a restart by clearing
-    # the dict on restart, then populating it after a delay (the wait loop's _READY_INTERVAL).
+    # The readiness wait polls SnapserverClient.get_stream_status until it is non-empty. Model
+    # Snapserver still coming up after a restart on that probe — the operation the loop actually
+    # polls — rather than on the wait primitive: refuse (empty) twice, then serve. This holds
+    # whether the loop sleeps via time.sleep, asyncio.sleep, or a monotonic spin.
     stub = system.systemctl
     state = {'refusals': 0}
 
@@ -1109,17 +1126,18 @@ async def test_sources_tab_enable_waits_for_snapserver_before_repainting_the_chi
             state['refusals'] = 2
         return stub(*args, check=check)
 
-    original_sleep = time.sleep
+    original_get_stream_status = SnapserverClient.get_stream_status
 
-    def _counted_sleep(seconds: float) -> None:
-        original_sleep(seconds)
+    def _refusing_get_stream_status(self) -> dict[str, str]:
         if state['refusals'] > 0:
             state['refusals'] -= 1
-        if state['refusals'] == 0 and not mock_stream_status:
-            mock_stream_status.update({'AirPlay': 'idle', 'Spotify': 'playing'})
+            if state['refusals'] == 0:
+                mock_stream_status.update({'AirPlay': 'idle', 'Spotify': 'playing'})
+            return {}
+        return original_get_stream_status(self)
 
     monkeypatch.setattr(system, 'systemctl', _systemctl)
-    monkeypatch.setattr(time, 'sleep', _counted_sleep)
+    monkeypatch.setattr(SnapserverClient, 'get_stream_status', _refusing_get_stream_status)
 
     user.find(marker='source-toggle-Spotify').click()
     await user.should_see('Spotify Connect enabled')
@@ -1432,7 +1450,7 @@ async def test_players_tab_defaults_to_the_by_player_grouping(
 async def test_players_tab_card_is_addressable_per_client(audera_home, mock_snapserver_two_players, mock_camilladsp, user: User):
     Page().load()
     await user.open('/')
-    assert [card._markers[1] for card in _elements(user, marker='player-card')] == ['player-card-abc123', 'player-card-def456']
+    assert _entity_markers(user, marker='player-card', prefix='player-card-') == ['player-card-abc123', 'player-card-def456']
 
 
 async def test_players_tab_chip_shows_the_current_stream(
@@ -1693,7 +1711,7 @@ async def test_players_tab_failed_move_notifies_and_refreshes(
 
 def _headers(user: User) -> list[str]:
     """Returns the by-stream section headers' per-stream markers, in render order."""
-    return [label._markers[1] for label in _elements(user, marker='stream-header')]
+    return _entity_markers(user, marker='stream-header', prefix='stream-header-')
 
 
 @pytest.mark.parametrize(
@@ -1883,7 +1901,7 @@ async def test_players_tab_by_stream_lists_every_connected_player_once(
     await user.open('/')
     # `_sections`' `setdefault` is what makes this hold: a group parked outside the enabled set
     # gets its own section rather than the player disappearing from the tab.
-    assert [card._markers[1] for card in _elements(user, marker='player-card')] == ['player-card-abc123']
+    assert _entity_markers(user, marker='player-card', prefix='player-card-') == ['player-card-abc123']
     assert _headers(user) == ['stream-header-AirPlay', 'stream-header-Ghost']
 
 
@@ -2056,17 +2074,18 @@ async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, u
     """Page.load() followed by apply_defaults() must not set core.script_mode=True.
 
     In production Client.instances is empty when run() executes.  If apply_defaults()
-    calls ui.colors() (a NiceGUI Element), NiceGUI activates script_mode and
-    ui.run() raises: RuntimeError: ui.page cannot be used in NiceGUI scripts when
-    UI is defined in the global scope.
+    created a NiceGUI Element (e.g. ui.colors()), NiceGUI would activate script_mode and
+    ui.run() would raise: RuntimeError: ui.page cannot be used in NiceGUI scripts when
+    UI is defined in the global scope. apply_defaults() only registers static files and
+    sets Quasar's slots via CSS, so it must stay element-free.
     """
     monkeypatch.setattr(streamer_plex, '_plexamp_state', lambda: 'inactive')
     Page().load()
     Client.instances.clear()  # replicate production: no pre-existing clients
     components.theme.apply_defaults()
     assert not core.script_mode, (
-        'apply_defaults() triggered script_mode via ui.colors(). '
-        'Use app.colors() for application-wide theming instead of ui.colors().'
+        'apply_defaults() triggered script_mode by creating a NiceGUI Element. '
+        'Keep it to app-level calls (app.add_static_files) and CSS.'
     )
 
 

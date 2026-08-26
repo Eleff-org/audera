@@ -97,7 +97,34 @@ def test_checked_wrapper_translates_a_missing_binary_to_unreachable(monkeypatch,
         getattr(netifaces, name)(*args)
 
 
-def test_delete_interface_is_best_effort(monkeypatch):
+def test_split_terse_unescapes_colons_and_backslashes():
+    """The terse splitter honors nmcli's `\\:` and `\\\\` escaping."""
+    assert netifaces._split_terse(r'Cafe\:Guest:WPA2') == ['Cafe:Guest', 'WPA2']
+    assert netifaces._split_terse(r'Plain:WPA1 WPA2') == ['Plain', 'WPA1 WPA2']
+    assert netifaces._split_terse(r'Back\\slash:') == ['Back\\slash', '']
+
+
+async def test_get_wifi_networks_parses_escaped_colon_ssid(monkeypatch):
+    """An SSID with a literal colon (emitted as `Cafe\\:Guest`) parses to `Cafe:Guest` with its security."""
+    monkeypatch.setattr(platform, 'NAME', 'dietpi')
+
+    stdout = 'Cafe\\:Guest:WPA2\nOpenNet:\n'.encode()
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return stdout, b''
+
+    async def _create(*args, **kwargs):
+        return _Proc()
+
+    monkeypatch.setattr(netifaces.asyncio, 'create_subprocess_exec', _create)
+
+    networks = await netifaces.get_wifi_networks()
+
+    assert networks['Cafe:Guest'] == ['WPA2']
+    assert networks['OpenNet'] == []
     """`delete_interface` does not raise when the interface is missing."""
     monkeypatch.setattr(platform, 'NAME', 'dietpi')
     calls = []

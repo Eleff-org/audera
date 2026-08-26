@@ -1,4 +1,5 @@
 import re
+import xml.etree.ElementTree
 from pathlib import Path
 
 import respx
@@ -19,12 +20,21 @@ _TIMELINE_IDLE = (_FIXTURES / 'timeline_idle.xml').read_text()
 @respx.mock
 def test_get_now_playing_active():
     respx.get(re.compile(r'.*/player/timeline/poll.*')).mock(return_value=Response(200, text=_TIMELINE_ACTIVE))
+    # Derive expectations from the fixture so a regenerated `timeline_active.xml` (see
+    # tests/fixtures/plexamp/README.md) doesn't require hand-editing pinned literals; the
+    # assertions still catch a client transform bug (wrong field mapping, dropped em-dash).
+    root = xml.etree.ElementTree.fromstring(_TIMELINE_ACTIVE)
+    timeline = root.find('./Timeline[@type="music"]')
+    assert timeline is not None, 'fixture is missing its music <Timeline>'
+    track = timeline.find('./Track')
+    assert track is not None, 'active fixture is missing its <Track>'
+
     result = _CLIENT.get_now_playing()
     assert isinstance(result, Stream)
-    assert result.id == '200896'
-    assert result.status == 'playing'
-    assert result.current_track == 'Of Monsters and Men — Television Love'
-    assert result.name == 'All Is Love and Pain in the Mouse Parade'
+    assert result.id == track.get('ratingKey')
+    assert result.name == track.get('parentTitle')
+    assert result.current_track == f'{track.get("grandparentTitle")} — {track.get("title")}'
+    assert result.status == ('playing' if timeline.get('state') == 'playing' else 'paused')
 
 
 @respx.mock

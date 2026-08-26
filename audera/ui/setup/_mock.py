@@ -72,8 +72,8 @@ def apply_seams() -> None:
     ap.AccessPoint.start = lambda self: None
     ap.AccessPoint.stop = lambda self: None
     netifaces.get_wifi_networks = _fake_get_wifi_networks
-    Page.connect_callback = _fake_connect  # type: ignore
-    Page.shutdown = _fake_shutdown  # type: ignore
+    Page.connect_callback = _fake_connect
+    Page.shutdown = _fake_shutdown
 
 
 def loopback_bind() -> None:
