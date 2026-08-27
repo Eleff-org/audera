@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING, Callable, NamedTuple
 from nicegui import ui
 
 import audera
+from audera.dal import balance as balance_dal
 from audera.dal import settings as settings_dal
 from audera.dal import sources as sources_dal
 from audera.dal import volume as volume_dal
 from audera.domains.sources import CATALOG, SourceDefinition, default_source, toggle
 from audera.errors import CommandError
+from audera.models.balance import ReferenceBalance
 from audera.models.player import Player
 from audera.models.settings import Settings
 from audera.ui import components, features
@@ -1444,6 +1446,17 @@ async def _reset_snap_volume(page: 'Page', client, vol_label=None) -> None:
     ui.notify('Snapcast volume reset to 100%', type='positive', position='top-right')
 
 
+def _apply_volume(settings: Settings, camilla, client_id: str, percent: int) -> None:
+    """Writes one player's volume through the triad: CamillaDSP (the real loudness), the volume
+    DAL, and the Snapcast 0/100 mute sidecar. The slider and Save/Restore share this path so the
+    three writes never drift.
+    """
+    camilla.set_percent_volume(percent)
+    volume_dal.set(client_id, percent)
+    muted = percent <= 0
+    _snapserver(settings).set_client_volume(client_id, 0 if muted else 100, muted=muted)
+
+
 def _build_volume_controls(
     page: 'Page',
     client_id: str,
@@ -1468,17 +1481,11 @@ def _build_volume_controls(
     camilla = _camilladsp(client_host) if client_host else _camilladsp('localhost')
     FF_VOLUME_PERC_OR_DB = features.flag_enabled(page.settings, features.VOLUME_KEY, features.FF_VOLUME_PERC_OR_DB)
 
-    def _write_volume(camilla_client, settings, cid, percent):
-        camilla_client.set_percent_volume(percent)
-        volume_dal.set(cid, percent)
-        muted = percent <= 0
-        _snapserver(settings).set_client_volume(cid, 0 if muted else 100, muted=muted)
-
     async def _persist_and_sync(e) -> None:
         percent = int(e.args)
         try:
             await commands.get().submit(
-                _write_volume, camilla, page.settings, client_id, percent, coalesce_key=('volume', client_id)
+                _apply_volume, page.settings, camilla, client_id, percent, coalesce_key=('volume', client_id)
             )
         except CommandError:
             pass
@@ -1520,8 +1527,42 @@ def _build_volume_controls(
     return slider
 
 
+def _at_reference() -> bool:
+    """Whether every connected player currently sits at its recorded reference volume.
+
+    ``False`` when no balance is saved, when no player is connected, or when any connected player
+    is missing from the balance or off its recorded percent.
+    """
+    if not balance_dal.exists():
+        return False
+    try:
+        ref = balance_dal.get().volumes
+    except CommandError:
+        return False
+    cache = broker.get().cache
+    connected = [player for player in cache.clients if player.connected]
+    if not connected:
+        return False
+    return all(player.id in ref and cache.volumes.get(player.id) == ref[player.id] for player in connected)
+
+
 def build_settings_tab(page: 'Page') -> None:
-    """Renders the Settings tab — one single-select button group per registered UX feature."""
+    """Renders the Settings tab — a reference-balance section, then one single-select button group
+    per registered UX feature."""
+    ui.label('Reference balance').classes('text-lg font-medium mb-2')
+    ui.label('Save and restore the current volume balance across all connected players.').classes('text-sm text-gray-500 mb-2')
+    # Indicator left, Save/Restore right, on one fixed-height row so the buttons stay put whether
+    # or not the indicator is lit.
+    with ui.row().classes('mb-4 w-full items-center justify-between h-9'):
+        with ui.row().classes('gap-1 items-center').mark('reference-status'):
+            if _at_reference():
+                ui.icon('circle').classes('text-green-500 text-xs')
+                ui.label('Listening at reference').classes('text-sm text-gray-500')
+        with ui.row().classes('gap-2'):
+            ui.button('Save', on_click=lambda: _on_save_reference_balance(page)).mark('save-reference')
+            restore = ui.button('Restore', on_click=lambda: _on_restore_reference_balance(page)).mark('restore-reference')
+            restore.set_enabled(balance_dal.exists())
+
     ui.label('Features').classes('text-lg font-medium mb-2')
     for feature in features.FEATURES:
         ui.label(feature.label).classes('text-sm text-gray-500')
@@ -1544,3 +1585,51 @@ async def _on_feature_change(page: 'Page', key: str, value: str) -> None:
         return
     page.settings = updated
     page._build_players_tab.refresh()
+
+
+async def _on_save_reference_balance(page: 'Page') -> None:
+    """Snapshots the current per-player volume balance and persists it as the reference balance."""
+    volumes = {player_id: percent for player_id, percent in broker.get().cache.volumes.items() if percent is not None}
+    ref = ReferenceBalance(volumes=volumes)
+    try:
+        await commands.get().submit(balance_dal.save, ref)
+    except CommandError:
+        ui.notify('Could not save reference balance', type='negative', position='top-right')
+        return
+    ui.notify('Saved reference balance', type='positive', position='top-right')
+    page._build_settings_tab.refresh()
+
+
+async def _on_restore_reference_balance(page: 'Page') -> None:
+    """Re-applies the saved reference balance to every connected player it names, skipping the rest."""
+    try:
+        ref = await asyncio.to_thread(balance_dal.get)
+    except CommandError:
+        ui.notify('Could not read reference balance', type='negative', position='top-right')
+        return
+
+    connected = [player for player in broker.get().cache.clients if player.connected]
+    restored = 0
+    for player in connected:
+        percent = ref.volumes.get(player.id)
+        if percent is None:
+            continue
+        try:
+            await commands.get().submit(
+                _apply_volume,
+                page.settings,
+                _camilladsp(player.host),
+                player.id,
+                percent,
+                coalesce_key=('volume', player.id),
+            )
+        except CommandError:
+            continue
+        restored += 1
+
+    page._build_players_tab.refresh()
+    ui.notify(
+        f'Restored balance for {restored} player{"" if restored == 1 else "s"}',
+        type='positive',
+        position='top-right',
+    )

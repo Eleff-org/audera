@@ -17,6 +17,15 @@ def _write_corrupt() -> str:
     return file_path
 
 
+def _write_raw(content: str) -> str:
+    """Writes arbitrary content to the settings file and returns its path."""
+    os.makedirs(settings_dal.PATH, exist_ok=True)
+    file_path = os.path.join(settings_dal.PATH, settings_dal.FILE_NAME)
+    with open(file_path, 'w') as f:
+        f.write(content)
+    return file_path
+
+
 def _settings(features: dict | None = None) -> Settings:
     return Settings(plexamp_host='localhost', snapserver_host='localhost', features=features or {})
 
@@ -90,6 +99,20 @@ def test_settings_load_without_features_key_backward_compatible(audera_home):
 
 def test_settings_get_raises_storage_error_on_corrupt_file(audera_home):
     _write_corrupt()
+    with pytest.raises(StorageError):
+        settings_dal.get()
+
+
+@pytest.mark.parametrize(
+    'content',
+    [
+        '{"other": {}}',  # valid JSON, missing the 'settings' key
+        '{"settings": null}',  # valid JSON, wrong shape for the model
+        '{"settings": {"plexamp_host": 5}}',  # valid JSON, wrong field type
+    ],
+)
+def test_settings_get_raises_storage_error_on_wrong_shape_file(audera_home, content):
+    _write_raw(content)
     with pytest.raises(StorageError):
         settings_dal.get()
 

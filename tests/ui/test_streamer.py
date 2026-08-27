@@ -15,6 +15,7 @@ from nicegui.testing import User
 import audera.ui.streamer.pages._plex as streamer_plex
 from audera.cli import conf
 from audera.clients import CamillaDSPClient, SnapserverClient
+from audera.dal import balance as balance_dal
 from audera.dal import dsp as dsp_dal
 from audera.dal import presets as presets_dal
 from audera.dal import settings as settings_dal
@@ -22,6 +23,7 @@ from audera.dal import sources as sources_dal
 from audera.dal import volume as volume_dal
 from audera.domains.sources import CATALOG, SourceDefinition, default_source
 from audera.errors import ServiceError, Unreachable
+from audera.models.balance import ReferenceBalance
 from audera.models.dsp import Band, DSPConfig, Preset
 from audera.models.player import Group, Player
 from audera.models.settings import Settings
@@ -2068,6 +2070,92 @@ async def test_settings_first_load_seeds_default_features(audera_home, mock_snap
     Page().load()
     await user.open('/')
     assert settings_dal.get().features == features.default_selections()
+
+
+async def test_settings_tab_restore_disabled_until_a_balance_is_saved(audera_home, mock_snapserver_two_players, user: User):
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    assert not user.find(kind=ui.button, marker='restore-reference').elements.pop().enabled
+
+
+async def test_settings_tab_save_reference_balance_captures_current_volumes(
+    audera_home, mock_snapserver_two_players, user: User
+):
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    user.find(marker='save-reference').click()
+    await _settled(balance_dal.exists)
+    assert balance_dal.get().volumes == {'abc123': 80, 'def456': 80}
+
+
+async def test_settings_tab_save_enables_restore(audera_home, mock_snapserver_two_players, user: User):
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    user.find(marker='save-reference').click()
+    await _settled(lambda: user.find(kind=ui.button, marker='restore-reference').elements.pop().enabled)
+    assert user.find(kind=ui.button, marker='restore-reference').elements.pop().enabled
+
+
+async def test_settings_tab_restore_applies_to_connected_players_and_skips_the_rest(
+    audera_home, mock_snapserver_two_players, mock_camilladsp, monkeypatch, user: User
+):
+    """`ghost` is absent from the cache (never restored) and `def456` is absent from the saved
+    balance (skipped); only the connected, named `abc123` is written back."""
+    balance_dal.save(ReferenceBalance(volumes={'abc123': 30, 'ghost': 55}))
+
+    applied: list[tuple[str, int, bool]] = []
+
+    def _set_client_volume(self, client_id: str, percent: int, muted: bool = False):
+        applied.append((client_id, percent, muted))
+
+    monkeypatch.setattr(SnapserverClient, 'set_client_volume', _set_client_volume)
+
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    user.find(marker='restore-reference').click()
+    await _settled(lambda: bool(applied))
+    assert applied == [('abc123', 100, False)]
+    assert mock_camilladsp.get('set_percent_volume') == 30
+    assert volume_dal.get('abc123') == 30
+
+
+async def test_settings_tab_indicator_lights_when_players_match_the_reference(
+    audera_home, mock_snapserver_two_players, user: User
+):
+    balance_dal.save(ReferenceBalance(volumes={'abc123': 80, 'def456': 80}))
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    await user.should_see('Listening at reference')
+
+
+async def test_settings_tab_indicator_dark_when_a_player_diverges(audera_home, mock_snapserver_two_players, user: User):
+    balance_dal.save(ReferenceBalance(volumes={'abc123': 80, 'def456': 80}))
+    broker.get().cache.volumes['abc123'] = 55
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    await user.should_not_see('Listening at reference')
+
+
+async def test_settings_tab_indicator_dark_without_a_saved_reference(audera_home, mock_snapserver_two_players, user: User):
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    await user.should_not_see('Listening at reference')
+
+
+async def test_settings_tab_save_lights_the_indicator(audera_home, mock_snapserver_two_players, user: User):
+    Page().load()
+    await user.open('/')
+    user.find('Settings').click()
+    await user.should_not_see('Listening at reference')
+    user.find(marker='save-reference').click()
+    await user.should_see('Listening at reference')
 
 
 async def test_run_preamble_does_not_set_script_mode(audera_home, monkeypatch, user: User):
