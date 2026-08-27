@@ -1,0 +1,12 @@
+# Audera
+
+> A private, DSP-corrected, multi-room synchronous audio playback OS for your own Raspberry Pi — no cloud accounts, no proprietary boxes.
+
+Audera is a private, DSP-corrected, multi-room synchronous audio playback operating system that runs on your own Raspberry Pi hardware, with no cloud accounts and no proprietary boxes. It leverages open standards — [Snapcast](https://github.com/snapcast/snapcast) for multi-room synchronization and [CamillaDSP](https://github.com/HEnquist/camilladsp) for per-player DSP correction — and casts from the sources you already use: AirPlay 2, Spotify Connect, and Plexamp. Unlike proprietary systems like Sonos, WiiM, Roon, Bluesound, or Bose, which require cloud accounts or proprietary hardware, Audera is fully private, open-source, and runs on hardware you own.
+
+## Docs
+
+- [Documentation hub](https://github.com/Eleff-org/audera/blob/main/docs/README.md): landing page for the developer and end-user docs.
+- [Getting started](https://github.com/Eleff-org/audera/blob/main/docs/getting-started.md): end-to-end setup guide for a new Audera system.
+- [Features](https://github.com/Eleff-org/audera/blob/main/docs/features.md): what Audera does, source by source and room by room.
+- [Architecture decision records](https://github.com/Eleff-org/audera/blob/main/docs/adrs/README.md): the design decisions behind Audera and why they were made.

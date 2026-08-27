@@ -4,7 +4,38 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Audera</title>
+    <title>Audera - Private, DSP-corrected multi-room audio for Raspberry Pi</title>
+    <meta name="description"
+        content="Audera is a private, DSP-corrected, multi-room synchronous audio playback operating system that runs on your own Raspberry Pi hardware, with no cloud accounts and no proprietary boxes.">
+    <link rel="canonical" href="https://audera-audio.com/">
+    <!-- theme-color mirrors --paper from brand/tokens.css (#FAFAF8); a <meta> can't resolve var(), so keep this one value in sync by hand. -->
+    <meta name="theme-color" content="#FAFAF8">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Audera",
+      "url": "https://audera-audio.com/",
+      "description": "Audera is a private, DSP-corrected, multi-room synchronous audio playback operating system that runs on your own Raspberry Pi hardware, with no cloud accounts and no proprietary boxes.",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "DietPi, Raspberry Pi OS",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "license": "https://github.com/Eleff-org/audera/blob/main/LICENSE",
+      "codeRepository": "https://github.com/Eleff-org/audera",
+      "sameAs": ["https://github.com/Eleff-org/audera"],
+      "featureList": [
+        "Multi-room synchronized playback",
+        "DSP room correction (CamillaDSP)",
+        "AirPlay, Spotify Connect, and Plexamp sources",
+        "Fully private, open-source"
+      ]
+    }
+    </script>
     <!-- Real brand tokens + fonts (url() in tokens.css resolves fonts/ relative to itself). -->
     <link rel="stylesheet" href="brand/tokens.css">
     <style>

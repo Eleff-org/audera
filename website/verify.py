@@ -22,6 +22,9 @@ from pathlib import Path
 
 PORT = 8123  # fixed high port; avoids clashing with anything else on the runner
 
+# Build-generated files that aren't href/src refs Layer A discovers, but must serve.
+EXTRA = ['/robots.txt', '/sitemap.xml', '/llms.txt']
+
 
 def collect_refs(site: Path) -> list[str]:
     """Extract local references and assert each resolves under ``_site/``.
@@ -78,11 +81,13 @@ class _QuietHandler(SimpleHTTPRequestHandler):
 
 
 def serve_and_fetch(site: Path, urls: list[str]) -> None:
-    """Serve ``_site/`` and assert ``/`` plus each URL returns ``200``.
+    """Serve ``_site/`` and assert ``/``, each URL, and each ``EXTRA`` path ``200``.
 
     Args:
         site: The assembled ``website/_site`` directory to serve verbatim.
         urls: The server-root-relative URL paths from :func:`collect_refs`.
+            The build-generated ``EXTRA`` paths (``robots.txt``, ``sitemap.xml``,
+            ``llms.txt``) are also fetched — they aren't ``href``/``src`` refs.
 
     Raises:
         SystemExit: If any URL returns a non-``200`` status.
@@ -94,7 +99,7 @@ def serve_and_fetch(site: Path, urls: list[str]) -> None:
     try:
         print(f'Serving {site} on :{PORT} and fetching:')
         failed = False
-        for path in ['/', *urls]:
+        for path in ['/', *urls, *EXTRA]:
             code = _fetch_status(f'http://127.0.0.1:{PORT}{path}')
             if code == 200:
                 print(f'  200 {path}')
