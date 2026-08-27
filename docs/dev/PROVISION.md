@@ -67,6 +67,24 @@ bash os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v
 & "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1 --audio-device digiamp-plus
 ```
 
+### Example with a friendly hostname
+
+Provision the same devices with friendly hostnames (which show in the router's DHCP record and become the setup-hotspot SSID), and carry the player's flash-time WiFi credentials so it rejoins the network without the setup wizard:
+
+**macOS / Linux**
+
+```bash
+bash os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1 --audio-device hdmi --hostname audera-living-room
+bash os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1 --audio-device digiamp-plus --hostname audera-bathroom --carry-wifi
+```
+
+**Windows (PowerShell)**
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device streamer --host 192.168.1.35 --branch v0.1.0-beta.1 --audio-device hdmi --hostname audera-living-room
+& "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v0.1.0-beta.1 --audio-device digiamp-plus --hostname audera-bathroom --carry-wifi
+```
+
 ## Options
 
 | Flag | Default | Description |
@@ -78,6 +96,8 @@ bash os/dietpi/setup/provision.sh --device player --host 192.168.1.12 --branch v
 | `-p, --port` | `22` | SSH port |
 | `-i, --identity` | | SSH private key file |
 | `-a, --audio-device` | | Configure `dtoverlay` for the attached audio device: `hdmi`, `digiamp-plus`, `dac-plus`, `hifiberry-dac-plus`. Unset leaves the existing `dtoverlay` untouched. `hdmi` renders the CamillaDSP playback format as `S16LE` (many HDMI sinks reject `S32LE`). On Pi 4, it uses firmware-KMS (`dtoverlay=vc4-fkms-v3d`) with the legacy `hdmi_*` settings and `hw:0`. On Pi 5, it uses full KMS (`dtoverlay=vc4-kms-v3d`) and `plughw:0` (vc4-hdmi accepts only `IEC958_SUBFRAME_LE`). Board model is auto-detected. |
+| `--hostname` | | Friendly hostname (letters, digits, interior hyphens (≤63 chars)); shows in the router's DHCP record and becomes the setup-hotspot SSID. Unset leaves a MAC-derived `audera-<6hex>`. |
+| `--carry-wifi` | | Migrate the WiFi credentials entered at flash time so the device rejoins its network without the setup wizard. Default off: the device boots into the wizard. |
 | `--no-reboot` | | Skip final reboot; leaves device running for inspection |
 | `--wipe-networks` | | Delete all NetworkManager connections before reboot (triggers WiFi wizard on next boot) |
 | `-l, --log` | | Tee session output to a local file |

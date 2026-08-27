@@ -5,10 +5,51 @@ import json
 import time
 from typing import Dict, List, Literal, Optional, Union
 
+from fastapi.responses import RedirectResponse, Response
 from nicegui import app, ui
 
 import audera
 from audera.ui import components
+
+# The connectivity-check URLs each OS probes on join, mapped to the success response it expects
+# (status, body, media-type; empty body means a bare 204). Handled statefully by
+# `_captive_response`: 302 to `/` until the portal opens, then the success sentinel so the phone
+# marks the network validated instead of dropping the AP on its "no internet" timeout. Only these
+# explicit paths are registered, so NiceGUI's routes are untouched and off-device they are inert.
+_CAPTIVE_PROBE_SUCCESS = {
+    '/generate_204': (204, '', 'text/plain'),
+    '/gen_204': (204, '', 'text/plain'),
+    '/hotspot-detect.html': (200, '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>', 'text/html'),
+    '/library/test/success.html': (200, '<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>', 'text/html'),
+    '/connecttest.txt': (200, 'Microsoft Connect Test', 'text/plain'),
+    '/ncsi.txt': (200, 'Microsoft NCSI', 'text/plain'),
+    '/redirect': (200, '', 'text/plain'),
+    '/canonical.html': (
+        200,
+        '<meta http-equiv="refresh" content="0;url=https://support.mozilla.org/kb/captive-portal"/>',
+        'text/html',
+    ),
+    '/success.txt': (200, 'success\n', 'text/plain'),
+}
+
+
+def _captive_response(path: str, opened: bool) -> Response:
+    """Returns the response for an OS captive-portal probe.
+
+    Parameters
+    ----------
+    path: `str`
+        The probe path, a key of `_CAPTIVE_PROBE_SUCCESS`.
+    opened: `bool`
+        Whether the portal has been opened; `False` 302s to `/`, `True` returns the OS sentinel.
+    """
+    if not opened:
+        return RedirectResponse('/', status_code=302)
+
+    status, body, media_type = _CAPTIVE_PROBE_SUCCESS[path]
+    if status == 204:
+        return Response(status_code=204)
+    return Response(content=body, status_code=status, media_type=media_type)
 
 
 class Page:
@@ -44,6 +85,10 @@ class Page:
 
         # Initialize shutdown state
         self.shutting_down: bool = False
+
+        # Flips to True once the portal is served, switching the captive probes from 302 to the OS
+        # success sentinel (see `_register_captive_probes`).
+        self.portal_opened: bool = False
 
         # Initialize access-point
         self.ap = audera.ap.AccessPoint(name=audera.NAME, url='http://%s-setup.audera.com' % role, interface='wlan0')
@@ -205,12 +250,32 @@ class Page:
 
     def load(self):
         """Returns the page content."""
+        self._register_captive_probes()
         ui.page('/', title='%s — Welcome' % audera.NAME.capitalize())(self.welcome)
         ui.page('/connect', title='%s — Connect' % audera.NAME.capitalize())(self.connect)
         ui.page('/finish', title='%s — Finish' % audera.NAME.capitalize())(self.finish)
 
+    def _register_captive_probes(self):
+        """Registers process-scoped handlers for the OS captive-portal probe URLs.
+
+        Called from `load()` (process-scoped per `audera/ui/AGENTS.md`). Each handler defers to
+        `_captive_response`, keyed on whether the portal has been opened yet.
+        """
+
+        def _make_probe(path: str):
+            def _probe() -> Response:
+                return _captive_response(path, self.portal_opened)
+
+            return _probe
+
+        for path in _CAPTIVE_PROBE_SUCCESS:
+            app.get(path)(_make_probe(path))
+
     def welcome(self):
         """Returns the welcome page content."""
+
+        # Portal is open; flip the captive probes to the OS success sentinel.
+        self.portal_opened = True
 
         self._chrome('welcome')
 

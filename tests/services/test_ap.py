@@ -125,6 +125,24 @@ def test_create_happy_path_ordering(monkeypatch, access_point):
     ]
 
 
+def test_create_writes_wildcard_captive_record(monkeypatch, access_point):
+    """dnsmasq resolves every domain to the portal, so a phone's captive-check auto-opens setup."""
+    written = {}
+    monkeypatch.setattr(ap.system, 'systemctl', _systemctl_recorder([]))
+    _patch_netifaces(monkeypatch, [])
+    monkeypatch.setattr(ap.io, 'write_text', lambda path, content, *a, **k: written.update({path: content}))
+    monkeypatch.setattr(ap.time, 'sleep', lambda seconds: None)
+    monkeypatch.setattr(access_point, 'connection_exists', lambda: True)
+
+    access_point.create()
+
+    # The dir NM's shared-connection dnsmasq reads, not the standalone `dnsmasq.conf`.
+    conf = written['/etc/NetworkManager/dnsmasq-shared.d/audera-captive.conf']
+    assert 'address=/#/10.42.0.1' in conf  # wildcard
+    assert 'address=/audera.local/10.42.0.1' in conf  # named host stays alongside
+    assert 'dhcp-range' not in conf  # NM owns DHCP; a range here would break its dnsmasq
+
+
 def test_delete_tears_down_the_interface_when_connection_exists(monkeypatch, access_point):
     events = []
     _patch_netifaces(monkeypatch, events)

@@ -42,5 +42,12 @@ activate_streamer_units() {
         # shellcheck disable=SC2086
         systemctl start $enabled_units
     fi
-    systemctl start snapserver snapclient camilladsp audera-streamer
+    # Start the backends now, but only enable `audera-streamer` (line 14), do not start it here.
+    #   `audera-streamer` runs the boot-time connectivity gate that launches the interactive WiFi
+    #   wizard when offline; started here — before `setup.sh` configures NetworkManager and the WiFi
+    #   carry-over — the gate sees no network and drops into the wizard. Its `Type=simple` variant
+    #   returns immediately rather than hanging the flash, but it leaves the device stuck in wizard
+    #   mode (AP up) instead of streaming, so it must be deferred too. Enabled here, it starts on the
+    #   post-provision reboot with the network up and exits cleanly.
+    systemctl start snapserver snapclient camilladsp
 }

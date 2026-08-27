@@ -85,6 +85,56 @@ setup_network_manager() {
     nmcli networking on
 }
 
+# Opt-in WiFi carry-over: migrates the SSID/PSK from `wpa_supplicant.conf` into a NetworkManager
+#   profile so the device rejoins its network without the setup wizard. Mirrors `netifaces.connect`.
+#   No credentials -> notice + `return 0`, so it never trips `set -e` when called bare (Trap #2).
+migrate_wifi_credentials() {
+    local conf='/etc/wpa_supplicant/wpa_supplicant.conf'
+    local ssid psk
+
+    if [[ ! -f "$conf" ]]; then
+        echo ">>> No {${conf}} found; skipping WiFi credential carry-over"
+        echo -e "[  ${GREEN}OK${RESET}  ] No WiFi credentials to migrate"
+        return 0
+    fi
+
+    # Isolate the first `network={ ... }` block so the ssid and psk come from the SAME network;
+    #   parsing each field independently across the file can pair one block's ssid with another's psk.
+    local block
+    block=$(awk '/^[[:space:]]*network[[:space:]]*=[[:space:]]*\{/{f=1} f{print} f&&/\}/{exit}' "$conf")
+
+    # Parse the ssid / psk from that first block.
+    ssid=$(printf '%s\n' "$block" | grep -m1 -oP '^\s*ssid="\K[^"]*' || true)
+    psk=$(printf '%s\n' "$block" | grep -m1 -oP '^\s*psk="\K[^"]*' || true)
+    if [[ -z "$psk" ]]; then
+        # A pre-computed PSK is stored unquoted as 64 hex chars; nmcli takes it verbatim.
+        psk=$(printf '%s\n' "$block" | grep -m1 -oP '^\s*psk=\K[0-9a-fA-F]{64}' || true)
+    fi
+
+    if [[ -z "$ssid" ]]; then
+        echo ">>> No WiFi SSID found in {${conf}}; skipping WiFi credential carry-over"
+        echo -e "[  ${GREEN}OK${RESET}  ] No WiFi credentials to migrate"
+        return 0
+    fi
+
+    # Delete any same-named profile then re-create it, mirroring `netifaces.connect`.
+    nmcli connection delete "$ssid" 2> /dev/null || true
+
+    local -a add_args=(connection add type wifi con-name "$ssid" ssid "$ssid" connection.autoconnect yes)
+    if [[ -n "$psk" ]]; then
+        add_args+=(wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$psk")
+    fi
+
+    if ! nmcli "${add_args[@]}"; then
+        echo ">>> Failed to create NetworkManager profile for {${ssid}}; falling back to the setup wizard"
+        echo -e "[  ${GREEN}OK${RESET}  ] No WiFi credentials migrated"
+        return 0
+    fi
+
+    echo ">>> Migrated WiFi network {${ssid}} from wpa_supplicant into NetworkManager"
+    return 0
+}
+
 # Disables WiFi power save globally
 disable_wifi_powersave() {
     mkdir -p /etc/NetworkManager/conf.d
@@ -94,17 +144,43 @@ wifi.powersave = 2
 EOF
 }
 
-# Derives the hostname from the eth0 (falling back to wlan0) MAC address, sets it,
-#   and appends it to /etc/hosts; echoes the derived hostname so the caller can
-#   capture it
+# Disables NetworkManager's connectivity check. The setup AP has no upstream internet by design,
+#   so the check only churns, repeatedly marking ap0/wlan0 "limited". Standard for an AP portal.
+disable_connectivity_check() {
+    mkdir -p /etc/NetworkManager/conf.d
+    cat > /etc/NetworkManager/conf.d/connectivity.conf <<'EOF'
+[connectivity]
+enabled=false
+EOF
+}
+
+# Sets the hostname, appends it to /etc/hosts, and echoes it back. Shared by both branches.
+_apply_hostname() {
+    local new_hostname="$1"
+    hostnamectl set-hostname "$new_hostname"
+    echo "127.0.1.1   $new_hostname" >> /etc/hosts
+    echo "$new_hostname"
+}
+
+# Derives the hostname from the eth0 (else wlan0) MAC and applies it. The `configure_hostname`
+#   fallback when no operator name is given.
 derive_hostname_from_mac() {
     local mac short new_hostname
     mac=$(cat /sys/class/net/eth0/address 2>/dev/null || cat /sys/class/net/wlan0/address)
     short=$(echo "$mac" | tr -d ':' | tail -c 7)
     new_hostname="audera-${short}"
-    hostnamectl set-hostname "$new_hostname"
-    echo "127.0.1.1   $new_hostname" >> /etc/hosts
-    echo "$new_hostname"
+    _apply_hostname "$new_hostname"
+}
+
+# Applies $1 as the hostname when non-empty (operator's friendly name, which flows to DHCP and the
+#   setup-hotspot SSID), else the MAC-derived default. Echoes the applied name.
+configure_hostname() {
+    local explicit="$1"
+    if [[ -n "$explicit" ]]; then
+        _apply_hostname "$explicit"
+    else
+        derive_hostname_from_mac
+    fi
 }
 
 # Writes the boot banner printed at login

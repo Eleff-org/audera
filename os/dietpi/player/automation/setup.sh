@@ -17,6 +17,11 @@ AUDIO_DEVICE="$2"
 #   these lines out of this script by regex.
 REBOOT="${3:-1}"
 
+# Operator hostname (empty ⇒ MAC-derived) and opt-in WiFi carry-over (0/1), passed as positional
+#   args rather than provision.sh regex-editing this script.
+HOSTNAME_ARG="${4:-}"
+CARRY_WIFI="${5:-0}"
+
 # Fetch and load shared config-injection helpers
 curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
 source /tmp/audera_config_lib.sh
@@ -119,7 +124,14 @@ audera player conf audera-player.service > /etc/systemd/system/audera-player.ser
 
 systemctl daemon-reload
 systemctl enable snapclient camilladsp audera-player
-systemctl start snapclient camilladsp audera-player
+
+# Start the backends now, but only enable `audera-player`, do not start it here. `audera-player`
+#   runs the boot-time connectivity gate that launches the interactive WiFi wizard when offline;
+#   started here — before `setup_network_manager` (line 154) and the WiFi carry-over (line 158) —
+#   the gate sees no network and drops into the wizard, and the oneshot `start` blocks on it, so the
+#   flash hangs mid-install. Enabled here, it starts on the post-provision reboot with the network
+#   up and exits cleanly.
+systemctl start snapclient camilladsp
 echo -e "[  ${GREEN}OK${RESET}  ] systemd service units installed successfully"
 
 # Purge ifupdown
@@ -133,10 +145,10 @@ echo ">>> Purging ifupdown"
 purge_ifupdown
 echo -e "[  ${GREEN}OK${RESET}  ] ifupdown purged successfully"
 
-# Derive hostname from MAC address
+# Configure hostname (operator-supplied, else MAC-derived fallback)
 echo
-echo ">>> Configuring hostname from MAC address"
-NEW_HOSTNAME=$(derive_hostname_from_mac)
+echo ">>> Configuring hostname"
+NEW_HOSTNAME=$(configure_hostname "$HOSTNAME_ARG")
 echo -e "[  ${GREEN}OK${RESET}  ] Hostname configured as {${NEW_HOSTNAME}}"
 
 # Setup network-manager
@@ -149,9 +161,21 @@ echo ">>> Setting up network-manager"
 setup_network_manager
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
+# Opt-in WiFi credential carry-over (default off keeps the setup wizard tested)
+if [[ "$CARRY_WIFI" == "1" ]]; then
+    echo
+    echo ">>> Carrying over existing WiFi credentials"
+    migrate_wifi_credentials
+    echo -e "[  ${GREEN}OK${RESET}  ] WiFi credential carry-over completed"
+fi
+
 # Disable WiFi power save globally
 disable_wifi_powersave
 echo -e "[  ${GREEN}OK${RESET}  ] WiFi power save disabled globally"
+
+# Disable NetworkManager connectivity checking (the setup AP has no upstream internet by design)
+disable_connectivity_check
+echo -e "[  ${GREEN}OK${RESET}  ] NetworkManager connectivity check disabled"
 
 # Setup dnsmasq
 echo

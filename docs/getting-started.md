@@ -30,7 +30,7 @@ Depending on the audio system you want to integrate **Audera** with, you may nee
 2. Complete the first-boot process on your `Raspberry Pi` device. You will likely need to set up Wi-Fi credentials, pick your locale, and select your keyboard layout. You do not need to install any additional software during the first boot.
 3. Once the first boot completes, run `hostname -I` and record the local IP address of your device.
 4. On a separate computer, clone **Audera** locally with `git clone https://github.com/Eleff-org/audera.git`.
-5. Navigate into the cloned repository and run the provisioning script for your operating system. Set `--device` to `streamer` or `player`, `--host` to the IP address you recorded, and `--audio-device` to match your hardware (`hdmi`, `digiamp-plus`, `dac-plus`, or `hifiberry-dac-plus`).
+5. Navigate into the cloned repository and run the provisioning script for your operating system. Set `--device` to `streamer` or `player`, `--host` to the IP address you recorded, and `--audio-device` to match your hardware (`hdmi`, `digiamp-plus`, `dac-plus`, or `hifiberry-dac-plus`). Optionally add `--hostname <name>` to give the device a friendly name that shows in your router and becomes the setup-hotspot network name (see the [provisioning docs](dev/PROVISION.md) for the full options reference).
 
     **macOS / Linux**
 
@@ -38,7 +38,8 @@ Depending on the audio system you want to integrate **Audera** with, you may nee
     bash os/dietpi/setup/provision.sh \
       --device streamer \
       --host <IP> \
-      --audio-device hdmi
+      --audio-device hdmi \
+      --hostname <name>   # optional
     ```
 
     **Windows (PowerShell)**
@@ -47,12 +48,13 @@ Depending on the audio system you want to integrate **Audera** with, you may nee
     & "$env:LOCALAPPDATA\Programs\Git\usr\bin\bash.exe" os/dietpi/setup/provision.sh `
       --device streamer `
       --host <IP> `
-      --audio-device hdmi
+      --audio-device hdmi `
+      --hostname <name>   # optional
     ```
 
 6. After provisioning completes, the `Raspberry Pi` device restarts into **Wi-Fi Setup** mode.
-7. On your phone, open your **Wi-Fi** settings and scan until you see a new `audera-{unique-identifier}` network, where the unique-identifier is a random string of letters and numbers.
-8. Select the network, then open `10.42.0.1` in a web browser.
+7. On your phone, open your **Wi-Fi** settings and scan until you see a new network named after the `--hostname` you set (or `audera-{unique-identifier}`, where the unique-identifier is a short string of letters and numbers, when you didn't set one).
+8. Select the network. On most phones the setup page opens automatically once you join; if it doesn't, open `10.42.0.1` in a web browser.
 9. Complete the **Wi-Fi Setup** steps.
 10. Once you finish **Wi-Fi Setup**, the `Raspberry Pi` device restarts.
 11. If you set up a **Streamer**, open your Streamer web app at `audera.local` in a browser on any device connected to the same network. If you set up a **Player**, open your Streamer web app and refresh the players tab until the new **Player** appears.
