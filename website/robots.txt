@@ -1,0 +1,29 @@
+# Audera — audera-audio.com
+# Open to all crawlers; AI crawlers listed explicitly to document intent.
+
+User-agent: *
+Allow: /
+
+# AI crawlers we welcome (search, answer engines, and model builders).
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://audera-audio.com/sitemap.xml
