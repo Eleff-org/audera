@@ -45,6 +45,8 @@ UI code never calls `subprocess`; every systemd interaction goes through `audera
 
 `streamer/broker.py` brokers Snapserver and volume-DAL events into a cache the UI reads synchronously; `streamer/commands.py` serializes every write path through one `asyncio.Queue`. Both are module-level singletons started on app startup and torn down on shutdown; their module docstrings own the details (seed-then-delta, debounce, reconnect, coalescing).
 
+Any DAL write whose result is reflected in a tab must fan out to every connected browser through the observer layer, not just `refresh()` the acting page — see ADR 005 §10. A new write path exposes `on_change` / `_notify_observers` on its DAL and a handler in `streamer/__init__.py` that refreshes the affected tabs on each `connected_pages()` entry, honoring `page._dialog_open` / `_deferred_tabs`.
+
 ## Previewing and running locally
 
 The user iterates on UI from screenshots. Most player UI needs live Snapcast clients, so:

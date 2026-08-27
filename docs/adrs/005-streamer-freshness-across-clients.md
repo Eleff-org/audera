@@ -21,13 +21,13 @@ The streamer UI polled Snapserver every 10 seconds per browser, rebuilding the e
 
 6. **Step-aligned pushes.** Every value pushed to the volume slider is `int(round(…))`. An unaligned value makes Quasar snap the slider and emit a phantom `update:model-value`, echoing back to the device.
 
-7. **Defer and replay.** All three fan-out callbacks (broker dirty, sources observer, settings observer) check `page._dialog_open`; if true, they add the affected tab names to `page._deferred_tabs: set[str]` instead of refreshing. Every path that clears `_dialog_open` replays the deferred set — sources, settings, then players — and replaces it with a fresh empty set.
+7. **Defer and replay.** Every fan-out callback (broker dirty, plus the sources, settings, volume, and balance observers) checks `page._dialog_open`; if true, it adds the affected tab names to `page._deferred_tabs: set[str]` instead of refreshing. Every path that clears `_dialog_open` replays the deferred set — sources, settings, then players — and replaces it with a fresh empty set.
 
 8. **Debounce.** A burst of Snapserver notifications (e.g. a server restart) produces one callback invocation after a 250 ms quiet period, not one per notification.
 
 9. **Startup/shutdown lifecycle.** `broker.start` on `app.on_startup`, `broker.stop` on `app.on_shutdown`, both wired in `audera/ui/streamer/__init__.py`. DAL observers are registered alongside the broker.
 
-10. **Device-wide settings.** Sources and Settings DAL writes notify all connected browsers via a simple observer pattern (`on_change` / `_notify_observers`). Both observers respect `page._dialog_open`, deferring into `_deferred_tabs` the same way the broker's dirty callback does. A settings change reloads every page's `settings` from disk unconditionally (data, not UI) and refreshes both the Players and Settings tabs.
+10. **Fan out every UI-visible write.** Any DAL write whose result is reflected in a tab must expose the observer pattern (`on_change` / `_notify_observers`, notified at the end of `save`/`set`) and fan out through a handler in `ui/streamer/__init__.py` that marshals onto the UI loop and refreshes the affected tabs on every connected page. A local `refresh()` on the acting page is not sufficient — it leaves other browsers, and often the acting one, stale. This is an invariant, not a fixed list: a new write path adds an observer. Every observer respects `page._dialog_open`, deferring into `_deferred_tabs` the same way the broker's dirty callback does. Current observers: sources, settings, volume, balance. A settings change additionally reloads every page's `settings` from disk (data, not UI). A volume change pushes the DAL volumes into the broker cache for the slider bindings and refreshes Settings so the "Listening at reference" indicator tracks loudness changes that cross no Snapcast mute boundary (and therefore produce no broker dirty).
 
 ## Consequences
 

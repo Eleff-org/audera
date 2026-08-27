@@ -5,6 +5,7 @@ import asyncio
 from nicegui import app, ui
 
 import audera
+from audera.dal import balance as balance_dal
 from audera.dal import settings as settings_dal
 from audera.dal import sources as sources_dal
 from audera.dal import volume as volume_dal
@@ -28,7 +29,12 @@ def _stream_status_key() -> tuple[tuple[str, str], ...]:
 
 
 def _on_dirty() -> None:
-    """Fan-out: rebuild Players on every dirty; rebuild Sources only when stream_status changed."""
+    """Fan-out: rebuild Players and Settings on every dirty; rebuild Sources only when
+    stream_status changed.
+
+    Settings rebuilds on every dirty so its "Listening at reference" indicator tracks live volume
+    and connection changes.
+    """
     global _prev_stream_status
     stream_key = _stream_status_key()
     streams_changed = stream_key != _prev_stream_status
@@ -37,12 +43,13 @@ def _on_dirty() -> None:
 
     for client, page in connected_pages():
         if page._dialog_open:
-            page._deferred_tabs.add('players')
+            page._deferred_tabs.update(('players', 'settings'))
             if streams_changed:
                 page._deferred_tabs.add('sources')
             continue
         with client:
             page._build_players_tab.refresh()
+            page._build_settings_tab.refresh()
             if streams_changed:
                 page._build_sources_tab.refresh()
 
@@ -83,8 +90,34 @@ def _on_settings_changed() -> None:
     _loop.call_soon_threadsafe(_apply)
 
 
+def _on_balance_changed() -> None:
+    """Refresh the Settings tab on every connected client after a reference-balance save.
+
+    A save changes no volumes, so only the Settings tab (its Restore button and "Listening at
+    reference" indicator) needs to rebuild.
+    """
+    if _loop is None:
+        return
+
+    def _apply():
+        for client, page in connected_pages():
+            if page._dialog_open:
+                page._deferred_tabs.add('settings')
+                continue
+            with client:
+                page._build_settings_tab.refresh()
+
+    _loop.call_soon_threadsafe(_apply)
+
+
 def _on_volume_changed() -> None:
-    """Push DAL volumes into the broker cache so NiceGUI bindings propagate to sliders."""
+    """Push DAL volumes into the broker cache so NiceGUI bindings propagate to sliders, and
+    refresh the Settings tab so its "Listening at reference" indicator tracks every loudness
+    change (a normal loudness change produces no broker dirty).
+
+    Players are intentionally not rebuilt: sliders update purely via binding; only the small
+    Settings section rebuilds.
+    """
     if _loop is None:
         return
     try:
@@ -96,6 +129,12 @@ def _on_volume_changed() -> None:
     def _apply():
         for player_id, percent in cached.items():
             b.cache.volumes[player_id] = percent
+        for client, page in connected_pages():
+            if page._dialog_open:
+                page._deferred_tabs.add('settings')
+                continue
+            with client:
+                page._build_settings_tab.refresh()
 
     _loop.call_soon_threadsafe(_apply)
 
@@ -110,6 +149,7 @@ def _start() -> None:
     sources_dal.on_change(_on_sources_changed)
     settings_dal.on_change(_on_settings_changed)
     volume_dal.on_change(_on_volume_changed)
+    balance_dal.on_change(_on_balance_changed)
 
 
 def run() -> None:
