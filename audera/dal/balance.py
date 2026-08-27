@@ -8,6 +8,8 @@ import logging
 import os
 from typing import Callable, Union
 
+from pydantic import ValidationError
+
 from audera import io
 from audera.dal import path
 from audera.errors import StorageError
@@ -45,15 +47,16 @@ def get() -> balance.ReferenceBalance:
     Raises
     ------
     `audera.errors.StorageError`
-        When the reference-balance file cannot be read or holds invalid JSON.
+        When the reference-balance file cannot be read, holds invalid JSON, or is missing the
+        expected keys or shape.
     """
     file_path = os.path.join(PATH, FILE_NAME)
     try:
         with open(file_path, 'r') as f:
             data = json.load(f)
-    except (OSError, ValueError) as exc:
+        return balance.ReferenceBalance.model_validate(data['balance'])
+    except (OSError, ValueError, KeyError, ValidationError) as exc:
         raise StorageError('Unable to read reference balance [%s]: %s' % (file_path, exc)) from exc
-    return balance.ReferenceBalance.model_validate(data['balance'])
 
 
 def save(ref: balance.ReferenceBalance) -> balance.ReferenceBalance:

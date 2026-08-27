@@ -9,10 +9,15 @@ from audera.models.balance import ReferenceBalance
 
 def _write_corrupt() -> str:
     """Writes an unparseable reference-balance file and returns its path."""
+    return _write_raw('{ not json')
+
+
+def _write_raw(content: str) -> str:
+    """Writes arbitrary content to the reference-balance file and returns its path."""
     os.makedirs(balance_dal.PATH, exist_ok=True)
     file_path = os.path.join(balance_dal.PATH, balance_dal.FILE_NAME)
     with open(file_path, 'w') as f:
-        f.write('{ not json')
+        f.write(content)
     return file_path
 
 
@@ -50,6 +55,20 @@ def test_balance_empty_round_trip(audera_home):
 
 def test_balance_get_raises_storage_error_on_corrupt_file(audera_home):
     _write_corrupt()
+    with pytest.raises(StorageError):
+        balance_dal.get()
+
+
+@pytest.mark.parametrize(
+    'content',
+    [
+        '{"other": {}}',  # valid JSON, missing the 'balance' key
+        '{"balance": null}',  # valid JSON, wrong shape for the model
+        '{"balance": {"volumes": "loud"}}',  # valid JSON, wrong field type
+    ],
+)
+def test_balance_get_raises_storage_error_on_wrong_shape_file(audera_home, content):
+    _write_raw(content)
     with pytest.raises(StorageError):
         balance_dal.get()
 

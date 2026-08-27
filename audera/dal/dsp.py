@@ -5,6 +5,8 @@ import logging
 import os
 from typing import Union
 
+from pydantic import ValidationError
+
 from audera import io
 from audera.dal import path
 from audera.errors import StorageError
@@ -48,15 +50,16 @@ def get(player_id: str) -> dsp.DSPConfig:
     Raises
     ------
     `audera.errors.StorageError`
-        When the DSP file cannot be read or holds invalid JSON.
+        When the DSP file cannot be read, holds invalid JSON, or is missing the expected keys or
+        shape.
     """
     file_path = os.path.join(PATH, path.to_filename(player_id))
     try:
         with open(file_path, 'r') as f:
             data = json.load(f)
-    except (OSError, ValueError) as exc:
+        return dsp.DSPConfig.model_validate(data['dsp'])
+    except (OSError, ValueError, KeyError, ValidationError) as exc:
         raise StorageError('Unable to read DSP configuration [%s]: %s' % (file_path, exc)) from exc
-    return dsp.DSPConfig.model_validate(data['dsp'])
 
 
 def get_or_create(dsp_config: dsp.DSPConfig) -> dsp.DSPConfig:

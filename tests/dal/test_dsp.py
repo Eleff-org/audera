@@ -9,12 +9,17 @@ from audera.models.dsp import Band, DSPConfig
 
 def _write_corrupt(player_id: str) -> str:
     """Writes an unparseable DSP file for `player_id` and returns its path."""
+    return _write_raw(player_id, '{ not json')
+
+
+def _write_raw(player_id: str, content: str) -> str:
+    """Writes arbitrary content to the DSP file for `player_id` and returns its path."""
     from audera.dal import path
 
     os.makedirs(dsp_dal.PATH, exist_ok=True)
     file_path = os.path.join(dsp_dal.PATH, path.to_filename(player_id))
     with open(file_path, 'w') as f:
-        f.write('{ not json')
+        f.write(content)
     return file_path
 
 
@@ -131,6 +136,20 @@ def test_dsp_get_or_create_idempotent_after_edit(audera_home):
 
 def test_dsp_get_raises_storage_error_on_corrupt_file(audera_home):
     _write_corrupt('abc123')
+    with pytest.raises(StorageError):
+        dsp_dal.get('abc123')
+
+
+@pytest.mark.parametrize(
+    'content',
+    [
+        '{"other": {}}',  # valid JSON, missing the 'dsp' key
+        '{"dsp": null}',  # valid JSON, wrong shape for the model
+        '{"dsp": {"player_id": "abc123", "preamp_db": "loud"}}',  # valid JSON, wrong field type
+    ],
+)
+def test_dsp_get_raises_storage_error_on_wrong_shape_file(audera_home, content):
+    _write_raw('abc123', content)
     with pytest.raises(StorageError):
         dsp_dal.get('abc123')
 
