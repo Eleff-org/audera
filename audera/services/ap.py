@@ -89,15 +89,16 @@ class AccessPoint:
             # Re-configure dnsmasq each time the access-point is started because the
             #   player identity may change overtime.
 
+            # `ipv4.method=shared` makes NetworkManager run its own dnsmasq for `ap0`, reading extra
+            # config only from `dnsmasq-shared.d/`. NM owns DHCP, so this file holds only address
+            # records; a `dhcp-range`/`interface=` line would collide and break dnsmasq startup.
             io.write_text(
-                '/etc/NetworkManager/dnsmasq.conf',
+                '/etc/NetworkManager/dnsmasq-shared.d/audera-captive.conf',
                 '\n'.join(
                     [
-                        f'interface={self.ap_interface}',
-                        'dhcp-range=10.42.0.10,10.42.0.100,12h',
-                        'dhcp-option=3,10.42.0.1',
-                        'dhcp-option=6,10.42.0.1',
                         f'address=/{self.url}/10.42.0.1',
+                        # Wildcard: resolve every domain to the portal so setup opens on join.
+                        'address=/#/10.42.0.1',
                     ]
                 ),
             )

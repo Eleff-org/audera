@@ -19,8 +19,9 @@ def main() -> None:
     (site / 'assets').mkdir(parents=True)
     (site / 'brand' / 'fonts').mkdir(parents=True)
 
-    # The page and its image.
-    shutil.copy(website / 'index.html', site / 'index.html')
+    # Every top-level page (index.html plus the features-*.html mockups) and images.
+    for page in sorted(website.glob('*.html')):
+        shutil.copy(page, site / page.name)
     for asset in (website / 'assets').iterdir():
         shutil.copy(asset, site / 'assets' / asset.name)
 

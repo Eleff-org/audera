@@ -13,6 +13,8 @@ WIPE_NETWORKS=0
 LOG=''
 DRY_RUN=0
 AUDIO_DEVICE=''
+HOSTNAME_ARG=''
+CARRY_WIFI=0
 
 usage() {
     cat <<EOF
@@ -30,6 +32,12 @@ Options:
   -a, --audio-device <value>       Configure dtoverlay for the attached audio device:
                                     hdmi, digiamp-plus, dac-plus, hifiberry-dac-plus
                                     (default: unset, leaves existing dtoverlay untouched)
+      --hostname <name>            Friendly hostname (letters, digits, interior hyphens (≤63 chars)); shows in the
+                                    router's DHCP record and becomes the setup-hotspot SSID
+                                    (default: unset, MAC-derived audera-<6hex>)
+      --carry-wifi                 Migrate the WiFi credentials entered at flash time so the
+                                    device rejoins its network without the setup wizard
+                                    (default: off, device boots into the wizard)
       --no-reboot                  Skip final reboot; leaves device running for inspection
       --wipe-networks              Delete all NM connections before reboot (triggers WiFi wizard on next boot)
   -l, --log <file>                 Tee session output to a local file
@@ -49,6 +57,8 @@ while [[ $# -gt 0 ]]; do
         -p|--port)           PORT="$2"; shift 2 ;;
         -i|--identity)       IDENTITY="$2"; shift 2 ;;
         -a|--audio-device)   AUDIO_DEVICE="$2"; shift 2 ;;
+        --hostname)          HOSTNAME_ARG="$2"; shift 2 ;;
+        --carry-wifi)        CARRY_WIFI=1; shift ;;
         --no-reboot)         NO_REBOOT=1; shift ;;
         --wipe-networks)     WIPE_NETWORKS=1; shift ;;
         -l|--log)            LOG="$2"; shift 2 ;;
@@ -67,6 +77,9 @@ if [[ -n "$AUDIO_DEVICE" ]]; then
         *) die "--audio-device must be one of: hdmi, digiamp-plus, dac-plus, hifiberry-dac-plus" ;;
     esac
 fi
+if [[ -n "$HOSTNAME_ARG" && ! "$HOSTNAME_ARG" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; then
+    die "--hostname must be 1-63 chars: letters, digits, and interior hyphens (no leading/trailing hyphen)"
+fi
 
 BRANCH_URL="${BRANCH//#/%23}"
 
@@ -82,7 +95,9 @@ else
     REBOOT_FLAG='1'
 fi
 
-SETUP_CMD="${FETCH_CMD} && bash /tmp/audera_setup.sh '${BRANCH}' '${AUDIO_DEVICE}' '${REBOOT_FLAG}'"
+# setup.sh positional contract: $1 branch, $2 audio, $3 reboot, $4 hostname (empty ⇒ MAC),
+#   $5 carry-wifi (0/1).
+SETUP_CMD="${FETCH_CMD} && bash /tmp/audera_setup.sh '${BRANCH}' '${AUDIO_DEVICE}' '${REBOOT_FLAG}' '${HOSTNAME_ARG}' '${CARRY_WIFI}'"
 
 WIPE_CMD="nohup bash -c '
   nmcli -t -f UUID con show | while IFS= read -r uuid; do
@@ -116,6 +131,8 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     _log "Device       : ${DEVICE}"
     _log "Branch       : ${BRANCH}"
     _log "Audio device : ${AUDIO_DEVICE:-<unset, leaves existing dtoverlay untouched>}"
+    _log "Hostname     : ${HOSTNAME_ARG:-<unset, MAC-derived audera-<6hex>>}"
+    _log "Carry WiFi   : ${CARRY_WIFI}"
     _log "Setup URL    : ${SETUP_URL}"
     _log ""
     _log "--- Step 1: setup command ---"

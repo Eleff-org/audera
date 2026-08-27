@@ -17,6 +17,11 @@ AUDIO_DEVICE="$2"
 #   these lines out of this script by regex.
 REBOOT="${3:-1}"
 
+# Operator hostname (empty ⇒ MAC-derived) and opt-in WiFi carry-over (0/1), passed as positional
+#   args rather than provision.sh regex-editing this script.
+HOSTNAME_ARG="${4:-}"
+CARRY_WIFI="${5:-0}"
+
 # Fetch and load shared config-injection helpers
 curl -fsSL "https://raw.githubusercontent.com/Eleff-org/audera/${GIT_BRANCH}/os/dietpi/lib/config.sh" -o /tmp/audera_config_lib.sh
 source /tmp/audera_config_lib.sh
@@ -296,14 +301,26 @@ echo ">>> Setting up network-manager"
 setup_network_manager
 echo -e "[  ${GREEN}OK${RESET}  ] Network-manager setup successfully"
 
+# Opt-in WiFi credential carry-over (default off keeps the setup wizard tested)
+if [[ "$CARRY_WIFI" == "1" ]]; then
+    echo
+    echo ">>> Carrying over existing WiFi credentials"
+    migrate_wifi_credentials
+    echo -e "[  ${GREEN}OK${RESET}  ] WiFi credential carry-over completed"
+fi
+
 # Disable WiFi power save globally
 disable_wifi_powersave
 echo -e "[  ${GREEN}OK${RESET}  ] WiFi power save disabled globally"
 
-# Derive hostname from MAC address
+# Disable NetworkManager connectivity checking (the setup AP has no upstream internet by design)
+disable_connectivity_check
+echo -e "[  ${GREEN}OK${RESET}  ] NetworkManager connectivity check disabled"
+
+# Configure hostname (operator-supplied, else MAC-derived fallback)
 echo
-echo ">>> Configuring hostname from MAC address"
-NEW_HOSTNAME=$(derive_hostname_from_mac)
+echo ">>> Configuring hostname"
+NEW_HOSTNAME=$(configure_hostname "$HOSTNAME_ARG")
 sed -i '/^\[server\]/a host-name=audera' /etc/avahi/avahi-daemon.conf
 systemctl enable avahi-daemon
 systemctl restart avahi-daemon

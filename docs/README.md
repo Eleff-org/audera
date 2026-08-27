@@ -6,23 +6,30 @@
 
 <table>
 <tr>
-<td width="33%" valign="top">
+<td width="25%" valign="top">
 
-### 🚀 [Getting started](getting-started.md)
+### [Getting started](getting-started.md)
 
 A quickstart guide on setting up your **Audera** devices and start listening.
 
 </td>
-<td width="33%" valign="top">
+<td width="25%" valign="top">
 
-### 🤝 [Contributing](#contributing)
+### [Features](features.md)
+
+Check-out the **Audera** web app.
+
+</td>
+<td width="25%" valign="top">
+
+### [Contributing](#contributing)
 
 Conventions and practices for contributing to **Audera**.
 
 </td>
-<td width="33%" valign="top">
+<td width="25%" valign="top">
 
-### ⌨️ [CLI Reference](dev/CLI.md)
+### [CLI Reference](dev/CLI.md)
 
 Learn about the `audera` CLI tool.
 

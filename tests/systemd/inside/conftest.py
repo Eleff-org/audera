@@ -84,7 +84,9 @@ SNAPCLIENT = '/usr/local/bin/snapclient-real'
 # stop budget over it and `test_provisioning.py` removes and then re-asserts it, so it lives here.
 WRITTEN_UNITS = conf.STREAMER_UNITS
 
-# Provisioning installs six units, enables five and starts five, each a round trip to the manager.
+# Provisioning installs six units, enables five and starts four, each a round trip to the manager.
+# The role service (`audera-streamer`) is enabled but not started at flash: it runs the connectivity
+# gate that launches the interactive wizard when offline, so it is deferred to the reboot.
 # Generous, because the failure this bounds is a wedged `systemctl`.
 _PROVISION_TIMEOUT: float = 120
 

@@ -7,7 +7,7 @@ The DietPi provisioning layer.
 - `setup/provision.sh` — operator entry point, run from a workstation over SSH; fetches and runs a device's `setup.sh`, then optionally reboots or wipes networks.
 - `streamer/automation/setup.sh`, `player/automation/setup.sh` — the flash scripts, run as root.
 - `streamer/dietpi.txt`, `player/dietpi.txt` — DietPi unattended-install answer files.
-- `lib/common.sh`, `lib/config.sh` — helpers both `setup.sh` scripts `source`.
+- `lib/common.sh`, `lib/config.sh` — helpers both `setup.sh` scripts `source`. `common.sh` owns `configure_hostname` (operator name, else the MAC-derived `derive_hostname_from_mac` fallback — both echo the applied name) and `migrate_wifi_credentials` (opt-in carry-over of the SSID/PSK from `wpa_supplicant.conf` into a NetworkManager profile; no creds ⇒ notice + `return 0`, so call it bare per Trap #2).
 - `lib/streamer.sh` — `activate_streamer_units`, the streamer-only `systemctl` orchestration; a player must not call it (it would provision it as a streamer). The unit and config files it used to write as heredocs now render from `audera.cli.conf`, which both roles redirect into place with `>`.
 
 ## What is tested
@@ -17,6 +17,7 @@ The units `audera streamer conf` renders and `activate_streamer_units` enables a
 ## Conventions
 
 - `setup.sh` uses `set -e` only; `provision.sh` uses `set -euo pipefail`.
+- `setup.sh`'s positional contract is `$1` branch, `$2` audio, `$3` reboot, `$4` hostname (empty ⇒ MAC-derived), `$5` carry-wifi (`0`/`1`). `provision.sh` threads its `--hostname`/`--carry-wifi` flags in as these positional args rather than regex-editing the script.
 - Progress is `echo ">>> Gerund phrase"` then `echo -e "[  ${GREEN}OK${RESET}  ] Past-tense phrase"`; failures are `[  ${RED}FAIL${RESET}  ]` then `exit 1`.
 - Whole config and unit files are rendered by `audera {streamer,player} conf <name>` and redirected with `>`; the shell writes no file itself except surgical in-place `sed` edits of OS-owned files and the `openssl` TLS keypair. A player can never emit a streamer unit, because the subject (`streamer`/`player`) picks the renderer.
 
@@ -46,4 +47,4 @@ The packaged AirPlay-2 daemon must not run: snapserver forks its own `/usr/local
 
 ## Enable vs. start
 
-`enable` starts a unit at boot; `start` runs it now. Infrastructure (`snapserver`, `snapclient`, `camilladsp`, `audera-streamer`) gets both unconditionally. A catalogued source's units follow the operator's recorded set (`activate_streamer_units` derives them from `audera streamer units --disabled/--enabled`; the shell names no source, so changing `DEFAULT_ENABLED` or reordering `CATALOG` needs no shell change). `~/.audera/sources.json` survives a flash because this script writes only `/etc/*`, `/var/lib/*`, and unit files, and must never seed or overwrite it. Two orderings the code does not comment: the apt install sits above every `systemctl start` (binaries exist before anything forks them), and every `audera streamer conf …` render comes after `install_audera_cli`.
+`enable` starts a unit at boot; `start` runs it now. Infrastructure backends (`snapserver`, `snapclient`, `camilladsp`) get both unconditionally. The role service (`audera-streamer`/`audera-player`) is enabled at flash but started only on the post-provision reboot: it runs the boot-time connectivity gate that launches the interactive WiFi wizard when offline, and starting it mid-flash — before NetworkManager and the WiFi carry-over are configured — drops into the wizard, hanging the player (oneshot `start` blocks) or leaving the streamer stuck in AP mode instead of streaming (`Type=simple` returns but the wizard is up). Enabled, it starts on the reboot with the network up and exits cleanly, which is where the wizard belongs and where no SSH session is stranded. A catalogued source's units follow the operator's recorded set (`activate_streamer_units` derives them from `audera streamer units --disabled/--enabled`; the shell names no source, so changing `DEFAULT_ENABLED` or reordering `CATALOG` needs no shell change). `~/.audera/sources.json` survives a flash because this script writes only `/etc/*`, `/var/lib/*`, and unit files, and must never seed or overwrite it. Two orderings the code does not comment: the apt install sits above every `systemctl start` (binaries exist before anything forks them), and every `audera streamer conf …` render comes after `install_audera_cli`.

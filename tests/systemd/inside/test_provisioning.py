@@ -50,6 +50,14 @@ SOURCE_UNITS = tuple(unit for source in CATALOG for unit in source.units)
 INFRASTRUCTURE = tuple(unit for unit in WRITTEN_UNITS if unit not in set(SOURCE_UNITS))
 FROM_APT = tuple(unit for unit in SOURCE_UNITS if unit not in set(WRITTEN_UNITS))
 
+# Infrastructure splits again by whether provisioning may start the unit at flash. `audera-streamer`
+# runs the boot-time connectivity gate that launches the interactive WiFi wizard when offline, so
+# `activate_streamer_units` enables it but does not start it: started mid-flash, before NetworkManager
+# and the WiFi carry-over are configured, it would drop into the wizard (`os/dietpi/lib/streamer.sh`).
+# The backends do not gate on connectivity, so they start unconditionally.
+BOOT_GATE = ('audera-streamer',)
+BACKENDS = tuple(unit for unit in INFRASTRUCTURE if unit not in set(BOOT_GATE))
+
 # `plexamp-mdns.service`'s ExecStart target, rendered by `render_plexamp_mdns_helper`.
 _MDNS_HELPER = '/usr/local/bin/plexamp-mdns.sh'
 
@@ -161,18 +169,35 @@ def test_provisioning_installs_a_unit_systemd_can_load(unit: str):
         assert fragment == f'/etc/systemd/system/{unit}.service'
 
 
-@pytest.mark.parametrize('unit', INFRASTRUCTURE)
-def test_infrastructure_is_enabled_and_running(unit: str):
-    """Infrastructure units are both enabled and started, unconditionally.
+@pytest.mark.parametrize('unit', BACKENDS)
+def test_backends_are_enabled_and_running(unit: str):
+    """Infrastructure backends are both enabled and started, unconditionally.
 
-    Derived from the renderers rather than listed, so the set is whatever provisioning installs and no
-    source claims, the definition `os/dietpi/AGENTS.md` uses. A unit added to `conf.STREAMER_UNITS` for
-    a source without being added to `CATALOG` therefore lands here and is asserted running, which a
-    source unit is not.
+    Derived from the renderers rather than listed, so the set is whatever provisioning installs, no
+    source claims, and does not gate on connectivity, the definition `os/dietpi/AGENTS.md` uses. A unit
+    added to `conf.STREAMER_UNITS` for a source without being added to `CATALOG` therefore lands here and
+    is asserted running, which a source unit is not.
     """
     state = unit_state(unit)
     assert state['UnitFileState'] == 'enabled', f'{unit} was not enabled: {state}'
     assert state['ActiveState'] == 'active', f'{unit} was not started: {state}'
+
+
+@pytest.mark.parametrize('unit', BOOT_GATE)
+def test_the_boot_gate_is_enabled_but_not_started(unit: str):
+    """The role service is enabled at flash but not started, so it runs on the reboot rather than now.
+
+    `audera-streamer` (and its player counterpart) runs the boot-time connectivity gate that launches
+    the interactive WiFi wizard when offline. `activate_streamer_units` starts it mid-flash — before
+    NetworkManager and the WiFi carry-over are configured — the gate would see no network and drop into
+    the wizard, leaving the device in AP mode instead of streaming (the player's oneshot variant hangs
+    the flash outright). Enabling without starting defers it to the post-provision reboot, where the
+    network is up and the wizard belongs. Asserting it inactive here also stops the lane from spawning a
+    real NiceGUI wizard each run.
+    """
+    state = unit_state(unit)
+    assert state['UnitFileState'] == 'enabled', f'{unit} was not enabled: {state}'
+    assert state['ActiveState'] == 'inactive', f'{unit} was started at flash: {state}'
 
 
 @pytest.mark.parametrize('source', [source for source in CATALOG if source.units], ids=lambda source: source.id)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Verify the assembled site builds and serves.
 
-- **Layer A — reference resolution.** Extract every local ref from
-  ``index.html`` (``href``/``src``) and ``brand/tokens.css`` (``url()``) and
+- **Layer A — reference resolution.** Extract every local ref from each page
+  (``_site/*.html`` — ``href``/``src``) and ``brand/tokens.css`` (``url()``) and
   assert each resolves under ``_site/``. A new ``<img>``/link/``@font-face`` the
   build forgets to copy fails here instead of shipping a broken link.
 - **Layer B — serve smoke test.** Serve ``_site/`` over HTTP and fetch ``/``
@@ -45,12 +45,13 @@ def collect_refs(site: Path) -> list[str]:
         elif url_path not in urls:
             urls.append(url_path)
 
-    # HTML: href/src, relative to the site root (index.html lives at _site/).
-    html = (site / 'index.html').read_text(encoding='utf-8')
-    for ref in re.findall(r'(?:href|src)="([^"]+)"', html):
-        if ref.startswith(('http:', 'https:', '#', 'mailto:')):
-            continue
-        add('/' + ref.lstrip('/'), site / ref.lstrip('/'))
+    # HTML: href/src on every page, relative to the site root (pages live at _site/).
+    for page in sorted(site.glob('*.html')):
+        html = page.read_text(encoding='utf-8')
+        for ref in re.findall(r'(?:href|src)="([^"]+)"', html):
+            if ref.startswith(('http:', 'https:', '#', 'mailto:')):
+                continue
+            add('/' + ref.lstrip('/'), site / ref.lstrip('/'))
 
     # CSS: url(), relative to _site/brand/ (where tokens.css lives).
     css = (site / 'brand' / 'tokens.css').read_text(encoding='utf-8')
