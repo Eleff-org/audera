@@ -6,53 +6,71 @@
        \ \__\ \__\ \______/\ \______/\ \______\ \__\\ _\\ \__\ \__\
         \|__|\|__|\|______| \|______| \|______|\|__|\|__|\|__|\|__|
 
-`Audera` is a new era of composable audio systems that brings open-protocols to your own hardware for multi-room synchronous playback, built with [Plex-Amp](https://www.plex.tv/plexamp/) (headless), [Snapcast](https://github.com/badaix/snapcast), and [CamillaDSP](https://github.com/HEnquist/camilladsp).
+**Audera** is a private, DSP-corrected, multi-room synchronous audio playback operating-system that runs on your **own** `Raspberry Pi` hardware, with no cloud accounts and no proprietary boxes.
+
+It is built entirely on open source protocols - [Snapcast](https://github.com/badaix/snapcast) and [CamillaDSP](https://github.com/HEnquist/camilladsp).
+
+[![CI/CD](https://img.shields.io/github/actions/workflow/status/Eleff-org/audera/tests.yml?branch=main&label=CI%2FCD)](https://github.com/Eleff-org/audera/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/Eleff-org/audera?include_prereleases&sort=semver&label=release)](https://github.com/Eleff-org/audera/releases/latest)
+[![License](https://img.shields.io/github/license/Eleff-org/audera)](LICENSE)
+
+## What it looks like
+
+The **Audera Streamer** hosts a local web app for managing devices (incl. latency adjustment), sources, player streams, and per-player DSP pipelines.
+
+<table>
+<tr>
+<td align="center" width="25%"><img src="website/assets/players.webp" alt="Players screen" width="180"></td>
+<td align="center" width="25%"><img src="website/assets/sources.webp" alt="Sources screen" width="180"></td>
+<td align="center" width="25%"><img src="website/assets/player-settings.webp" alt="Player settings screen" width="180"></td>
+<td align="center" width="25%"><img src="website/assets/dsp.webp" alt="DSP screen" width="180"></td>
+</tr>
+<tr>
+<td align="center"><b>Players</b></td>
+<td align="center"><b>Sources</b></td>
+<td align="center"><b>Player settings</b></td>
+<td align="center"><b>DSP</b></td>
+</tr>
+</table>
+
+Take the full tour in [Features](docs/features.md).
+
+## Documentation
+
+- [Getting started](docs/getting-started.md) — set up your **Audera** devices and start listening.
+- [Features](docs/features.md) — a walkthrough of the **Streamer** web app.
+- [Contributing](docs/README.md#contributing) — conventions and practices for contributing.
+- [CLI Reference](docs/dev/CLI.md) — learn about the `audera` CLI tool.
+- [Architecture decisions](docs/adrs/README.md) — the decision records behind the design.
 
 ## Architecture
 
 | Service | Role | Port |
 |---|---|---|
-| **Plex-Amp** (headless) | Music source / playback queue | 32500 (HTTP) |
-| **Snapserver / Snapclient** | Synchronized multi-room audio distribution | 1704 (audio), 1780 (HTTP API) |
-| **CamillaDSP** | Per-device DSP pipeline (EQ, room correction) | 1234 (WebSocket) |
+| [**Snapserver / Snapclient**](https://github.com/badaix/snapcast) | Synchronized multi-room audio distribution | 1704 (audio), 1780 (HTTP API) |
+| [**CamillaDSP**](https://github.com/HEnquist/camilladsp) | Per-device DSP pipeline (EQ, room correction) | 1234 (WebSocket) |
+| [**Plexamp**](https://www.plex.tv/plexamp/) (headless) | Music source / playback queue | 32500 (HTTP) |
+| [**shairport-sync**](https://github.com/mikebrady/shairport-sync) | AirPlay 2 receiver source | 7000, mDNS (`_airplay._tcp`) |
+| [**go-librespot**](https://github.com/devgianlu/go-librespot) | Spotify Connect receiver source | Zeroconf (`_spotify-connect._tcp`) |
 
-### Devices
+**Audera** is made of two device types:
 
-**Streamer** — one per system (or zone)
-- Runs Plex-Amp (headless), Snapserver, Snapclient, and CamillaDSP
-- Hosts the Audera web UI at `https://audera.local` — manages volume and mute for all connected players
-- CamillaDSP sits in the Snapclient audio path so each device DSPs independently
+- **Streamer** — one per household. Runs Snapserver, Snapclient, CamillaDSP, Plexamp (headless), and the shairport-sync (AirPlay 2) and go-librespot (Spotify Connect) receivers, and hosts the web app at `audera.local` that controls every connected player. Acts as a player itself.
+- **Player** — one per room. Runs Snapclient and CamillaDSP, joins the streamer automatically on boot, and is managed from the streamer web app.
 
-**Player** — one per room
-- Runs Snapclient and CamillaDSP
-- Connects to the streamer automatically on boot; managed via the streamer web UI
-- No local web UI required
+CamillaDSP sits in each device's Snapclient audio path, so every room is corrected independently.
 
 ## Getting started
 
-Audera is designed for [DietPi](https://dietpi.com/) on Raspberry Pi hardware. Devices are provisioned remotely from a host machine using `os/dietpi/setup/provision.sh`.
-
-### 1. Flash DietPi
-
-Flash DietPi to an SD card and copy the appropriate `dietpi.txt` to the boot partition:
-
-- Streamer: `os/dietpi/streamer/dietpi.txt`
-- Player: `os/dietpi/player/dietpi.txt`
-
-Boot the device and ensure it is reachable over SSH.
-
-### 2. Provision
-
-Run `provision.sh` from your host machine, pointing it at the target device:
+**Audera** runs on [DietPi](https://dietpi.com/) on `Raspberry Pi` hardware. Flash a device, then provision it remotely from a host machine:
 
 ```bash
-# Provision a streamer
-bash os/dietpi/setup/provision.sh --device streamer --host <IP>
-
-# Provision a player
-bash os/dietpi/setup/provision.sh --device player --host <IP>
+bash os/dietpi/setup/provision.sh \
+  --device streamer \
+  --host <IP> \
+  --audio-device hdmi
 ```
 
-The script fetches and runs the appropriate `setup.sh` on the device over SSH, then reboots it. Once provisioning is complete, the streamer web UI is available at `https://audera.local`.
+The script installs and configures everything over SSH, then hands off to Wi-Fi setup. Once it finishes, open your **Streamer** web app at `audera.local`.
 
-See [docs/dev/PROVISION.md](docs/dev/PROVISION.md) for the full options reference, examples, and post-provisioning verification.
+For hardware selection, flashing, Wi-Fi setup, and the full options reference, see [Getting started](docs/getting-started.md).

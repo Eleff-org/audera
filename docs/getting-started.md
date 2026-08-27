@@ -7,7 +7,7 @@ To get started with **Audera**, you will need a `Raspberry Pi` device, an audio 
 
 ## Devices
 
-**Audera** consists of two types of devices, a **Streamer** (one per household) and a **Player** (multiple per household). The **Streamer** hosts a local web app for managing devices (incl. latency adjustment), sources (`AirPlay 2`, `Spotify Connect`, and `Plexamp`), player groups and streams, and per-player DSP pipelines.
+**Audera** consists of two types of devices, a **Streamer** (one per household) and a **Player** (multiple per household). The **Streamer** hosts a local web app for managing devices (incl. latency adjustment), sources (`AirPlay 2`, `Spotify Connect`, and `Plexamp`), player streams, and per-player DSP pipelines.
 
 ## Selecting hardware
 
