@@ -41,7 +41,12 @@ setup_alsa_loopback() {
 # Downloads, extracts, and installs the given CamillaDSP version to /usr/local/bin
 install_camilladsp() {
     local version="$1"
-    local archive="camilladsp-linux-aarch64.tar.gz"
+    local archive
+    case "$(uname -m)" in
+        armv6l)  archive="camilladsp-linux-armv6.tar.gz" ;;
+        armv7l)  archive="camilladsp-linux-armv7.tar.gz" ;;
+        *)       archive="camilladsp-linux-aarch64.tar.gz" ;;
+    esac
     local url="https://github.com/HEnquist/camilladsp/releases/download/v${version}/${archive}"
     wget -q "$url" -O "/tmp/${archive}"
     tar -xzf "/tmp/${archive}" -C /usr/local/bin/
