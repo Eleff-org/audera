@@ -67,6 +67,9 @@ echo "    Script source {https://raw.githubusercontent.com/Eleff-org/audera/${GI
 # Ensure the script is running as root
 require_root
 
+# Ensure the board is aarch64 (the go-librespot download and ADR 001 assume a 64-bit streamer)
+require_aarch64
+
 # Ensure the DietPi apt repository is present
 #   `shairport-sync-airplay2` only exists there. Debian trixie's own `shairport-sync 4.3.7-1` is
 #   built without `--with-airplay-2`, so falling back to it silently ships AirPlay 1.

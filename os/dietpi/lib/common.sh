@@ -30,6 +30,17 @@ require_root() {
     fi
 }
 
+# Aborts unless the host is aarch64. The streamer's go-librespot download is arm64-only
+#   (streamer/automation/setup.sh) and ADR 001 assumes an aarch64 streamer, so any 32-bit
+#   ARM board (armv6 Zero W, armv7) must fail here with a clear message, not deep in the
+#   go-librespot download.
+require_aarch64() {
+    if [[ "$(uname -m)" != "aarch64" ]]; then
+        echo -e "${RED}*** CRITICAL: The streamer requires an aarch64 (64-bit) Raspberry Pi; this board is $(uname -m). See ADR 001.${RESET}"
+        exit 1
+    fi
+}
+
 # Loads the ALSA loopback module (needed for CamillaDSP <-> Snapclient audio path)
 # index=7 keeps the loopback off hw:0 so physical card indices are stable
 setup_alsa_loopback() {
@@ -41,7 +52,12 @@ setup_alsa_loopback() {
 # Downloads, extracts, and installs the given CamillaDSP version to /usr/local/bin
 install_camilladsp() {
     local version="$1"
-    local archive="camilladsp-linux-aarch64.tar.gz"
+    local archive
+    case "$(uname -m)" in
+        armv6l)  archive="camilladsp-linux-armv6.tar.gz" ;;
+        armv7l)  archive="camilladsp-linux-armv7.tar.gz" ;;
+        *)       archive="camilladsp-linux-aarch64.tar.gz" ;;
+    esac
     local url="https://github.com/HEnquist/camilladsp/releases/download/v${version}/${archive}"
     wget -q "$url" -O "/tmp/${archive}"
     tar -xzf "/tmp/${archive}" -C /usr/local/bin/
@@ -57,11 +73,21 @@ install_uv() {
     fi
 }
 
-# Installs the audera CLI from the given git repo/branch
+# Installs the audera CLI from the given git repo/branch.
+#
+# piwheels ships prebuilt ARM wheels (incl. armv6l) for the Rust deps that PyPI has
+# only as sdists — pydantic-core, orjson, watchfiles — so uv downloads them instead of
+# cargo-building on-device. `unsafe-best-match` is uv's scary name for pip-normal
+# behaviour: consider PyPI + piwheels together and pick the best wheel, rather than
+# stopping at the first index (PyPI, sdist-only). No-op off ARM; dev machines are
+# unaffected since this lives in the device installer, not pyproject.
 install_audera_cli() {
     local repo_url="$1"
     local branch="$2"
-    UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall "git+${repo_url}@${branch}"
+    UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall \
+        --index-strategy unsafe-best-match \
+        --extra-index-url https://www.piwheels.org/simple \
+        "git+${repo_url}@${branch}"
     export PATH="/usr/local/bin:$PATH"
 }
 
