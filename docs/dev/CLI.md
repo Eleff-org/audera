@@ -22,6 +22,7 @@ Available files:
 | `camilladsp.yml` | `/etc/camilladsp/config.yml` |
 | `asound.conf` | `/etc/asound.conf` (appended) |
 | `go-librespot.yml` | `/var/lib/snapserver/.config/go-librespot/config.yml` |
+| `shairport-sync.conf` | `/usr/local/etc/shairport-sync.conf` |
 
 `--playback-format` sets the CamillaDSP playback device format (`camilladsp.yml` only; default `S32LE`). Provisioning passes `S16LE` for `--audio-device hdmi`, which many HDMI sinks require.
 

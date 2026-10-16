@@ -71,8 +71,9 @@ require_root
 require_aarch64
 
 # Ensure the DietPi apt repository is present
-#   `shairport-sync-airplay2` only exists there. Debian trixie's own `shairport-sync 4.3.7-1` is
-#   built without `--with-airplay-2`, so falling back to it silently ships AirPlay 1.
+#   Only this repository has `shairport-sync-airplay2`. The Debian trixie `shairport-sync` package
+#   does not have `--with-airplay-2`. If apt installs that package, the device gets AirPlay 1 and
+#   shows no error.
 echo
 echo ">>> Verifying the DietPi apt repository"
 if [ ! -f /etc/apt/sources.list.d/dietpi.list ]; then
@@ -84,8 +85,14 @@ echo -e "[  ${GREEN}OK${RESET}  ] DietPi apt repository verified"
 # Install build packages
 echo
 echo ">>> Installing build packages"
-apt-get update && \
+#   Each command is a separate statement. `set -e` stops the script only when the last command in
+#   an `&&` chain gives an error. `--allow-change-held-packages` lets a re-flash replace a held
+#   version. `--force-confold` keeps the old conffile and prevents a prompt during the flash.
+#   Provisioning renders the shairport-sync conffile again below.
+apt-get update
 apt-get install -y \
+    --allow-change-held-packages \
+    -o Dpkg::Options::=--force-confold \
     wget \
     curl \
     git \
@@ -98,14 +105,14 @@ apt-get install -y \
     openssl \
     snapserver=0.31.0-1 \
     snapclient \
-    shairport-sync-airplay2=4.3.7-dietpi2 \
+    shairport-sync-airplay2=5.6-dietpi1 \
     python3.13 \
     python3-dev \
     build-essential \
     libsensors5 \
-    jq && \
-apt-mark hold snapserver shairport-sync-airplay2 && \
-apt-get clean && \
+    jq
+apt-mark hold snapserver shairport-sync-airplay2
+apt-get clean
 rm -rf /var/lib/apt/lists/*
 echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 
@@ -206,6 +213,17 @@ mkdir -p "$GO_LIBRESPOT_CONFIG_DIR"
 audera streamer conf go-librespot.yml > "$GO_LIBRESPOT_CONFIG_DIR/config.yml"
 chmod 644 "$GO_LIBRESPOT_CONFIG_DIR/config.yml"
 echo -e "[  ${GREEN}OK${RESET}  ] go-librespot configured successfully"
+
+# Write the shairport-sync configuration
+#
+#   This file replaces the package conffile at the default path. Snapserver starts the binary
+#   without `-c`, so the binary reads this file. The file sets the stdout format to 44100:16:2,
+#   which is the format that the snapserver `airplay://` source reads.
+echo
+echo ">>> Creating the shairport-sync configuration"
+audera streamer conf shairport-sync.conf > /usr/local/etc/shairport-sync.conf
+chmod 644 /usr/local/etc/shairport-sync.conf
+echo -e "[  ${GREEN}OK${RESET}  ] shairport-sync configured successfully"
 
 # Carry an existing server.json to the datadir the conf now pins
 #

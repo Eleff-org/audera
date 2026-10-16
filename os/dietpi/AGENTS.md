@@ -25,6 +25,7 @@ The units `audera streamer conf` renders and `activate_streamer_units` enables a
 
 1. The apt block ends with `apt-get clean && rm -rf /var/lib/apt/lists/*`. A package added later needs its own `apt-get update` (a minute on a Pi Zero 2 W); add to the single install at the top instead.
 2. Call `lib/`'s functions as bare commands, never in condition context. `set -e` is suppressed inside a function invoked as an `if`/`while` condition or the left of `&&`, so `if activate_streamer_units; then` runs on past a failed `systemctl`.
+3. `set -e` has the same limit in an `a && b && c` chain. It stops the script only when the last command gives an error. If `apt-get install` gives an error in the middle of a chain, the script continues. Write each command as a separate statement.
 
 ## Pinning
 
@@ -33,7 +34,7 @@ The units `audera streamer conf` renders and `activate_streamer_units` enables a
 | Pin | What breaks if unpinned |
 | :--- | :--- |
 | `snapserver=0.31.0-1` | conf keys move between releases; the rendered conf is written to 0.31.0's key set. |
-| `shairport-sync-airplay2=4.3.7-dietpi2` | 5.x negotiates a different stdout format while snapserver forces 44100:16:2, producing a byte-misaligned stream that plays as noise. |
+| `shairport-sync-airplay2=5.6-dietpi1` | By default, 5.x sends AirPlay 2 audio to stdout as 48000/S32_LE. Snapserver reads 44100:16:2 and plays the 5.x default as noise. The rendered `shairport-sync.conf` sets 44100/S16_LE/2. The hold prevents an upgrade that replaces that conffile or changes the stdout keys. DietPi removes old versions from its repository. If the pinned version is not there, the flash stops at the install step. |
 
 go-librespot is pinned by its release-asset URL (no apt package), so there is no `apt-mark hold` to audit it against.
 

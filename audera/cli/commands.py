@@ -204,6 +204,9 @@ def _emit_conf(
         if filename == 'go-librespot.yml':
             sys.stdout.write(conf.render_go_librespot())
             return
+        if filename == 'shairport-sync.conf':
+            sys.stdout.write(conf.render_shairport_sync())
+            return
         if filename == 'asound.conf':
             sys.stdout.write(conf.render_asound())
             return

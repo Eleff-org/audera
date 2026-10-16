@@ -4,6 +4,7 @@ The catalog's three rules are asserted directly rather than through the CLI that
 """
 
 import itertools
+import re
 
 import pytest
 import yaml
@@ -127,3 +128,11 @@ def test_go_librespot_pipe_format_agrees_with_the_spotify_source_uri():
     _, uri_bits, _ = sampleformat.split(':')
 
     assert pipe_bits == int(uri_bits)
+
+
+def test_shairport_sync_stdout_format_agrees_with_airplay_sampleformat():
+    # Snapserver 0.31 always reads 44100:16:2 from airplay://. The shairport-sync 5.x default for
+    # AirPlay 2 is 48000/S32_LE. The two programs do not examine the format of the other. If the
+    # formats are different, the audio is noise and no error occurs.
+    settings = dict(re.findall(r'^\s*(output_\w+) = "?(\w+)"?;$', conf.render_shairport_sync(), re.MULTILINE))
+    assert settings == {'output_rate': '44100', 'output_format': 'S16_LE', 'output_channels': '2'}

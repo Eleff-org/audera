@@ -193,6 +193,7 @@ _STREAMER_ARTIFACTS = [
     ('plexamp-mdns.sh', conf.render_plexamp_mdns_helper),
     ('audera-streamer.service', conf.render_audera_streamer_service),
     ('nqptp-timeout.conf', conf.render_nqptp_timeout),
+    ('shairport-sync.conf', conf.render_shairport_sync),
     ('nginx-site', conf.render_nginx_site),
 ]
 

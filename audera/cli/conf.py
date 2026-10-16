@@ -22,6 +22,11 @@ SNAPSERVER_CONF: str = '/etc/snapserver.conf'
 # names, volumes, latencies, groups, stream assignments) does not follow a change to `$HOME`.
 SNAPSERVER_HOME: str = '/var/lib/snapserver'
 
+# The default configuration path of shairport-sync. This file is a dpkg conffile of the DietPi
+# `shairport-sync-airplay2` package. Snapserver starts the binary without `-c`, so the
+# `airplay://` source reads this file.
+SHAIRPORT_SYNC_CONF: str = '/usr/local/etc/shairport-sync.conf'
+
 # CamillaDSP's config and volume-statefile paths, named by both `camilladsp.service` and the
 # `camilladsp.yml` redirect. Both roles write the same two files.
 CAMILLADSP_CONFIG: str = '/etc/camilladsp/config.yml'
@@ -484,6 +489,34 @@ credentials:
 # of scope for beta.1 and requires snapserver >= 0.34's bundled meta_go-librespot.py.
 server:
   enabled: false
+"""
+
+
+def render_shairport_sync() -> str:
+    """Renders the shairport-sync (AirPlay) configuration file.
+
+    Provisioning writes this file one time, over the conffile of the package. The snapserver
+    command line sets the name, the port, the backend, and the metadata pipe. This file sets only
+    the output format of the `stdout` backend.
+
+    Returns
+    -------
+    `str`
+        The rendered shairport-sync configuration.
+    """
+    return f"""// `audera streamer conf shairport-sync.conf` renders this file into {SHAIRPORT_SYNC_CONF}.
+//
+// The airplay:// source of Snapserver 0.31 always reads 44100:16:2 from the stdout of the binary.
+// It does not read the `sampleformat` parameter. In shairport-sync 5.x, the default stdout format
+// for AirPlay 2 is 48000 Hz S32_LE. Snapserver plays that format as noise. Each key below has one
+// value, so the format does not change. shairport-sync transcodes all sessions to this format.
+// The snapserver command line sets all other settings.
+stdout =
+{{
+\toutput_rate = 44100;
+\toutput_format = "S16_LE";
+\toutput_channels = 2;
+}};
 """
 
 

@@ -51,7 +51,9 @@ require_root
 # Install build packages
 echo
 echo ">>> Installing build packages"
-apt-get update && \
+#   Each command is a separate statement. `set -e` stops the script only when the last command in
+#   an `&&` chain gives an error.
+apt-get update
 apt-get install -y \
     wget \
     curl \
@@ -63,8 +65,8 @@ apt-get install -y \
     snapclient \
     python3.13 \
     python3-dev \
-    build-essential && \
-apt-get clean && \
+    build-essential
+apt-get clean
 rm -rf /var/lib/apt/lists/*
 echo -e "[  ${GREEN}OK${RESET}  ] Packages installed successfully"
 
