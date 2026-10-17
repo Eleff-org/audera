@@ -12,7 +12,7 @@ The DietPi provisioning layer.
 
 ## What is tested
 
-The units `audera streamer conf` renders and `activate_streamer_units` enables are exercised by `tests/systemd/inside/test_provisioning.py`, which provisions a privileged systemd container — rendering every unit from `audera.cli.conf` and shelling only to `activate_streamer_units` — and reads the result back off the manager (`uv run pytest -m systemd -v`). Everything else is verified by flashing a device and checking it by hand: the apt block, the pins, the DietPi repo, the `shairport-sync` neutralization, `dietpi.txt`, NetworkManager, the reboot tail, and any Pi-Zero-2-W timing. The installed stubs stand in for backends, so nothing here covers audio, ALSA, sync, or DSP.
+The units `audera streamer conf` renders and `activate_streamer_units` enables are exercised by `tests/systemd/inside/test_provisioning.py`, which provisions a privileged systemd container — rendering every unit from `audera.cli.conf` and shelling only to `activate_streamer_units` — and reads the result back off the manager (`uv run pytest -m systemd -v`). Everything else is verified by flashing a device and checking it by hand: the apt block, the pins, the DietPi repo, the `shairport-sync` neutralization, the Pi 4 HDMI `snd_bcm2835` unblacklist, `dietpi.txt`, NetworkManager, the reboot tail, and any Pi-Zero-2-W timing. The installed stubs stand in for backends, so nothing here covers audio, ALSA, sync, or DSP.
 
 ## Conventions
 
@@ -26,6 +26,7 @@ The units `audera streamer conf` renders and `activate_streamer_units` enables a
 1. The apt block ends with `apt-get clean && rm -rf /var/lib/apt/lists/*`. A package added later needs its own `apt-get update` (a minute on a Pi Zero 2 W); add to the single install at the top instead.
 2. Call `lib/`'s functions as bare commands, never in condition context. `set -e` is suppressed inside a function invoked as an `if`/`while` condition or the left of `&&`, so `if activate_streamer_units; then` runs on past a failed `systemctl`.
 3. `set -e` has the same limit in an `a && b && c` chain. It stops the script only when the last command gives an error. If `apt-get install` gives an error in the middle of a chain, the script continues. Write each command as a separate statement.
+4. The DietPi image ships with `snd_bcm2835` blacklisted (`/etc/modprobe.d/dietpi-disable_rpi_audio.conf`, written by `dietpi-set_hardware soundcard none` at image build). On Pi 4, `hdmi` uses firmware-KMS, whose only HDMI audio driver is `snd_bcm2835`, so `configure_audio_device` must delete that file. Otherwise no HDMI card enumerates and CamillaDSP crash-loops on `hw:0`.
 
 ## Pinning
 
