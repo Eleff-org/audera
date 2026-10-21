@@ -59,6 +59,9 @@ configure_audio_device() {
                 set_config_line /boot/firmware/config.txt 'dtoverlay' 'dtoverlay=vc4-fkms-v3d'
                 set_config_line /boot/firmware/config.txt 'dtparam=audio' 'dtparam=audio=on'
                 set_cmdline_param /boot/firmware/cmdline.txt 'vc4\.force_hotplug' 'vc4.force_hotplug=3'
+                # The DietPi image blacklists snd_bcm2835, the only HDMI audio driver under
+                #   firmware-KMS; without this, no HDMI card enumerates and hw:0 fails to open
+                rm -f /etc/modprobe.d/dietpi-disable_rpi_audio.conf
             fi
             ;;
         digiamp-plus)

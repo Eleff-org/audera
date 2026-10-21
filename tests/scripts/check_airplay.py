@@ -14,9 +14,9 @@ that address, which makes the script usable from a machine whose firewall drops 
 The device name and stream id are read from `audera.domains.sources.CATALOG`, the same URI the
 device provisions shairport-sync with.
 
-This script does not play audio. shairport-sync 4.3.7 in AirPlay 2 mode requires the transient
-HAP pair-verify a real sender performs, and `pyatv`'s implementation of it is rejected with
-`HTTP 400` on `/pair-pin-start`, so sending a tone needs an iPhone, iPad, or Mac.
+This script does not play audio. In AirPlay 2 mode, shairport-sync requires the HAP pair-verify
+step that a real sender does. shairport-sync rejects the `pyatv` pair-verify with `HTTP 400` on
+`/pair-pin-start`. To send a tone, use an iPhone, iPad, or Mac.
 
 Exit status is 0 only when the receiver advertised AirPlay 2 and Snapserver knows the stream. A
 receiver that advertises while Snapserver has no such stream is a `snapserver.conf` fault, not a
