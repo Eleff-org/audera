@@ -75,6 +75,11 @@ install_uv() {
 
 # Installs the audera CLI from the given git repo/branch.
 #
+# `uv tool install` does not use uv.lock or the `[tool.uv]` cooldown of the package that it
+# installs. Without constraints, the device gets the newest release of each dependency. Thus,
+# this function clones the branch, exports uv.lock as constraints, and installs the same commit.
+# The device then gets the versions that CI tested.
+#
 # piwheels ships prebuilt ARM wheels (incl. armv6l) for the Rust deps that PyPI has
 # only as sdists — pydantic-core, orjson, watchfiles — so uv downloads them instead of
 # cargo-building on-device. `unsafe-best-match` is uv's scary name for pip-normal
@@ -84,10 +89,17 @@ install_uv() {
 install_audera_cli() {
     local repo_url="$1"
     local branch="$2"
+    local src=/tmp/audera_src
+    rm -rf "$src"
+    git clone --quiet --depth 1 --branch "$branch" "$repo_url" "$src"
+    uv export --project "$src" --frozen --no-dev --no-emit-project --no-hashes --quiet \
+        -o /tmp/audera_constraints.txt
     UV_TOOL_BIN_DIR=/usr/local/bin uv tool install --reinstall \
         --index-strategy unsafe-best-match \
         --extra-index-url https://www.piwheels.org/simple \
-        "git+${repo_url}@${branch}"
+        --constraints /tmp/audera_constraints.txt \
+        "git+${repo_url}@$(git -C "$src" rev-parse HEAD)"
+    rm -rf "$src"
     export PATH="/usr/local/bin:$PATH"
 }
 
