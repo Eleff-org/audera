@@ -57,6 +57,8 @@ packages = ["audera"]
 
 [tool.uv]
 exclude-newer = "1 week"
+# certifi is a CA bundle; revocations (e.g. the 2026-10 emSign removal) must land immediately.
+exclude-newer-package = { certifi = false }
 
 [tool.ruff]
 line-length = 129
