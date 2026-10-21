@@ -1,0 +1,9 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Use the same period as `exclude-newer = "1 week"` in pyproject.toml. If not, uv cannot lock the update.
+    cooldown:
+      default-days: 7
