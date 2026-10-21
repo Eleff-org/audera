@@ -20,7 +20,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Iterator
+from typing import Generator, Iterator
 
 import pytest
 
@@ -346,7 +346,7 @@ def _clients() -> list[Player]:
 
 
 @contextlib.contextmanager
-def sampling_main_pid(unit: str, interval: float = 0.01) -> Iterator[list[int]]:
+def sampling_main_pid(unit: str, interval: float = 0.01) -> Generator[list[int]]:
     """Records the ordered, distinct, non-zero `MainPID`s `unit` holds while the block runs.
 
     Two `systemctl show` calls either side of a block cannot count restarts, since one restart and ten

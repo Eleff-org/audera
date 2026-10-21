@@ -1,6 +1,7 @@
 """Integration tests for the streamer dashboard UI."""
 
 import asyncio
+import inspect
 import os
 import subprocess
 import time
@@ -2412,8 +2413,8 @@ async def test_dsp_page_offloads_the_snapserver_read_off_the_event_loop(
     unreachable Snapserver froze every connected browser for the client's open/read timeout. The
     render path (and its route) is now async and the read is offloaded via `asyncio.to_thread`.
     """
-    assert asyncio.iscoroutinefunction(dsp_page.render)
-    assert asyncio.iscoroutinefunction(Page.dsp)
+    assert inspect.iscoroutinefunction(dsp_page.render)
+    assert inspect.iscoroutinefunction(Page.dsp)
 
     offloaded: list = []
     real_to_thread = asyncio.to_thread
